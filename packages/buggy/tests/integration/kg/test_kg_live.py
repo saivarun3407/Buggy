@@ -168,7 +168,7 @@ class TestRecordObservationsLive:
 
         # Verify the edge exists in the graph.
         rows = kgstore.execute_read(
-            "MATCH (h:Host {key: $hk, engagement: $eng})-[r:HOSTS]->(s:Service {key: $sk, engagement: $eng}) "
+            "MATCH (h:Host {key: $hk, engagement: $engagement})-[r:HOSTS]->(s:Service {key: $sk, engagement: $engagement}) "
             "RETURN r.weight AS weight",
             {"hk": host_key, "sk": svc_key, "eng": engagement},
             engagement=engagement,
@@ -190,7 +190,7 @@ class TestRecordObservationsLive:
             source_episode_id="tc-real",
         )
         rows = kgstore.execute_read(
-            "MATCH (n:Host) WHERE n.engagement = $eng AND n.key = $key "
+            "MATCH (n:Host) WHERE n.engagement = $engagement AND n.key = $key "
             "RETURN n.engagement AS engagement, "
             "       n.created_by AS created_by, "
             "       n.source_episode_id AS sep, "
@@ -229,7 +229,7 @@ class TestRecordObservationsLive:
             source_episode_id="tc-trusted",
         )
         rows = kgstore.execute_read(
-            "MATCH (n:Host) WHERE n.engagement = $eng AND n.key = $key "
+            "MATCH (n:Host) WHERE n.engagement = $engagement AND n.key = $key "
             "RETURN n.engagement AS engagement, "
             "       n.created_by AS created_by, "
             "       n.source_episode_id AS sep, "
@@ -328,7 +328,7 @@ class TestParallelWriteStress:
 
         assert all(r["created"] == 1 for r in results)
         rows = kgstore.execute_read(
-            "MATCH (n:Host) WHERE n.engagement = $eng "
+            "MATCH (n:Host) WHERE n.engagement = $engagement "
             "AND n.key STARTS WITH 'host::parallel::' RETURN count(n) AS c",
             {"eng": engagement},
             engagement=engagement,
@@ -359,7 +359,7 @@ class TestParallelWriteStress:
 
         # End state: exactly one node with this key.
         rows = kgstore.execute_read(
-            "MATCH (n:Host) WHERE n.engagement = $eng AND n.key = $key RETURN count(n) AS c",
+            "MATCH (n:Host) WHERE n.engagement = $engagement AND n.key = $key RETURN count(n) AS c",
             {"eng": engagement, "key": shared_key},
             engagement=engagement,
         )

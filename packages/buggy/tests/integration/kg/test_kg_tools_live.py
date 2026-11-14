@@ -45,7 +45,7 @@ def test_kg_record_writes_through_live_store(kgstore: KGStore, engagement: str) 
     assert payload["merged"] == 0
 
     rows = kgstore.execute_read(
-        "MATCH (h:Host) WHERE h.engagement = $eng AND h.key = $key "
+        "MATCH (h:Host) WHERE h.engagement = $engagement AND h.key = $key "
         "RETURN h.label AS label, h.created_by AS created_by, "
         "       h.source_episode_id AS sep",
         {"eng": engagement, "key": f"host::tool-record::{engagement}"},
@@ -85,7 +85,7 @@ def test_kg_record_atomic_batch_with_edges_live(kgstore: KGStore, engagement: st
     )
     edge_rows = kgstore.execute_read(
         "MATCH (h:Host)-[r:HOSTS]->(s:Service) "
-        "WHERE h.engagement = $eng AND h.key = $hk RETURN r.weight AS w",
+        "WHERE h.engagement = $engagement AND h.key = $hk RETURN r.weight AS w",
         {"eng": engagement, "hk": f"host::batch::{engagement}"},
         engagement=engagement,
     )
@@ -120,7 +120,7 @@ def test_kg_ingest_routes_nuclei_jsonl_through_live_store(
     assert payload["parsed"] == 1
 
     rows = kgstore.execute_read(
-        "MATCH (v:Vulnerability) WHERE v.engagement = $eng "
+        "MATCH (v:Vulnerability) WHERE v.engagement = $engagement "
         "AND v.rule_id = 'tool-ssrf' "
         "RETURN v.created_by AS created_by, v.source_episode_id AS sep",
         {"eng": engagement},

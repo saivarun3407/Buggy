@@ -95,10 +95,10 @@ def _populate(store: KGStore, engagement: str) -> None:
     # as a viable path.
     store.execute_write(
         (
-            "MATCH (e:Entrypoint {key: $ek, engagement: $eng}) "
-            "MATCH (c:CrownJewel {key: $ck, engagement: $eng}) "
+            "MATCH (e:Entrypoint {key: $ek, engagement: $engagement}) "
+            "MATCH (c:CrownJewel {key: $ck, engagement: $engagement}) "
             "MERGE (e)-[r:LEADS_TO]->(c) "
-            "ON CREATE SET r.engagement = $eng, r.firstseen = 1, r.lastupdated = 1"
+            "ON CREATE SET r.engagement = $engagement, r.firstseen = 1, r.lastupdated = 1"
         ),
         {
             "ek": f"entrypoint::unexplored::{engagement}",
