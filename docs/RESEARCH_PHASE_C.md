@@ -128,3 +128,16 @@ Concrete, repo-specific builds it proposes (ordered by how well they serve accur
 Strategic tension this raises: Phases A/B built autonomous multi-agent coordination (strix-like). This plan argues for a human-driven copilot (Shift-like), because fully autonomous hackbots are weak on hardened targets. The two are reconcilable: keep the coordination graph, but gate the high-value, high-risk actions (submit, send, start) behind the hunter, and add the "walk first" + authorization-matrix + session-replay HITL surfaces. The accuracy argument agrees with section 2: the human is the independent check autonomous agents lack.
 
 Cited primaries (attributed, not all re-verified this pass): josephthacker.com (hackbots, Shift, how-to-hack-ai-apps); jhaddix/tbhm (Philosophy, Discovery); Critical Thinking podcast (Haddix, note-taking methodology); rhynorater.github.io postMessage braindump.
+
+### 8a. Update — page revision v=66fe9cf5 ("Ten more hunters")
+
+The operator re-sent the same grok.bot URL after it regenerated with more content. New additions, same MEDIUM confidence, same detect-only + HITL posture, mostly additional recon/specialist modules (large, deferred until a running stack):
+- Safe desync + cache-oracle lab (James Kettle): a bounty class Buggy does not yet handle safely. Detect-only by default, HITL on confirm, timing/cache oracles as graph nodes, live exchanges required before publishing.
+- OAuth flow + non-happy-path mapper (Frans Rosen): map happy and error paths, list listeners and third-party scripts per path. Quick win: record OAuth and error-page URLs into the notes graph from Caido, then map the full sign-in dance. Cites Detectify "dirty dancing in sign-in OAuth flows."
+- DOM source/sink mapper (Gareth Heyes): optional browser instrumentation in `tools/browser`, canary injection, a source-to-sink tree on the graph.
+- Authorization-matrix extension: follow-the-identifier from mobile apps, JS constants, and response bodies, covering write and action calls, not only reads.
+- Nahamsec URL-consuming feature inventory: fast, high-yield graph tags on the walk-the-app phase.
+- RoE-bound recon pipe runner writing to Neo4j with jsluice extraction; continuous new-host / dangling-asset watch and evolving wordlists feeding a heat map.
+- Orange Tsai SSRF URL-parser research (DEF CON 25) as a reference for the SSRF/parser class.
+
+Through-line reinforcing the Phase C build: every new module is detect-only by default, HITL on confirm, and refuses to publish without a live exchange. That is the same accuracy posture the corroboration gate enforces, applied to new vuln classes.
