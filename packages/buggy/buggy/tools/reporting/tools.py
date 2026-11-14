@@ -203,7 +203,12 @@ def record_finding(
     if not result.accepted:
         return {"success": False, "error": "Validation failed", "errors": result.errors}
 
-    if env_flag(CORROBORATION_REQUIRED_ENV, default=True):
+    # Opt-in until the KG corroboration provider lands (TODO(phaseC-kg-provider)).
+    # The provider is still a stub that returns no corroborations, so an
+    # enabled gate would hold every finding — an outage, not a safeguard. The
+    # gate machinery below is live and tested; flip this default to True in the
+    # same change that makes the provider read real CORROBORATES/CONTRADICTS edges.
+    if env_flag(CORROBORATION_REQUIRED_ENV, default=False):
         corroborations, contradictions, evidence_resolves = corroboration_provider(
             canonical_finding_key(finding)
         )

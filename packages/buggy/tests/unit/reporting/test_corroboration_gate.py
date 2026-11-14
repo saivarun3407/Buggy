@@ -195,7 +195,7 @@ def _proven_finding() -> dict[str, Any]:
 
 @pytest.fixture
 def corroboration_on(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.delenv("BUGGY_CORROBORATION_REQUIRED", raising=False)
+    monkeypatch.setenv("BUGGY_CORROBORATION_REQUIRED", "1")
 
 
 def _record(
