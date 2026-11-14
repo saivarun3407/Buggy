@@ -20,9 +20,15 @@ from langchain_core.tools import tool
 
 from buggy.tools.proxy.tools import CaidoClient, CaidoError
 from buggy.tools.reporting.bugcrowd import render_bugcrowd_csv
+from buggy.tools.reporting.corroboration_gate import CorroborationProvider, corroboration_verdict
 from buggy.tools.reporting.executive import render_executive_summary
 from buggy.tools.reporting.hackerone import render_hackerone_markdown
-from buggy.tools.reporting.kg_adapter import load_engagement_graph, publish_finding_node
+from buggy.tools.reporting.kg_adapter import (
+    canonical_finding_key,
+    load_corroboration_inputs,
+    load_engagement_graph,
+    publish_finding_node,
+)
 from buggy.tools.reporting.proof_gate import proof_gate_strict, verify_finding
 from buggy.tools.reporting.sarif import render_sarif
 from buggy.tools.reporting.timeline import extract_timeline
@@ -175,6 +181,82 @@ def _mint_replays(
     return replay
 
 
+#: Env flag for the corroboration gate (default on; ``=0`` disables it for the
+#: source-only phase, where no independent validator runs).
+CORROBORATION_REQUIRED_ENV = "BUGGY_CORROBORATION_REQUIRED"
+
+
+def record_finding(
+    finding: dict[str, Any],
+    *,
+    strict: bool,
+    client: CaidoClient | None,
+    corroboration_provider: CorroborationProvider = load_corroboration_inputs,
+) -> dict[str, Any]:
+    """Run a finding through the proof gate, then the corroboration gate, then publish it.
+
+    Returns the agent-facing payload. Nothing reaches the KG unless both gates
+    pass; a finding the corroboration gate holds or rules out comes back with
+    its closure ``state`` and the ``reasons``.
+    """
+    result = verify_finding(finding, client=client, strict=strict)
+    if not result.accepted:
+        return {"success": False, "error": "Validation failed", "errors": result.errors}
+
+    if env_flag(CORROBORATION_REQUIRED_ENV, default=True):
+        corroborations, contradictions, evidence_resolves = corroboration_provider(
+            canonical_finding_key(finding)
+        )
+        verdict = corroboration_verdict(
+            proof_accepted=result.accepted,
+            corroborations=corroborations,
+            contradictions=contradictions,
+            evidence_resolves=evidence_resolves,
+        )
+        if not verdict.published:
+            return {
+                "success": False,
+                "error": "Not published",
+                "state": verdict.state.value,
+                "reasons": verdict.reasons,
+            }
+
+    # Mint human-reviewable replay artifacts for live-verified evidence —
+    # one Caido Replay entry per confirmed exchange id, so the operator
+    # verifies in the same tool the agent worked in. Best-effort: replay
+    # failures never affect the already-rendered gate verdict.
+    replay = _mint_replays(client, result.http_exchange_ids, finding.get("title") or "")
+
+    # Only the gate-approved, non-None fields are persisted. Verified ids
+    # replace the raw input; the unverified-evidence flag rides along.
+    node_fields = {k: v for k, v in finding.items() if v not in (None, "")}
+    node_fields["http_exchange_ids"] = result.http_exchange_ids or []
+    node_fields["evidence_unverified"] = result.evidence_unverified
+    node_fields["live_verified"] = result.live_verified
+    if replay:
+        node_fields["replay"] = replay
+
+    node_id, persisted = publish_finding_node(get_active_engagement() or "", node_fields)
+
+    payload: dict[str, Any] = {
+        "success": True,
+        "report_id": node_id,
+        "severity": finding.get("severity"),
+        "persisted": persisted,
+        "evidence_unverified": result.evidence_unverified,
+        "live_verified": result.live_verified,
+    }
+    if result.warning:
+        payload["warning"] = result.warning
+    if replay:
+        payload["replay"] = replay
+    if not persisted:
+        payload.setdefault(
+            "note", "finding accepted by the gate but not persisted (KG store unavailable)"
+        )
+    return payload
+
+
 @tool
 def report_record_finding(
     title: str,
@@ -186,9 +268,11 @@ def report_record_finding(
     cvss_vector: str = "",
     target: str = "",
     summary: str = "",
+    vuln_class: str = "",
+    sink_demonstrated: str = "",
     analysis_only: bool = False,
 ) -> str:
-    """Record a vulnerability finding — gated by live-evidence proof verification.
+    """Record a vulnerability finding — gated by live-evidence proof, then independent corroboration.
 
     This is the proof gate: a finding is REJECTED (never written to the KG)
     unless it carries a working PoC (``poc_script_code``), a PoC description
@@ -196,12 +280,20 @@ def report_record_finding(
     ``http_exchange_ids`` entry, AND every cited id is positively confirmed in
     the live proxy capture. Fabricated findings whose evidence references
     requests that were never sent — or that cite no live request — are
-    blocked here.
+    blocked here. An LLM / prompt-injection finding must also name the sink
+    its injected instruction reached in ``sink_demonstrated``.
 
     Only a transport failure (CLI missing, timeout, connection refused) keeps
     the cited ids with an "unverified evidence" warning rather than rejecting —
     an unreachable proxy must never silently delete a real finding. An id the
     proxy reports absent, or answers for without confirming, is rejected.
+
+    A proven finding is then published only when at least two independent
+    sources (distinct agent and tool family) corroborate it, nothing
+    contradicts it, and its evidence resolves to raw tool output. Otherwise it
+    is held (``open_proof_gap``) or ruled out (``ruled_out``) and NOT
+    published; your own proof does not count as corroboration.
+    ``BUGGY_CORROBORATION_REQUIRED=0`` disables this second gate.
 
     Strictness follows ``BUGGY_PROOF_GATE_STRICT`` (default strict → proof
     required). Set ``analysis_only=True`` to file a source/static finding
@@ -219,12 +311,20 @@ def report_record_finding(
         cvss_vector: Optional CVSS 3.1 vector; validated by the spine scorer.
         target: Affected URL / domain / repository.
         summary: Optional short summary stored on the node.
+        vuln_class: Vulnerability class (e.g. ``sqli``, ``xss``,
+            ``prompt_injection``). LLM classes require ``sink_demonstrated``.
+        sink_demonstrated: For an LLM / prompt-injection finding, the sink the
+            injected instruction was shown to reach: ``email_send``,
+            ``web_fetch``, ``markdown_image_load``, ``tool_call``, or
+            ``file_access``.
         analysis_only: Request the proof-optional path (see strictness above).
 
     Returns:
-        JSON. On acceptance: ``{success: true, report_id, severity,
-        persisted, evidence_unverified, live_verified, warning?}``. On rejection:
-        ``{success: false, error: "Validation failed", errors: [...]}``.
+        JSON. On publication: ``{success: true, report_id, severity,
+        persisted, evidence_unverified, live_verified, warning?}``. On proof
+        rejection: ``{success: false, error: "Validation failed", errors: [...]}``.
+        When held or ruled out by corroboration: ``{success: false,
+        error: "Not published", state, reasons: [...]}``.
     """
     env_strict = proof_gate_strict()
     # analysis-only is only permitted when the deployment is non-strict; in a
@@ -241,47 +341,10 @@ def report_record_finding(
         "cvss_vector": cvss_vector,
         "target": target,
         "summary": summary,
+        "vuln_class": vuln_class,
+        "sink_demonstrated": sink_demonstrated,
     }
-
-    client = _new_caido_client()
-    result = verify_finding(finding, client=client, strict=gate_strict)
-    if not result.accepted:
-        return _json({"success": False, "error": "Validation failed", "errors": result.errors})
-
-    # Mint human-reviewable replay artifacts for live-verified evidence —
-    # one Caido Replay entry per confirmed exchange id, so the operator
-    # verifies in the same tool the agent worked in. Best-effort: replay
-    # failures never affect the already-rendered gate verdict.
-    replay = _mint_replays(client, result.http_exchange_ids, title)
-
-    # Only the gate-approved, non-None fields are persisted. Verified ids
-    # replace the raw input; the unverified-evidence flag rides along.
-    node_fields = {k: v for k, v in finding.items() if v not in (None, "")}
-    node_fields["http_exchange_ids"] = result.http_exchange_ids or []
-    node_fields["evidence_unverified"] = result.evidence_unverified
-    node_fields["live_verified"] = result.live_verified
-    if replay:
-        node_fields["replay"] = replay
-
-    node_id, persisted = publish_finding_node(get_active_engagement() or "", node_fields)
-
-    payload: dict[str, Any] = {
-        "success": True,
-        "report_id": node_id,
-        "severity": severity,
-        "persisted": persisted,
-        "evidence_unverified": result.evidence_unverified,
-        "live_verified": result.live_verified,
-    }
-    if result.warning:
-        payload["warning"] = result.warning
-    if replay:
-        payload["replay"] = replay
-    if not persisted:
-        payload.setdefault(
-            "note", "finding accepted by the gate but not persisted (KG store unavailable)"
-        )
-    return _json(payload)
+    return _json(record_finding(finding, strict=gate_strict, client=_new_caido_client()))
 
 
 REPORTING_TOOLS = [

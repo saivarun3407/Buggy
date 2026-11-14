@@ -392,7 +392,11 @@ def test_tool_accepts_full_finding() -> None:
     client = FakeCaido(existing={"101"})
     with (
         patch("buggy.tools.reporting.tools._new_caido_client", return_value=client),
-        patch.dict("os.environ", {"BUGGY_PROOF_GATE_STRICT": "1"}, clear=False),
+        patch.dict(
+            "os.environ",
+            {"BUGGY_PROOF_GATE_STRICT": "1", "BUGGY_CORROBORATION_REQUIRED": "0"},
+            clear=False,
+        ),
     ):
         payload = _run_record(
             title="XSS",
@@ -448,7 +452,11 @@ def test_tool_unreachable_proxy_persists_with_warning() -> None:
             "buggy.tools.reporting.tools.get_active_engagement",
             return_value="eng-1",
         ),
-        patch.dict("os.environ", {"BUGGY_PROOF_GATE_STRICT": "1"}, clear=False),
+        patch.dict(
+            "os.environ",
+            {"BUGGY_PROOF_GATE_STRICT": "1", "BUGGY_CORROBORATION_REQUIRED": "0"},
+            clear=False,
+        ),
     ):
         from buggy.tools.reporting.tools import report_record_finding
 
@@ -489,7 +497,11 @@ def test_tool_analysis_only_requires_nonstrict_env() -> None:
             return_value=("n", False),
         ),
         patch("buggy.tools.reporting.tools.get_active_engagement", return_value="e"),
-        patch.dict("os.environ", {"BUGGY_PROOF_GATE_STRICT": "0"}, clear=False),
+        patch.dict(
+            "os.environ",
+            {"BUGGY_PROOF_GATE_STRICT": "0", "BUGGY_CORROBORATION_REQUIRED": "0"},
+            clear=False,
+        ),
     ):
         raw = asyncio.run(report_record_finding.ainvoke({"title": "static", "analysis_only": True}))
         payload = json.loads(raw)
@@ -704,3 +716,95 @@ def test_analysis_only_zero_ids_not_live_verified() -> None:
     assert result.accepted is True
     assert result.live_verified is False
     assert result.evidence_unverified is False
+
+
+# ── sink_demonstrated: LLM-class findings must name a demonstrated sink ──
+
+
+@pytest.mark.parametrize(
+    "llm_class",
+    [
+        {"vuln_class": "prompt_injection"},
+        {"vuln_class": "Indirect Prompt-Injection"},
+        {"kind": "llm01"},
+        {"vuln_class": "llm_excessive_agency"},
+        {"cwe": ["CWE-1427"]},
+        {"cwe": "cwe-1427"},
+    ],
+)
+def test_llm_finding_without_sink_rejected(llm_class: dict[str, object]) -> None:
+    finding = _full_finding(title="Indirect prompt injection via support ticket", **llm_class)
+    result = verify_finding(finding, client=FakeCaido(existing={"101", "102"}), strict=True)
+    assert result.accepted is False
+    assert len(result.errors) == 1
+    assert "sink_demonstrated" in result.errors[0]
+    assert "tool_call" in result.errors[0]
+
+
+def test_llm_finding_with_unknown_sink_rejected() -> None:
+    finding = _full_finding(vuln_class="prompt_injection", sink_demonstrated="model_said_so")
+    result = verify_finding(finding, client=FakeCaido(existing={"101", "102"}), strict=True)
+    assert result.accepted is False
+    assert any("sink_demonstrated" in e for e in result.errors)
+
+
+@pytest.mark.parametrize(
+    "sink", ["email_send", "web_fetch", "markdown_image_load", "tool_call", "file_access"]
+)
+def test_llm_finding_with_demonstrated_sink_accepted(sink: str) -> None:
+    finding = _full_finding(vuln_class="prompt_injection", sink_demonstrated=sink)
+    result = verify_finding(finding, client=FakeCaido(existing={"101", "102"}), strict=True)
+    assert result.accepted is True
+    assert result.errors == []
+
+
+@pytest.mark.parametrize(
+    "web_class",
+    [
+        {"vuln_class": "xss"},
+        {"kind": "sqli"},
+        {"cwe": ["CWE-89"]},
+        {"vuln_class": "LLMNR poisoning"},
+    ],
+)
+def test_web_finding_needs_no_sink(web_class: dict[str, object]) -> None:
+    result = verify_finding(
+        _full_finding(**web_class), client=FakeCaido(existing={"101", "102"}), strict=True
+    )
+    assert result.accepted is True
+
+
+def test_analysis_only_llm_finding_needs_no_sink() -> None:
+    finding = {"title": "prompt built from user input", "vuln_class": "prompt_injection"}
+    result = verify_finding(finding, client=FakeCaido(), strict=False)
+    assert result.accepted is True
+
+
+def test_tool_rejects_llm_finding_without_sink() -> None:
+    from buggy.tools.reporting.tools import report_record_finding
+
+    with (
+        patch(
+            "buggy.tools.reporting.tools._new_caido_client",
+            return_value=FakeCaido(existing={"101"}),
+        ),
+        patch("buggy.tools.reporting.tools.publish_finding_node") as persist,
+        patch.dict("os.environ", {"BUGGY_PROOF_GATE_STRICT": "1"}, clear=False),
+    ):
+        raw = asyncio.run(
+            report_record_finding.ainvoke(
+                {
+                    "title": "Prompt injection exfiltrates chat history",
+                    "poc_script_code": "p",
+                    "poc_description": "d",
+                    "evidence": "e",
+                    "http_exchange_ids": ["101"],
+                    "vuln_class": "prompt_injection",
+                }
+            )
+        )
+    payload = json.loads(raw)
+    assert payload["success"] is False
+    assert payload["error"] == "Validation failed"
+    assert any("sink_demonstrated" in e for e in payload["errors"])
+    persist.assert_not_called()

@@ -407,6 +407,50 @@ def cvss_errors(finding: dict[str, Any]) -> list[str]:
     return []
 
 
+# ── LLM sink demonstration ─────────────────────────────────────────────
+
+SINK_KINDS = frozenset(
+    {"email_send", "web_fetch", "markdown_image_load", "tool_call", "file_access"}
+)
+
+PROMPT_INJECTION_CWES = frozenset({"CWE-1427"})
+
+# Anchored so a network class such as ``llmnr_poisoning`` is not read as LLM.
+_LLM_CLASS_RE = re.compile(r"^llm(?:\d|_|$)|prompt_injection")
+
+
+def _class_token(value: Any) -> str:
+    return re.sub(r"[^a-z0-9]+", "_", str(value or "").lower()).strip("_")
+
+
+def is_llm_finding(finding: dict[str, Any]) -> bool:
+    """True when the finding's class (``kind``/``vuln_class``/``cwe``) is LLM or prompt injection."""
+    for name in ("kind", "vuln_class"):
+        if _LLM_CLASS_RE.search(_class_token(finding.get(name))):
+            return True
+    cwe = finding.get("cwe")
+    cwes = cwe if isinstance(cwe, list) else [cwe]
+    return any(str(c or "").strip().upper() in PROMPT_INJECTION_CWES for c in cwes)
+
+
+def sink_errors(finding: dict[str, Any], *, strict: bool) -> list[str]:
+    """Require an LLM-class finding to name the sink its injected instruction reached.
+
+    A live exchange proves the model was steered, not that the steering did
+    anything. A web finding's sink is the live exchange itself, so only
+    LLM-class findings carry this requirement.
+    """
+    if not strict or not is_llm_finding(finding):
+        return []
+    sink = finding.get("sink_demonstrated")
+    if isinstance(sink, str) and sink in SINK_KINDS:
+        return []
+    return [
+        "sink_demonstrated is REQUIRED for an LLM/prompt-injection finding - name the "
+        "sink the injected instruction reached, one of: " + ", ".join(sorted(SINK_KINDS))
+    ]
+
+
 # ── Top-level gate ─────────────────────────────────────────────────────
 
 #: Strict-mode error when a finding cites no live proxy request at all.
@@ -443,7 +487,8 @@ def verify_finding(
     """Run the full proof gate over a candidate finding.
 
     Rejected (``accepted=False``, never persisted): missing required proof;
-    in strict mode, no cited ``http_exchange_ids``; a malformed id list; an
+    in strict mode, no cited ``http_exchange_ids`` or an LLM-class finding
+    with no valid ``sink_demonstrated``; a malformed id list; an
     id the proxy reports absent or answers for without confirming; an
     invalid CVSS vector. A finding whose probes hit only transport failures
     is accepted with ``evidence_unverified=True`` and a warning.
@@ -458,6 +503,7 @@ def verify_finding(
         strict = proof_gate_strict()
 
     errors = required_proof_errors(finding, strict=strict)
+    errors.extend(sink_errors(finding, strict=strict))
     errors.extend(cvss_errors(finding))
 
     ids, id_errors, warning = verify_http_exchange_ids(client, finding.get("http_exchange_ids"))
@@ -481,11 +527,14 @@ __all__ = [
     "LIVE_EVIDENCE_REQUIRED_ERROR",
     "PROOF_GATE_STRICT_ENV",
     "REQUIRED_PROOF_ERRORS",
+    "SINK_KINDS",
     "GateResult",
     "cvss_errors",
+    "is_llm_finding",
     "normalize_http_exchange_ids",
     "proof_gate_strict",
     "required_proof_errors",
+    "sink_errors",
     "verify_finding",
     "verify_http_exchange_ids",
 ]

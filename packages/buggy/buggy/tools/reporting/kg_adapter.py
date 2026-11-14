@@ -24,6 +24,7 @@ from buggy.middleware.kg_internal.store import (
     KGStoreConfigError,
     KGStoreUnavailableError,
 )
+from buggy.tools.reporting.corroboration_gate import Contradiction, Corroboration
 from buggy_core.types.kg import (
     Edge,
     EdgeKind,
@@ -75,7 +76,7 @@ def _coerce_props(raw: Any, reserved: frozenset[str]) -> dict[str, Any]:
     return {k: v for k, v in raw.items() if k not in reserved}
 
 
-def _canonical_finding_key(finding: dict[str, Any]) -> str:
+def canonical_finding_key(finding: dict[str, Any]) -> str:
     """Derive a merge-stable key for a gate-approved finding.
 
     The store MERGEs on ``(key, engagement)``. A title-derived key makes
@@ -130,7 +131,7 @@ def publish_finding_node(
 
     Write-side dedup: when the caller supplies no explicit ``key``, the key
     is derived from the finding's normalized location + class
-    (:func:`_canonical_finding_key`), so the same bug reported twice —
+    (:func:`canonical_finding_key`), so the same bug reported twice —
     by different agents with different wording — MERGEs onto one node
     rather than producing near-duplicates that only the report-time
     dedupe pass could catch.
@@ -142,7 +143,7 @@ def publish_finding_node(
     stands regardless of backend availability.
     """
     label = str(finding.get("title") or finding.get("label") or "finding")
-    key = _canonical_finding_key(finding)
+    key = canonical_finding_key(finding)
     props = {k: v for k, v in finding.items() if k not in {"title", "label", "key"}}
     node = Node.make(NodeKind.FINDING, label, key=key, **props)
 
@@ -174,6 +175,20 @@ def publish_finding_node(
         return node.id, False
     finally:
         store.close()
+
+
+def load_corroboration_inputs(
+    finding_key: str,
+) -> tuple[list[Corroboration], list[Contradiction], bool]:
+    """Corroborations, contradictions, and evidence resolution for one finding.
+
+    Reports nothing corroborated and nothing resolved, so the corroboration
+    gate holds every finding until independent validators record their
+    evidence in the graph.
+    """
+    # TODO(phaseC-kg-provider): read Corroboration / Contradiction edges and
+    # evidence provenance for ``finding_key`` once validators write them.
+    return [], [], False
 
 
 def load_engagement_graph(engagement: str) -> KnowledgeGraph:

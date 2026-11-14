@@ -103,7 +103,11 @@ def test_record_finding_attaches_replay_block() -> None:
             "buggy.tools.reporting.tools.get_active_engagement",
             return_value="eng",
         ),
-        patch.dict("os.environ", {"BUGGY_PROOF_GATE_STRICT": "1"}, clear=False),
+        patch.dict(
+            "os.environ",
+            {"BUGGY_PROOF_GATE_STRICT": "1", "BUGGY_CORROBORATION_REQUIRED": "0"},
+            clear=False,
+        ),
     ):
         raw = asyncio.run(
             report_record_finding.ainvoke(

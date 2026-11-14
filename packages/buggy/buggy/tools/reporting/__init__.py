@@ -5,6 +5,7 @@
 - ``executive``   — Engagement-level executive summary composer
 - ``timeline``    — Chronological event timeline extractor
 - ``sarif``       — SARIF v2.1.0 JSON exporter for GitHub / DefectDojo
+- ``corroboration_gate`` — deterministic publish gate over independent corroboration
 
 Renderers operate on ``KnowledgeGraph`` state so the same graph can
 feed a bounty submission, an engagement executive summary, a SARIF
@@ -14,6 +15,13 @@ upload, and a JSON bundle for further automation.
 from __future__ import annotations
 
 from buggy.tools.reporting.bugcrowd import render_bugcrowd_csv
+from buggy.tools.reporting.corroboration_gate import (
+    ClosureState,
+    Contradiction,
+    Corroboration,
+    CorroborationResult,
+    corroboration_verdict,
+)
 from buggy.tools.reporting.cvss import (
     CVSS_TOOLS,
     cvss_score_tool,
@@ -32,8 +40,13 @@ from buggy.tools.reporting.timeline import extract_timeline
 
 __all__ = [
     "CVSS_TOOLS",
+    "ClosureState",
+    "Contradiction",
+    "Corroboration",
+    "CorroborationResult",
     "GateResult",
     "HackerOneReport",
+    "corroboration_verdict",
     "cvss_score_tool",
     "extract_timeline",
     "proof_gate_strict",
