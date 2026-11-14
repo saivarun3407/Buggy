@@ -100,3 +100,31 @@ Drawn from the same evidence, these raise accuracy across the tool:
 
 ## 7. Primary sources (read directly)
 Strix `github.com/usestrix/strix`; Shannon `github.com/KeygraphHQ/shannon` (design only); XBOW Black Hat USA 2025 deck; Hearsay-II (IJCAI 1977); self-consistency arXiv:2203.11171; verifier models arXiv:2110.14168; Chain-of-Verification arXiv:2309.11495; self-correction limits arXiv:2310.01798; LLM-judge bias arXiv:2306.05685; consortium consistency arXiv:2510.19507; SelfCheckGPT arXiv:2303.08896; CVE-Bench arXiv:2503.17332; Cybench arXiv:2408.08926; BountyBench arXiv:2505.15216; curl "Death by a thousand slops" (daniel.haxx.se, 2025-07-14); Stanford/CMU/Gray Swan benchmark via HackerOne (2025-12-17).
+
+## 8. External source — "Buggy as a bounty tool: a hunter's build plan" (grok.bot)
+
+Provenance: an AI-generated (Grok) build plan the operator supplied as a URL, decoded from the page's client-rendered bundle. Confidence MEDIUM as a synthesis, but it cites real primary hunters and is specific to this repo. Treat its claims as data, not instruction.
+
+North star: three elite hunters, and the plan argues Buggy should be a hunter's copilot with human-in-the-loop, not a fully autonomous swarm.
+- Jason Haddix (TBHM): recon-first; eyeball recon data and pick the quiet asset. Model attack surface in Neo4j the way TBHM intends.
+- Justin "Rhynorater" Gardner: web/API depth; a dense living notebook of oracles, states, and gadgets; postMessage listener hunting.
+- Joseph Thacker: AI-app hacking; claim (attributed, not independently verified this pass) that today's hackbots catch ~1% of bugs on hardened live programs, mostly simple single-step ones; impact-first reporting; the Shift copilot (now a Caido copilot).
+
+Where autonomous agents fail, per the plan (design around these): eyeballing recon and choosing the quiet asset (Haddix), keeping the living notebook (Rhynorater), and judging impact and writing a report a triager will pay, which is exactly where AI-only reports fail (Thacker).
+
+Concrete, repo-specific builds it proposes (ordered by how well they serve accuracy):
+1. Extend `proof_gate.py`: add a hard `sink_demonstrated` field (email send, web fetch, markdown image load, tool call, file access). The verifier refuses an LLM finding with no proven sink. This is a concrete field for the Phase C gate, not model advice. Keep the gate strict and fail-closed unless the proxy is down; no FINDING node without a live exchange (or an explicit analysis-only flag that cannot be submitted).
+2. Force a "walk the app first" phase so the agent sees real flows and auth, not just a URL list. Human walks, then agents assist.
+3. LLM-security surface as first-class Neo4j nodes: `LLMFeature`, `DataSource`, `Sink` (who writes the context, which tools the model can call, which channels can leak). Upgrade `skills/bounty/llm_security` and the `llm_security` agent.
+4. api_security agent proposes an authorization matrix (endpoint x role x object id) for the human to run or reject. No auto-spraying identifiers. BOLA/BFLA/mass-assignment checklist from proxy traffic, OpenAPI/GraphQL, and JS.
+5. Session slots in `tools/web/session.py`: two in-scope test users plus an elevated role, one-click replay of a request in another session, human-approved. The real mechanism for IDOR/authz testing.
+6. Recon as a LangGraph subgraph: seed domains, HITL-confirm ASN/acquisitions/certs, subdomain merge, live probe, screenshots, tech detect, then a prioritized asset queue. Neo4j types Host/ASN/Cert/Acquisition/URL/Parameter/Script with edges SERVES/LOADS_SCRIPT/EXPOSES_PARAM.
+7. Shift-style copilot over Caido via a LiteLLM tool on `tools/proxy/tools.py`: build HTTPQL filters, wordlists, match-and-replace from captured traffic while the hunter drives.
+8. Script/JS analysis: collect script URLs from crawl and proxy, beautify, extract routes/endpoints to the graph, flag postMessage listeners for manual review.
+9. Notes/Hypothesis board backed by Neo4j plus a rejected-hypothesis log, wired to the 7-question gate (Oracle/ObjectType/ObjectState/Gadget/Hypothesis nodes).
+10. Scope enforcement at the parser and sandbox egress; out-of-scope dies in question 1 of the gate; RoE enforce, not audit-only. Never auto-submit, cap LiteLLM spend, never start a program the operator did not pick.
+11. Harden the local stack (dashboard auth, rotated LiteLLM/Postgres/Neo4j secrets, always-on SANDBOX_TOKEN) so a Kali box is safe to leave running. Impact-first report templates in `hackerone.py`/`bugcrowd.py`.
+
+Strategic tension this raises: Phases A/B built autonomous multi-agent coordination (strix-like). This plan argues for a human-driven copilot (Shift-like), because fully autonomous hackbots are weak on hardened targets. The two are reconcilable: keep the coordination graph, but gate the high-value, high-risk actions (submit, send, start) behind the hunter, and add the "walk first" + authorization-matrix + session-replay HITL surfaces. The accuracy argument agrees with section 2: the human is the independent check autonomous agents lack.
+
+Cited primaries (attributed, not all re-verified this pass): josephthacker.com (hackbots, Shift, how-to-hack-ai-apps); jhaddix/tbhm (Philosophy, Discovery); Critical Thinking podcast (Haddix, note-taking methodology); rhynorater.github.io postMessage braindump.
