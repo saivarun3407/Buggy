@@ -115,6 +115,33 @@ def test_child_inherits_parent_id_from_current_agent_id() -> None:
     assert child_update["current_agent_id"] == child_id
 
 
+def test_second_wave_child_threads_to_parent_after_model_reasserts() -> None:
+    # A first child merges its own current_agent_id up into the parent on
+    # completion, polluting the pointer. after_model re-asserts the parent
+    # before the next spawn, so a second-wave child threads to the parent,
+    # not to its prior sibling, and its completion report routes correctly.
+    parent = CoordinatorMiddleware(role="buggy")
+    state = _apply({}, parent.before_agent({}, runtime=None))
+    parent_id = state["current_agent_id"]
+
+    wave1 = CoordinatorMiddleware(role="recon")
+    wave1_update = wave1.before_agent(state, runtime=None)
+    wave1_id = wave1_update["current_agent_id"]
+    # wave1 completes: its current_agent_id merges up into the parent.
+    state = _apply(state, {"current_agent_id": wave1_id})
+    assert state["current_agent_id"] == wave1_id
+
+    # The parent takes a model turn to spawn the next wave; after_model fires.
+    state = _apply(state, parent.after_model(state, runtime=None))
+    assert state["current_agent_id"] == parent_id
+
+    wave2 = CoordinatorMiddleware(role="exploit")
+    wave2_update = wave2.before_agent(state, runtime=None)
+    _, wave2_node = next(iter(wave2_update["agent_graph"].items()))
+    assert wave2_node["parent_id"] == parent_id
+    assert wave2_node["parent_id"] != wave1_id
+
+
 def test_view_agent_graph_nests_child_under_threaded_parent() -> None:
     parent = CoordinatorMiddleware(role="buggy")
     state = _apply({}, parent.before_agent({}, runtime=None))

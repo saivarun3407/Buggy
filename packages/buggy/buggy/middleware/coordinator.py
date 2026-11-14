@@ -284,6 +284,30 @@ class CoordinatorMiddleware(AgentMiddleware):
         return {"mailboxes": {parent_id: [dict(message)]}}
 
     @override
+    def after_model(self, state: Any, runtime: Any) -> dict[str, Any] | None:
+        return self._reassert_current()
+
+    @override
+    async def aafter_model(self, state: Any, runtime: Any) -> dict[str, Any] | None:
+        return self._reassert_current()
+
+    def _reassert_current(self) -> dict[str, Any] | None:
+        """Re-point ``current_agent_id`` at this agent after each model turn.
+
+        A child merges its own ``current_agent_id`` up into the parent on
+        completion (``reduce_converging_value`` is last-write-wins), so after
+        one child returns the parent's pointer names that child, not itself.
+        The agent loop runs this hook between the model emitting a ``task``
+        call and the child spawning, so re-asserting here means every later
+        spawn snapshots the correct parent. Without it a second wave of
+        children would thread to a prior sibling and misroute their
+        completion reports.
+        """
+        if self._agent_id is None:
+            return None
+        return {"current_agent_id": self._agent_id}
+
+    @override
     def wrap_model_call(self, request: Any, handler: Any) -> Any:
         return handler(self._inject_context(request))
 
