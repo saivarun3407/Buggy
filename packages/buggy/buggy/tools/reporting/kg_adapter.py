@@ -365,11 +365,19 @@ def _read_corroboration_inputs(
         source = row.get("source_agent_id")
         if not isinstance(source, str) or not source:
             continue
+        evidence_id = str(row.get("evidence_id") or "")
+        # A contradiction rules a finding out, so it must earn that weight with
+        # disconfirming evidence that resolves to real recorded tool output,
+        # the same anchor a corroboration needs. Otherwise a single unevidenced
+        # assertion from any agent could bury a true finding — a false negative,
+        # the accuracy failure that mirrors a false positive.
+        if not _evidence_resolves(store, engagement, evidence_id):
+            continue
         contradictions.append(
             Contradiction(
                 source_agent_id=source,
                 reason=str(row.get("reason") or ""),
-                evidence_id=str(row.get("evidence_id") or ""),
+                evidence_id=evidence_id,
             )
         )
 

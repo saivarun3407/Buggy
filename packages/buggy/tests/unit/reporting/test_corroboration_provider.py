@@ -146,11 +146,28 @@ def test_contradiction_is_read() -> None:
         contras=[
             {"source_agent_id": "devils-advocate", "reason": "login fails", "evidence_id": "e9"}
         ],
-        anchors={"e1": "tc-1"},
+        anchors={"e1": "tc-1", "e9": "tc-9"},
     )
     _corrs, contras, _resolves = _load(store)
     assert [c.source_agent_id for c in contras] == ["devils-advocate"]
     assert contras[0].reason == "login fails"
+
+
+def test_contradiction_without_resolving_evidence_is_dropped() -> None:
+    # A contradiction rules a finding out, so it must carry disconfirming
+    # evidence that resolves to real tool output. An unevidenced assertion
+    # cannot bury a true finding (a false negative).
+    store = _ReadStore(
+        finder="finder-a",
+        corrs=[_corr_row("validator-a")],
+        contras=[
+            {"source_agent_id": "griefer", "reason": "no", "evidence_id": "e9"},
+            {"source_agent_id": "", "reason": "blank source", "evidence_id": "e1"},
+        ],
+        anchors={"e1": "tc-1"},  # e9 absent, so the griefer's contradiction does not resolve
+    )
+    _corrs, contras, _resolves = _load(store)
+    assert contras == []
 
 
 # ── Degradation ────────────────────────────────────────────────────────
@@ -257,7 +274,7 @@ def test_record_rules_out_on_contradiction(monkeypatch: pytest.MonkeyPatch) -> N
         finder="finder-a",
         corrs=[_corr_row("validator-a", "sqlmap", "e1"), _corr_row("validator-b", "nuclei", "e2")],
         contras=[{"source_agent_id": "critic", "reason": "unauth 401", "evidence_id": "e9"}],
-        anchors={"e1": "tc-1", "e2": "tc-2"},
+        anchors={"e1": "tc-1", "e2": "tc-2", "e9": "tc-9"},
     )
     payload, persist = _run_full(store)
     assert payload["success"] is False
