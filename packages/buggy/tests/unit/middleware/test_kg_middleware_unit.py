@@ -41,11 +41,17 @@ def test_state_schema_is_kg_state() -> None:
     assert KGMiddleware.state_schema is KGState
 
 
-def test_init_builds_two_tools_from_store(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_init_builds_default_tools_from_store(monkeypatch: pytest.MonkeyPatch) -> None:
     store = _store_mock()
     mw = KGMiddleware(store=store)
     names = {t.name for t in mw.tools}
-    assert names == {"kg_record", "kg_ingest", "kg_query"}
+    assert names == {
+        "kg_record",
+        "kg_ingest",
+        "kg_query",
+        "submit_corroboration",
+        "submit_contradiction",
+    }
 
 
 def test_init_default_enabled_filter_can_be_overridden() -> None:

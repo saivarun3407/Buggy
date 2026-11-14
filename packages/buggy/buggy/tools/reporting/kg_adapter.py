@@ -17,14 +17,15 @@ Contract tool surfaces — those migrate in dedicated follow-up PRs.
 from __future__ import annotations
 
 import re
-from typing import Any
+from typing import Any, get_args
+from uuid import uuid4
 
 from buggy.middleware.kg_internal.store import (
     KGStore,
     KGStoreConfigError,
     KGStoreUnavailableError,
 )
-from buggy.tools.reporting.corroboration_gate import Contradiction, Corroboration
+from buggy.tools.reporting.corroboration_gate import Contradiction, Corroboration, Modality
 from buggy_core.types.kg import (
     Edge,
     EdgeKind,
@@ -32,7 +33,12 @@ from buggy_core.types.kg import (
     Node,
     NodeKind,
 )
+from buggy_core.utils.engagement_scope import get_active_engagement
 from buggy_core.utils.normalize import normalize_endpoint, normalize_host
+
+#: The closed modality vocabulary, sourced from the gate's ``Modality`` literal
+#: so the submit tools and the gate can never drift out of agreement.
+CORROBORATION_MODALITIES: frozenset[str] = frozenset(get_args(Modality))
 
 # Provenance / reserved property names that ``KGStore`` auto-injects on
 # every observation. They live on the Neo4j node so we can read them
@@ -177,18 +183,237 @@ def publish_finding_node(
         store.close()
 
 
+def _finding_created_by(store: KGStore, engagement: str, finding_key: str) -> str | None:
+    """The ``created_by`` of the Finding keyed ``finding_key`` in ``engagement``.
+
+    ``None`` when no such Finding exists — the write guards fail closed on
+    that, so a corroboration can never attach to a finding that is not there.
+    """
+    rows = store.execute_read(
+        "MATCH (f:Finding {key: $key}) WHERE f.engagement = $engagement "
+        "RETURN f.created_by AS finder LIMIT 1",
+        {"key": finding_key},
+        engagement=engagement,
+    )
+    if not rows:
+        return None
+    finder = rows[0].get("finder")
+    return finder if isinstance(finder, str) else ""
+
+
+def submit_corroboration_observation(
+    store: KGStore,
+    *,
+    engagement: str,
+    created_by: str,
+    source_episode_id: str,
+    finding_key: str,
+    tool_family: str,
+    modality: str,
+    evidence_id: str,
+) -> dict[str, Any]:
+    """Write a Corroboration node + ``CORROBORATES`` edge to a target finding.
+
+    Fails closed before any write on three conditions, each a
+    ``ValueError`` the caller surfaces to the agent:
+
+    - an unknown ``modality`` (not one of :data:`CORROBORATION_MODALITIES`);
+    - a ``finding_key`` with no matching Finding node in the engagement;
+    - self-corroboration — the submitting agent (``created_by``) equals the
+      finding's own creator. The finder cannot certify itself; independence
+      of the checker is the whole point of the gate.
+
+    The store stamps ``created_by`` onto the node, so the submitting agent
+    becomes the corroboration's ``source_agent_id`` on read.
+    """
+    if modality not in CORROBORATION_MODALITIES:
+        raise ValueError(
+            f"invalid modality {modality!r}; one of {sorted(CORROBORATION_MODALITIES)}"
+        )
+    finder = _finding_created_by(store, engagement, finding_key)
+    if finder is None:
+        raise ValueError(
+            f"unknown finding {finding_key!r}: no Finding node in this engagement to corroborate"
+        )
+    if finder == created_by:
+        raise ValueError(
+            f"self-corroboration refused: agent {created_by!r} created finding {finding_key!r} "
+            "and cannot corroborate it; corroboration must come from an independent source"
+        )
+    key = f"corroboration::{uuid4().hex}"
+    return store.record_observations(
+        [
+            {
+                "kind": "Corroboration",
+                "key": key,
+                "label": key,
+                "props": {
+                    "tool_family": tool_family,
+                    "modality": modality,
+                    "evidence_id": evidence_id,
+                },
+                "edges_out": [{"to_key": finding_key, "kind": "CORROBORATES"}],
+            }
+        ],
+        engagement=engagement,
+        created_by=created_by,
+        source_episode_id=source_episode_id,
+    )
+
+
+def submit_contradiction_observation(
+    store: KGStore,
+    *,
+    engagement: str,
+    created_by: str,
+    source_episode_id: str,
+    finding_key: str,
+    reason: str,
+    evidence_id: str,
+) -> dict[str, Any]:
+    """Write a Contradiction node + ``CONTRADICTS`` edge to a target finding.
+
+    Fails closed on an unknown ``finding_key`` (``ValueError``). Unlike
+    corroboration there is no self guard: a finder recording disconfirming
+    evidence against its own finding is a legitimate retraction, and any
+    contradiction rules the finding out regardless of its source.
+    """
+    finder = _finding_created_by(store, engagement, finding_key)
+    if finder is None:
+        raise ValueError(
+            f"unknown finding {finding_key!r}: no Finding node in this engagement to contradict"
+        )
+    key = f"contradiction::{uuid4().hex}"
+    return store.record_observations(
+        [
+            {
+                "kind": "Contradiction",
+                "key": key,
+                "label": key,
+                "props": {"reason": reason, "evidence_id": evidence_id},
+                "edges_out": [{"to_key": finding_key, "kind": "CONTRADICTS"}],
+            }
+        ],
+        engagement=engagement,
+        created_by=created_by,
+        source_episode_id=source_episode_id,
+    )
+
+
+def _evidence_resolves(store: KGStore, engagement: str, evidence_id: str) -> bool:
+    """True when ``evidence_id`` keys a node in ``engagement`` carrying a
+    non-empty ``source_episode_id`` — the immutable raw-output anchor the
+    store stamps on every observation."""
+    if not evidence_id:
+        return False
+    rows = store.execute_read(
+        "MATCH (n {key: $evidence_id}) WHERE n.engagement = $engagement "
+        "RETURN n.source_episode_id AS anchor LIMIT 1",
+        {"evidence_id": evidence_id},
+        engagement=engagement,
+    )
+    if not rows:
+        return False
+    anchor = rows[0].get("anchor")
+    return isinstance(anchor, str) and bool(anchor.strip())
+
+
+def _read_corroboration_inputs(
+    store: KGStore, engagement: str, finding_key: str
+) -> tuple[list[Corroboration], list[Contradiction], bool]:
+    finder = _finding_created_by(store, engagement, finding_key)
+
+    corr_rows = store.execute_read(
+        "MATCH (c:Corroboration)-[r:CORROBORATES]->(f:Finding {key: $key}) "
+        "WHERE c.engagement = $engagement AND r.engagement = $engagement "
+        "  AND f.engagement = $engagement "
+        "RETURN c.created_by AS source_agent_id, c.tool_family AS tool_family, "
+        "       c.modality AS modality, c.evidence_id AS evidence_id",
+        {"key": finding_key},
+        engagement=engagement,
+    )
+    corroborations: list[Corroboration] = []
+    for row in corr_rows or []:
+        source = row.get("source_agent_id")
+        if not isinstance(source, str) or not source:
+            continue
+        # Defense in depth over the submit-tool self-corroboration guard: a
+        # corroboration from the finding's own creator is dropped on read, so
+        # a write that slipped past the guard still cannot certify the finder.
+        if finder is not None and source == finder:
+            continue
+        corroborations.append(
+            Corroboration(
+                source_agent_id=source,
+                tool_family=str(row.get("tool_family") or ""),
+                modality=str(row.get("modality") or ""),  # type: ignore[arg-type]
+                evidence_id=str(row.get("evidence_id") or ""),
+            )
+        )
+
+    contra_rows = store.execute_read(
+        "MATCH (c:Contradiction)-[r:CONTRADICTS]->(f:Finding {key: $key}) "
+        "WHERE c.engagement = $engagement AND r.engagement = $engagement "
+        "  AND f.engagement = $engagement "
+        "RETURN c.created_by AS source_agent_id, c.reason AS reason, "
+        "       c.evidence_id AS evidence_id",
+        {"key": finding_key},
+        engagement=engagement,
+    )
+    contradictions: list[Contradiction] = []
+    for row in contra_rows or []:
+        source = row.get("source_agent_id")
+        if not isinstance(source, str) or not source:
+            continue
+        contradictions.append(
+            Contradiction(
+                source_agent_id=source,
+                reason=str(row.get("reason") or ""),
+                evidence_id=str(row.get("evidence_id") or ""),
+            )
+        )
+
+    # Nothing survived → nothing to resolve → cannot confirm. Otherwise every
+    # surviving corroboration must anchor to raw tool output.
+    evidence_resolves = bool(corroborations) and all(
+        _evidence_resolves(store, engagement, c.evidence_id) for c in corroborations
+    )
+    return corroborations, contradictions, evidence_resolves
+
+
 def load_corroboration_inputs(
     finding_key: str,
 ) -> tuple[list[Corroboration], list[Contradiction], bool]:
     """Corroborations, contradictions, and evidence resolution for one finding.
 
-    Reports nothing corroborated and nothing resolved, so the corroboration
-    gate holds every finding until independent validators record their
-    evidence in the graph.
+    Reads the ``CORROBORATES`` / ``CONTRADICTS`` edges recorded against the
+    Finding keyed ``finding_key`` in the active engagement, drops any
+    corroboration whose source is the finding's own creator, and resolves
+    evidence to the immutable raw-output anchor.
+
+    ``evidence_resolves`` is True only when at least one corroboration
+    survives and every surviving corroboration's ``evidence_id`` keys a node
+    carrying a non-empty ``source_episode_id``. Nothing surviving → False.
+
+    Resolves the active engagement from the engagement-scope contextvar, the
+    same source :func:`publish_finding_node` is handed. Degrades like
+    :func:`publish_finding_node` / :func:`load_engagement_graph`: an unset
+    engagement or an unavailable store returns ``([], [], False)`` so the gate
+    holds the finding rather than the record path crashing.
     """
-    # TODO(phaseC-kg-provider): read Corroboration / Contradiction edges and
-    # evidence provenance for ``finding_key`` once validators write them.
-    return [], [], False
+    engagement = get_active_engagement()
+    if not engagement:
+        return [], [], False
+    try:
+        store = KGStore.from_env()
+    except (KGStoreConfigError, KGStoreUnavailableError, ImportError):
+        return [], [], False
+    try:
+        return _read_corroboration_inputs(store, engagement, finding_key)
+    except Exception:  # noqa: BLE001 — a mid-read backend failure holds, never crashes record
+        return [], [], False
+    finally:
+        store.close()
 
 
 def load_engagement_graph(engagement: str) -> KnowledgeGraph:

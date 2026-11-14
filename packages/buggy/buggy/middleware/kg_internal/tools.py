@@ -41,7 +41,9 @@ from buggy.middleware.kg_internal.ingest import ingest as _ingest_dispatch
 from buggy.middleware.kg_internal.store import KGStore
 from buggy_core.utils.env import env_flag
 
-DEFAULT_KG_TOOLS = frozenset({"kg_record", "kg_ingest", "kg_query"})
+DEFAULT_KG_TOOLS = frozenset(
+    {"kg_record", "kg_ingest", "kg_query", "submit_corroboration", "submit_contradiction"}
+)
 
 _ENGAGEMENT_UNSET = (
     "kg_engagement is not set on agent state; middleware before_agent did not hydrate"
@@ -103,6 +105,14 @@ def build_kg_tools(
     """
     enabled_set: set[str] = set(enabled) if enabled is not None else set(DEFAULT_KG_TOOLS)
     tools: list[Any] = []
+
+    # Imported here, not at module scope: the corroboration write helpers live
+    # in the reporting layer, and deferring the import to factory-call time
+    # keeps the middleware module free of a tools-layer import at load time.
+    from buggy.tools.reporting.kg_adapter import (
+        submit_contradiction_observation,
+        submit_corroboration_observation,
+    )
 
     if "kg_record" in enabled_set:
 
@@ -379,5 +389,110 @@ def build_kg_tools(
             return json.dumps(payload)
 
         tools.append(kg_query)
+
+    if "submit_corroboration" in enabled_set:
+
+        @tool
+        def submit_corroboration(
+            finding_key: str,
+            tool_family: str,
+            modality: str,
+            evidence_id: str,
+            state: Annotated[dict, InjectedState],
+            tool_call_id: Annotated[str, InjectedToolCallId] = "",
+        ) -> str:
+            """Corroborate ANOTHER agent's finding with independent evidence.
+
+            The deterministic publish gate promotes a finding only once two
+            independent sources (distinct agent AND tool family) corroborate
+            it. You may NOT corroborate a finding you recorded — the finder
+            cannot certify itself, and that submission is refused.
+
+            Args:
+                finding_key: Canonical key of the target Finding node; it must
+                    already exist in this engagement (unknown key is refused).
+                tool_family: Tool family your evidence came from (e.g.
+                    ``sqlmap``, ``nuclei``). Independence is counted per
+                    (agent, tool_family).
+                modality: Evidence modality — one of ``static_match``,
+                    ``dynamic_probe``, ``response_diff``, ``canary``,
+                    ``log_event``.
+                evidence_id: Key of the evidence node anchoring this
+                    corroboration to raw tool output.
+
+            Returns JSON: the store write result
+            (``{"created", "merged", "edges", "revision"}``), or
+            ``{"error": "..."}`` for an invalid modality, an unknown finding,
+            or a self-corroboration.
+            """
+            engagement = _resolve_engagement(state)
+            if not engagement:
+                return _err(_ENGAGEMENT_UNSET)
+            try:
+                result = submit_corroboration_observation(
+                    store,
+                    engagement=engagement,
+                    created_by=_resolve_created_by(state),
+                    source_episode_id=tool_call_id or "no-tool-call-id",
+                    finding_key=finding_key,
+                    tool_family=tool_family,
+                    modality=modality,
+                    evidence_id=evidence_id,
+                )
+            except ValueError as exc:
+                return _err(str(exc))
+            except Exception as exc:  # noqa: BLE001 — surface to LLM
+                return _err(f"submit_corroboration failed: {exc}")
+            return json.dumps(result)
+
+        tools.append(submit_corroboration)
+
+    if "submit_contradiction" in enabled_set:
+
+        @tool
+        def submit_contradiction(
+            finding_key: str,
+            reason: str,
+            evidence_id: str,
+            state: Annotated[dict, InjectedState],
+            tool_call_id: Annotated[str, InjectedToolCallId] = "",
+        ) -> str:
+            """Record disconfirming evidence against a finding.
+
+            A single contradiction rules the finding OUT at the publish gate,
+            regardless of how many corroborations it has — a devil's-advocate
+            or a retraction. Fails closed on an unknown ``finding_key``.
+
+            Args:
+                finding_key: Canonical key of the target Finding node; it must
+                    already exist in this engagement (unknown key is refused).
+                reason: Why the finding is wrong (e.g. the login actually
+                    fails for unknown users).
+                evidence_id: Key of the evidence node anchoring this
+                    contradiction to raw tool output.
+
+            Returns JSON: the store write result, or ``{"error": "..."}`` when
+            the finding is unknown.
+            """
+            engagement = _resolve_engagement(state)
+            if not engagement:
+                return _err(_ENGAGEMENT_UNSET)
+            try:
+                result = submit_contradiction_observation(
+                    store,
+                    engagement=engagement,
+                    created_by=_resolve_created_by(state),
+                    source_episode_id=tool_call_id or "no-tool-call-id",
+                    finding_key=finding_key,
+                    reason=reason,
+                    evidence_id=evidence_id,
+                )
+            except ValueError as exc:
+                return _err(str(exc))
+            except Exception as exc:  # noqa: BLE001 — surface to LLM
+                return _err(f"submit_contradiction failed: {exc}")
+            return json.dumps(result)
+
+        tools.append(submit_contradiction)
 
     return tools

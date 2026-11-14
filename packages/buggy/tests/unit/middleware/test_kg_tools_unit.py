@@ -52,10 +52,16 @@ def _fake_store(record_result: dict[str, Any] | None = None) -> MagicMock:
 # ── Factory shape ───────────────────────────────────────────────────────
 
 
-def test_default_factory_returns_two_tools() -> None:
+def test_default_factory_returns_all_tools() -> None:
     tools = build_kg_tools(_fake_store())
     names = {t.name for t in tools}
-    assert names == {"kg_record", "kg_ingest", "kg_query"}
+    assert names == {
+        "kg_record",
+        "kg_ingest",
+        "kg_query",
+        "submit_corroboration",
+        "submit_contradiction",
+    }
 
 
 def test_factory_respects_enabled_filter() -> None:
@@ -70,8 +76,16 @@ def test_factory_with_empty_enabled_returns_no_tools() -> None:
     assert build_kg_tools(_fake_store(), enabled=set()) == []
 
 
-def test_default_kg_tools_constant_lists_both() -> None:
-    assert DEFAULT_KG_TOOLS == frozenset({"kg_record", "kg_ingest", "kg_query"})
+def test_default_kg_tools_constant_lists_all() -> None:
+    assert DEFAULT_KG_TOOLS == frozenset(
+        {
+            "kg_record",
+            "kg_ingest",
+            "kg_query",
+            "submit_corroboration",
+            "submit_contradiction",
+        }
+    )
 
 
 # ── kg_record engagement scope ──────────────────────────────────────────
