@@ -26,7 +26,7 @@ def _call(tool: Any, args: dict[str, Any], state: dict[str, Any]) -> str:
 
 
 def test_kg_record_writes_through_live_store(kgstore: KGStore, engagement: str) -> None:
-    [kg_record, _] = build_kg_tools(kgstore)
+    kg_record = next(t for t in build_kg_tools(kgstore) if t.name == "kg_record")
     obs = [
         {
             "kind": "Host",
@@ -58,7 +58,7 @@ def test_kg_record_writes_through_live_store(kgstore: KGStore, engagement: str) 
 
 
 def test_kg_record_atomic_batch_with_edges_live(kgstore: KGStore, engagement: str) -> None:
-    [kg_record, _] = build_kg_tools(kgstore)
+    kg_record = next(t for t in build_kg_tools(kgstore) if t.name == "kg_record")
     obs = [
         {
             "kind": "Host",
@@ -109,7 +109,7 @@ def test_kg_ingest_routes_nuclei_jsonl_through_live_store(
         + "\n",
         encoding="utf-8",
     )
-    [_, kg_ingest] = build_kg_tools(kgstore)
+    kg_ingest = next(t for t in build_kg_tools(kgstore) if t.name == "kg_ingest")
     out_msg = _call(
         kg_ingest,
         {"scanner_kind": "nuclei_jsonl", "path": str(f)},
@@ -134,7 +134,7 @@ def test_kg_ingest_routes_nuclei_jsonl_through_live_store(
 def test_kg_record_idempotent_across_two_calls_live(kgstore: KGStore, engagement: str) -> None:
     """Two ToolCalls with the same observation key collapse to one
     node — the deterministic key + (key, engagement) uniqueness."""
-    [kg_record, _] = build_kg_tools(kgstore)
+    kg_record = next(t for t in build_kg_tools(kgstore) if t.name == "kg_record")
     obs = [
         {
             "kind": "Host",
@@ -166,7 +166,7 @@ def test_kg_record_engagement_unset_short_circuits_live(
 ) -> None:
     """When kg_engagement is missing, the tool returns an error and does
     NOT write anything to the live store."""
-    [kg_record, _] = build_kg_tools(kgstore)
+    kg_record = next(t for t in build_kg_tools(kgstore) if t.name == "kg_record")
     obs = [{"kind": "Host", "key": "host::no-engagement", "label": "x"}]
     out_msg = _call(
         kg_record,

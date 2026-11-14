@@ -58,7 +58,7 @@ def test_middleware_summary_updates_after_kg_record_write(
     assert "Top vulnerabilities" not in state["kg_summary"]
 
     # Invoke kg_record through the tool the middleware exposes.
-    [kg_record, _] = mw.tools
+    kg_record = next(t for t in mw.tools if t.name == "kg_record")
     payload = {
         "name": "kg_record",
         "type": "tool_call",
@@ -125,7 +125,7 @@ def test_middleware_wrap_tool_call_rejects_kg_record_without_engagement(
     """End-to-end refusal: no engagement on state → middleware returns
     a ToolMessage and the live store is NEVER touched."""
     mw = KGMiddleware(store=kgstore)
-    [kg_record, _] = mw.tools
+    kg_record = next(t for t in mw.tools if t.name == "kg_record")
 
     tool_request = SimpleNamespace(
         tool=SimpleNamespace(name="kg_record"),
@@ -172,7 +172,7 @@ def test_middleware_full_lifecycle_loop_live(kgstore: KGStore, engagement: str) 
     # Turn 1.
     state: dict[str, Any] = {"engagement_name": engagement}
     state.update(mw.before_agent(state, runtime=None) or {})
-    [kg_record, _] = mw.tools
+    kg_record = next(t for t in mw.tools if t.name == "kg_record")
     payload = {
         "name": "kg_record",
         "type": "tool_call",
