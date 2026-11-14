@@ -38,7 +38,7 @@ def _enveloped(
     tool_call_id: str = "tc-1",
     categories: list[str] | None = None,
 ) -> str:
-    """Reproduce ``untrusted_output._format_envelope`` output exactly."""
+    """Reproduce ``untrusted_output.format_untrusted_envelope`` output exactly."""
     cats = f' categories="{",".join(categories)}"' if categories else ""
     return (
         f'<UNTRUSTED_TOOL_OUTPUT origin="{origin}" '

@@ -77,7 +77,7 @@ log = logging.getLogger(__name__)
 
 
 # Matches the envelope ``untrusted_output`` emits (see
-# ``untrusted_output._format_envelope``). Attributes never contain ``>``,
+# ``untrusted_output.format_untrusted_envelope``). Attributes never contain ``>``,
 # so ``[^>]*`` captures the whole opening tag verbatim; the body is
 # whatever sits between the tag's trailing newline and the final closing
 # marker. ``untrusted_output`` neutralizes any embedded marker in the raw

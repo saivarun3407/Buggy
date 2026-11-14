@@ -153,13 +153,21 @@ Strict rules - violating these is a critical failure:
 """
 
 
-def _format_envelope(
+def format_untrusted_envelope(
     origin: str,
     tool_call_id: str,
     risk: str,
     categories: list[str],
     body: str,
 ) -> str:
+    """Wrap ``body`` in the ``<UNTRUSTED_TOOL_OUTPUT>`` quarantine envelope.
+
+    Public so a tool that must return a ``Command`` (and therefore bypasses
+    this middleware's ``wrap_tool_call``, which only rewrites ``ToolMessage``
+    results) can emit the identical envelope at construction time instead of
+    duplicating its format. ``read_messages`` does exactly this for
+    peer-authored message bodies.
+    """
     cats_attr = f' categories="{",".join(categories)}"' if categories else ""
     # Defang chat-template special tokens (e.g. <|im_start|>) so a self-hosted
     # tokenizer cannot parse attacker bytes into a forged role boundary
@@ -255,7 +263,7 @@ class UntrustedOutputMiddleware(AgentMiddleware):
         verdict = detect_injection(original_text)
 
         body = _maybe_truncate(original_text, self._max_body_chars)
-        wrapped = _format_envelope(
+        wrapped = format_untrusted_envelope(
             origin=tool_name,
             tool_call_id=result.tool_call_id or "",
             risk=verdict.risk,
