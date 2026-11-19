@@ -1,0 +1,224 @@
+# Buggy vs ten harnesses from offsecharnesses.ai — evaluation matrix (2026-11-19)
+
+Supersedes the scoring in `offsec-harness-product-review-2026-11-17.md` for
+the ten tools below. That review rated Buggy before the scope-enforcement,
+pipeline, evidence-gateway and one-command work; this one rates it after.
+
+## How to read this
+
+**The evidence is not symmetric, and that matters more than any score.**
+
+| | Basis |
+|---|---|
+| Buggy | Run on a live stack on 2026-11-19: scope enforcement end to end, the recon pipeline against two lab apps, six probes against known bugs, the gateway and approval hold. **The agent stage has never run** (no model credentials), so nothing here measures what Buggy's agents find. |
+| The ten others | Each project's own README on 2026-11-19. **None was installed or run.** A capability the README does not state is scored 0 and marked "not stated"; it may exist. |
+| The site | [offsecharnesses.ai](https://offsecharnesses.ai) lists 154 harnesses. It does not score them. It orders them by evidence of use in real attacks (vendor and government reports), then by GitHub stars. |
+
+"Seen in real attacks" means criminals or state actors used the tool. It shows
+the tool works in someone's hands. It says nothing about precision, safety or
+whether it suits authorised testing.
+
+## How the ten were picked
+
+The site has no "top 10". Criteria used: purpose-built for offensive testing
+(not a general agent, skill pack or bare MCP server), and either in the site's
+attack-evidence tier or among the most prominent or most similar to Buggy.
+
+| # | Tool | Why it is here | Site tier | License |
+|---|---|---|---|---|
+| 1 | [Shannon](https://github.com/KeygraphHQ/shannon) | Most-starred pentest agent on the site (52k) | No attack on record | AGPL-3.0 |
+| 2 | [Strix](https://github.com/usestrix/strix) | Attack-evidence tier; app-security product | Confirmed | Apache-2.0 |
+| 3 | [RedAmon](https://github.com/samugit83/redamon) | Closest architecture: deterministic recon + graph + agent | No attack on record | MIT |
+| 4 | [PentAGI](https://github.com/vxcontrol/pentagi) | Attack-evidence tier; full platform | Confirmed | MIT |
+| 5 | [Xalgorix](https://github.com/xalgorix/xalgorix) | Independent re-exploitation of every finding | No attack on record | Apache-2.0 |
+| 6 | [PentestGPT](https://github.com/GreyDGL/PentestGPT) | Attack-evidence tier; the reference research agent | Confirmed | MIT |
+| 7 | [Cairn](https://github.com/oritera/Cairn) | Attack-evidence tier; different coordination model | Confirmed | AGPL-3.0 |
+| 8 | [CyberStrikeAI](https://github.com/AIPentest/CyberStrikeAI) | Attack-evidence tier; governed operations platform | Confirmed | Apache-2.0 |
+| 9 | [HexStrike AI](https://github.com/0x4m4/hexstrike-ai) | Attack-evidence tier; tool breadth via MCP | Observed | MIT |
+| 10 | [Hacker Bob](https://github.com/vmihalis/hacker-bob) | The bug-bounty agent with public results | No attack on record | Apache-2.0 |
+| — | [Decepticon](https://github.com/BitterSecurity/Decepticon) | Buggy's upstream; shown as the baseline Buggy started from | No attack on record | Apache-2.0 |
+
+Left out on purpose: ARTEX (repository closed), OpenClaw, Hermes Agent and
+oh-my-claudecode (general agents, not offensive harnesses).
+
+## Evaluation matrix
+
+Scale: **3** clear strength · **2** solid · **1** partial · **0** absent or not
+stated. Scores for the others rest on README statements only.
+
+| Criterion | Buggy | Shannon | Strix | RedAmon | PentAGI | Xalgorix | PentestGPT | Cairn | CyberStrikeAI | HexStrike | Hacker Bob | *Decepticon* |
+|---|:-:|:-:|:-:|:-:|:-:|:-:|:-:|:-:|:-:|:-:|:-:|:-:|
+| 1. Time to first result | 1 | 3 | 3 | 1 | 1 | 3 | 2 | 1 | 2 | 2 | 2 | 1 |
+| 2. Recon done by code, not by the model | **3** | 1 | 1 | **3** | 0 | 1 | 0 | 0 | 1 | 1 | 2 | 0 |
+| 3. Scope enforced technically | **3** | 1 | 0 | 2 | 0 | 1 | 0 | 0 | 1 | 0 | 2 | 1 |
+| 4. Human approval before state changes | **3** | 0 | 0 | 2 | 1 | 0 | 1 | 0 | 2 | 0 | 0 | 1 |
+| 5. Findings proven before they are reported | 2 | **3** | 2 | 2 | 0 | **3** | 0 | 0 | 1 | 0 | **3** | 0 |
+| 6. Evidence and audit trail | **3** | 1 | 1 | 2 | 1 | 1 | 0 | 1 | 2 | 0 | 2 | 1 |
+| 7. Memory / knowledge store | 2 | 0 | 1 | **3** | **3** | 0 | 1 | 2 | 2 | 0 | 1 | 2 |
+| 8. Published results | 1 | 1 | 1 | **3** | 1 | 0 | 2 | 2 | 0 | 0 | **3** | 2 |
+| 9. Web and API depth | 2 | **3** | **3** | 2 | 1 | **3** | 1 | 1 | 2 | 1 | 2 | 2 |
+| 10. Breadth beyond web | 2 | 0 | 1 | 2 | 2 | 1 | 2 | 2 | **3** | **3** | 1 | **3** |
+| 11. Reports and developer workflow | 2 | **3** | **3** | **3** | 2 | **3** | 1 | 0 | 1 | 1 | 2 | 0 |
+| 12. UI, API, observability | 1 | 2 | 2 | **3** | **3** | 2 | 1 | 1 | **3** | 1 | 1 | 1 |
+| 13. Bug-bounty program support | **3** | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 1 | 1 | 0 |
+
+No totals are given. The criteria are not equally important, and adding a
+measured score to a README claim would produce a number that means nothing.
+
+### What each score rests on
+
+**1. Time to first result.** Shannon, Strix and Xalgorix are one install and one
+command against one app, with a report at the end. Buggy now has one command
+(`buggy hunt <url>`) and stages 1–3 need no model, but it starts thirteen
+containers and several gigabytes of images, and the install script was not
+tested. RedAmon and PentAGI are similarly heavy (RedAmon states 7 GB RAM and
+80 GB disk).
+
+**2. Recon by code.** Buggy: pinned scanner versions, every input and output
+scope-filtered, one record schema, cache, diff, resume, parallel engagements;
+verified by running. RedAmon states a fan-out/fan-in pipeline of 40+ tools
+with deterministic fallbacks, which is broader than Buggy's. Hacker Bob states
+optional deterministic collectors. In the others the model drives the tools.
+
+**3. Scope enforcement.** Buggy enforces scope in a separate container the
+agent cannot reach (packet filter plus a DNS proxy), refuses to run without a
+loaded policy, and by default gives the agent's shell no route to the target.
+Twelve end-to-end tests cover it. RedAmon states RoE enforcement, an
+unremovable block on government and military targets, and a broker in front of
+the Docker socket. Hacker Bob states session-bound scope checks and says
+plainly that it does not guarantee containment. PentAGI's README tells the
+operator to restrict sandbox egress themselves. Strix, PentestGPT, Cairn and
+HexStrike state only an authorisation notice.
+
+**4. Human approval.** Buggy holds every state-changing request until the
+operator allows that exact request, and holds reports until the exact text is
+approved; verified live. RedAmon and CyberStrikeAI state approval gates for
+dangerous tools. Shannon warns that it creates users and changes state and
+should not be pointed at production, with no approval step.
+
+**5. Proven findings.** Shannon ("no exploit, no report"), Xalgorix (a separate
+verifier re-exploits every candidate) and Hacker Bob (verify, then grade
+submit / hold / discard) make proof the product. Buggy has the mechanism
+(findings must cite captured requests that verify and replay; independent
+corroboration) but it has only been exercised by tests and by six probes,
+never by an agent producing a finding. That is why it is a 2, not a 3.
+
+**6. Evidence and audit.** Buggy records every evidence request outside the
+agent's reach and keeps hash-chained, HMAC-bound ledgers of scope decisions,
+dropped packets and captures. CyberStrikeAI states audit logs, evidence
+retention and step-by-step replay. RedAmon states append-only audit trails.
+
+**7. Memory.** RedAmon (Neo4j graph the agent queries, vector search,
+cross-session attack chains) and PentAGI (pgvector plus an optional Neo4j
+graph) are ahead. Cairn's shared fact / intent graph is the most original
+design. Buggy has three typed stores with provenance (recon, captures,
+knowledge graph), and the graph's schema and authorship gaps were fixed today,
+but nothing shows agents learning across engagements.
+
+**8. Published results.** RedAmon reports 101/104 on the XBOW benchmark,
+black-box, with raw session logs published. Hacker Bob lists 17 CVE IDs across
+9 projects, 14 of them public. PentestGPT reports 86.5% (90/104) on XBOW and
+labels it historical. Cairn reports 54/54 at a 610-team competition. Buggy has
+one measured number: the pipeline alone matched 6 of 40 known lab bugs and the
+probes reproduce 8. Its inherited "102/104" was found to be unsound and the
+README now says there is no validated score. Decepticon advertises 102/104
+with linked traces. The scorer this fork inherited could pass without
+exploitation; whether upstream's published runs depended on that was not
+established, so the figure is counted but not relied on here.
+
+**9. Web and API depth.** Shannon reads the source and then attacks the
+running app. Strix takes OpenAPI, Postman and source. Xalgorix runs 22 phases
+including IDOR, race conditions and SSRF. Buggy has deterministic probes for
+six classes (IDOR, unsigned JWT, SSRF by callback, negative quantities, mass
+assignment, GraphQL), each proven on a known bug, and nothing deterministic
+for injection, XSS or file handling.
+
+**10. Breadth.** CyberStrikeAI (network, cloud, binary, built-in C2) and
+HexStrike (150+ tools) are widest. Buggy inherits Decepticon's breadth (Active
+Directory, cloud, C2, reversing and more); none of it was run in this work, so
+it is scored on design and one point below its upstream.
+
+**11. Reports and workflow.** Shannon ships PDF, JSON and SARIF with CI gates.
+Strix adds auto-fix. Xalgorix produces branded PDFs with remediation. RedAmon
+opens fix pull requests. Buggy writes a Markdown recon report and renders
+HackerOne, Bugcrowd and SARIF formats; it has no CI integration and no PDF.
+
+**12. UI and operations.** PentAGI (web UI, REST and GraphQL, Grafana, Jaeger,
+Langfuse), RedAmon (web app with graph view) and CyberStrikeAI (platform with
+RBAC) are well ahead. Buggy is a terminal tool with an optional dashboard that
+was not tested here.
+
+**13. Bug-bounty programs.** Buggy imports a program's official scope from
+HackerOne or Bugcrowd, turns it into an enforced policy with the program's
+rate limit and exclusions, and refuses findings that lack a captured in-scope
+request and a remediation. No other tool here states scope import. Hacker Bob
+is built for bounty work and grades findings for submission, and says it does
+not enforce program policy.
+
+## Where each tool is better than Buggy, and where Buggy is better
+
+| Tool | Better than Buggy at | Buggy is better at |
+|---|---|---|
+| Shannon | Source-aware testing; proof as the product; SARIF and CI; adoption | Not changing state without approval (Shannon says not to run it on production); scope enforcement; black-box targets without source |
+| Strix | Packaging; API-contract and source inputs; auto-fix; a hosted option | Scope enforcement (none stated); approval; recon that does not spend tokens; audit trail |
+| RedAmon | Broader recon pipeline; graph the agent reasons over; UI; published benchmark with logs; fix pull requests | Enforcement the agent cannot reach; per-request approval; bounty-program import; recorded evidence gateway |
+| PentAGI | UI, APIs, observability; long-term memory; self-hosted model performance tuning | Scope (PentAGI leaves egress to the operator); proof of findings; deterministic recon |
+| Xalgorix | Independent re-exploitation of every finding; 22-phase method; PDF reports; single binary | Approval before state changes; scope beyond a private-range block; memory; bounty programs |
+| PentestGPT | A measured, honestly labelled benchmark; simplicity; research pedigree | Almost every control: scope, approval, evidence, deterministic recon, reporting |
+| Cairn | Coordination through shared facts and intents instead of fixed roles; a strong competition result | Everything around the agent: scope, approval, evidence, recon, reports |
+| CyberStrikeAI | Breadth; platform features (RBAC, workflows with approval nodes, replay) | Network-level scope (CyberStrikeAI uses regex checks before tool calls); sandboxing (none stated); proof of findings |
+| HexStrike AI | Sheer number of tools, usable from any MCP client | It is a toolbox with no stated guardrails, sandbox, approval or proof; Buggy has all four |
+| Hacker Bob | Real published results (CVEs); submit / hold / discard grading; pull-request review; honesty about limits | Containment (Bob says it does not guarantee it); approval; official scope import and program rules |
+| Decepticon | It is the maintained upstream, with a hosted console | Everything added in this fork: enforcement outside the agent, deterministic pipeline, evidence gateway, probes, program import, one-command flow |
+
+## Verdict
+
+**Where Buggy leads.** Control. No other tool here states enforcement the
+agent cannot reach, approval per state-changing request, a recorded evidence
+gateway, and import of a bounty program's official scope together. These are
+the properties that decide whether a tool can be pointed at someone else's
+production system under a program's rules. They are also verified by running,
+not claimed.
+
+**Where Buggy trails.** Proof that it finds bugs. Shannon, Xalgorix and Hacker
+Bob make a proven finding the product; RedAmon, PentestGPT, Cairn and Hacker
+Bob publish results. Buggy has no agent result at all. It also trails on
+packaging (Shannon, Strix, Xalgorix), on UI and operations (PentAGI, RedAmon,
+CyberStrikeAI) and on memory the agent visibly uses (RedAmon, PentAGI).
+
+**The honest ranking for authorised bug-bounty work today.** If the question
+is "which tool will find me a bug this week", the evidence favours Hacker Bob,
+Shannon (when you have the source), Xalgorix and RedAmon. If the question is
+"which tool can I let run against a real program without it leaving scope or
+changing state behind my back", Buggy is the only one whose answer has been
+tested. Buggy is the safest harness in this set and the least proven hunter.
+
+## What to take from the others, in order
+
+1. **Run the agents and publish the result** (RedAmon, PentestGPT). Buggy's
+   lab harness and two agent arms already exist; they need a model key.
+   Publish raw traces, as RedAmon does. Nothing else on this list changes the
+   verdict as much.
+2. **Make "exploited" a status the report depends on** (Shannon, Xalgorix).
+   Buggy's capture-verify and replay checks are the mechanism; add a separate
+   verifier pass that re-sends the proof and marks each finding exploited,
+   inconclusive or discarded.
+3. **Grade findings for submission** (Hacker Bob): submit, hold or discard,
+   before the operator is asked to approve a report.
+4. **Give injection and XSS deterministic probes.** They are the largest
+   uncovered classes in the lab baseline (0 of 9).
+5. **SARIF upload and a CI gate** (Shannon). The SARIF renderer exists.
+6. **A lighter install** (Shannon, Xalgorix): recon and report need two of
+   the thirteen services.
+7. **Let agents coordinate through shared facts** (Cairn). Buggy's recon
+   store and graph are already the shared state; the agents still coordinate
+   by role.
+
+## Sources
+
+Fetched 2026-11-19: [offsecharnesses.ai](https://offsecharnesses.ai) and the
+README of each repository linked in the selection table. Buggy facts come from
+running this repository; see `docs/quickstart.md`,
+`docs/security/scope-enforcement.md`, `docs/pipeline.md`,
+`docs/evidence-and-probes.md`, `docs/bounty-programs.md` and
+`benchmark/lab/results/README.md`.
