@@ -1,5 +1,5 @@
 {
- "updated": "2026-11-19 21:47 UTC",
+ "updated": "2026-11-19 21:50 UTC",
  "columns": [
   "backlog",
   "ready",
@@ -215,12 +215,12 @@
    "lane": "A",
    "title": "`buggy-cli status <engagement>`: one snapshot of a run, with `--json` and `--follow`",
    "depends": [],
-   "status": "in_progress",
+   "status": "done",
    "agent": "",
    "branch": "",
-   "commit": "",
-   "tests": "",
-   "note": "",
+   "commit": "53cd290",
+   "tests": "460 CLI tests pass",
+   "note": "merged; one snapshot of scope, recon, approvals, evidence, findings with --json and --follow",
    "order": 1
   },
   {
@@ -229,7 +229,7 @@
    "lane": "A",
    "title": "Lite stack: recon and report with two services",
    "depends": [],
-   "status": "backlog",
+   "status": "in_progress",
    "agent": "",
    "branch": "",
    "commit": "",
