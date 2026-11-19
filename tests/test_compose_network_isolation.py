@@ -578,3 +578,37 @@ def test_control_and_audit_trees_are_outside_the_agent_writable_tree():
     }
     assert "operator" in writers
     assert writers <= {"operator", "web"}, f"unexpected control-root writers: {sorted(writers)}"
+
+
+# ── Pipeline invariants ──────────────────────────────────────────────
+
+
+def test_pipeline_is_isolated_from_agents_and_the_management_plane():
+    services = _rendered_compose()["services"]
+    pipeline, mcp = services["pipeline"], services["pipeline-mcp"]
+    # The scanners have their own network: no management plane, no sandbox.
+    assert _service_networks(pipeline) == {"pipeline-net"}
+    # Agents reach pipeline data only through langgraph -> pipeline-mcp.
+    assert _service_networks(mcp) == {MGMT_NET}
+    assert SANDBOX_NET not in _service_networks(mcp)
+    for name in ("sandbox", "langgraph"):
+        assert "pipeline-net" not in _service_networks(services[name])
+        targets = set(_mounts(services[name]))
+        assert not {"/data/pipeline", "/data/queue"} & targets, f"{name} mounts the recon store"
+
+
+def test_recon_store_is_read_only_for_the_agent_facing_server():
+    services = _rendered_compose()["services"]
+    worker, mcp = _mounts(services["pipeline"]), _mounts(services["pipeline-mcp"])
+    assert worker["/data/pipeline"].get("read_only") is not True
+    assert mcp["/data/pipeline"].get("read_only") is True
+    assert mcp["/data/queue"].get("read_only") is not True  # re-run requests only
+    for mounts in (worker, mcp):
+        assert mounts["/control"].get("read_only") is True
+    for name in ("pipeline", "pipeline-mcp"):
+        env = _environment(services[name])
+        leaked = [
+            k for k in env if any(s in k for s in ("API_KEY", "LITELLM", "ANTHROPIC", "OPENAI"))
+        ]
+        assert not leaked, f"{name} must not carry model credentials: {leaked}"
+        assert services[name].get("cap_drop") == ["ALL"] and services[name].get("read_only") is True

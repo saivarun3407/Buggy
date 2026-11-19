@@ -23,6 +23,7 @@ def _print_help() -> int:
         "  assessment         Track web/API inventory and evidence-backed coverage\n"
         "  workflows          Inspect capabilities and run bounded defensive workflows\n"
         "  auth               Show provider/auth configuration (API keys + subscriptions)\n\n"
+        "  pipeline           Run / inspect the deterministic recon pipeline\n"
         "  scope              Show / approve the enforced scope (operator only)\n"
         "  approvals          List and answer the agent's approval requests\n"
         "  audit              Verify engagement audit ledgers\n"
@@ -53,6 +54,10 @@ def main(argv: list[str] | None = None) -> int:
         from buggy.cli.engage import main as engage_main
 
         return engage_main(rest)
+    if sub == "pipeline":
+        from buggy.pipeline.cli import main as pipeline_main
+
+        return pipeline_main(rest)
     if sub == "scope":
         from buggy.cli.scope import main as scope_main
 

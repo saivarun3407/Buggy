@@ -572,6 +572,94 @@ services:
     logging: *default-logging
 
 
+  # Deterministic recon pipeline — scanners as plain code, no LLM.
+  #
+  # Runs subfinder / amass / dnsx / naabu / httpx / katana / gau / nuclei /
+  # gitleaks (pinned in buggy/pipeline/versions.py) in seven ordered stages,
+  # filters every input and output against the engagement's enforced scope,
+  # and writes normalised records to the recon store. The worker runs an
+  # engagement when its scope is first approved or changes, and serves the
+  # re-run requests agents queue through pipeline-mcp.
+  #
+  #   docker compose run --rm pipeline run <engagement>      # run now
+  #   docker compose run --rm pipeline status <engagement>
+  #
+  # It has its own network: no path to the management plane or the sandbox.
+  # See docs/pipeline.md.
+  pipeline:
+    image: buggy-pipeline:${BUGGY_VERSION:-stable}
+    build:
+      context: .
+      dockerfile: containers/pipeline.Dockerfile
+    container_name: buggy${BUGGY_STACK_NAME:+-${BUGGY_STACK_NAME}}-pipeline
+    command: ["worker"]
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    read_only: true
+    tmpfs:
+      - /tmp
+      - /home/pipeline
+    mem_limit: 2g
+    pids_limit: 1024
+    environment:
+      - BUGGY_PIPELINE_DATA=/data/pipeline
+      - BUGGY_PIPELINE_QUEUE=/data/queue
+      - BUGGY_CONTROL_ROOT=/control
+      # 0 = run only when a scope is new/changed or a re-run is requested.
+      - BUGGY_PIPELINE_REFRESH_SECONDS=${BUGGY_PIPELINE_REFRESH_SECONDS:-0}
+    volumes:
+      - pipeline_data:/data/pipeline
+      - pipeline_queue:/data/queue
+      # The enforced scope of every engagement, by slug. Read-only.
+      - ${BUGGY_HOME:-~/.buggy}/control:/control:ro
+    networks:
+      - pipeline-net
+    restart: unless-stopped
+    logging: *default-logging
+
+  # Read-only MCP server over the recon store — the agents' only access to
+  # pipeline data. The store volume is mounted read-only; the one thing an
+  # agent can write is a re-run request naming an asset (queue volume), which
+  # the worker re-checks against the enforced scope before doing anything.
+  pipeline-mcp:
+    image: buggy-pipeline:${BUGGY_VERSION:-stable}
+    container_name: buggy${BUGGY_STACK_NAME:+-${BUGGY_STACK_NAME}}-pipeline-mcp
+    entrypoint: ["python", "-m", "buggy.pipeline.mcp_server"]
+    command: []
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    read_only: true
+    tmpfs:
+      - /tmp
+    mem_limit: 512m
+    pids_limit: 128
+    environment:
+      - BUGGY_PIPELINE_DATA=/data/pipeline
+      - BUGGY_PIPELINE_QUEUE=/data/queue
+      - BUGGY_CONTROL_ROOT=/control
+      - BUGGY_PIPELINE_MCP_PORT=9460
+    volumes:
+      - pipeline_data:/data/pipeline:ro
+      - pipeline_queue:/data/queue
+      - ${BUGGY_HOME:-~/.buggy}/control:/control:ro
+    depends_on:
+      pipeline:
+        condition: service_started
+    healthcheck:
+      test: ["CMD", "python", "-c", "import socket; socket.create_connection(('127.0.0.1', 9460), 2).close()"]
+      interval: 5s
+      timeout: 3s
+      retries: 12
+      start_period: 10s
+    networks:
+      - buggy-net
+    restart: unless-stopped
+    logging: *default-logging
+
   # Operator shell — the only container that can WRITE the control root.
   #
   # Scope (roe.json) and approval decisions are operator-authored. The
@@ -968,6 +1056,10 @@ services:
       - langgraph
 
 volumes:
+  # Recon store (written by `pipeline`, read-only everywhere else) and the
+  # queue of agent re-run requests.
+  pipeline_data:
+  pipeline_queue:
   postgres_data:
   sliver_data:
   neo4j_data:
@@ -977,6 +1069,10 @@ volumes:
 
 networks:
   buggy-net:
+    driver: bridge
+  # The pipeline's own way out. Not shared with the sandbox or the
+  # management plane.
+  pipeline-net:
     driver: bridge
   # Internal: Docker drops every packet addressed outside this subnet, so
   # nothing on it can reach the host or the internet directly. The sandbox

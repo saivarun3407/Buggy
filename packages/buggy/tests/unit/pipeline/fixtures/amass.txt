@@ -1,0 +1,7 @@
+example.com (FQDN) --> a_record --> 172.66.147.243 (IPAddress)
+example.com (FQDN) --> a_record --> 104.20.23.154 (IPAddress)
+172.66.144.0/20 (Netblock) --> contains --> 172.66.147.243 (IPAddress)
+104.20.16.0/20 (Netblock) --> contains --> 104.20.23.154 (IPAddress)
+13335 (ASN) --> managed_by --> CLOUDFLARENET - Cloudflare, Inc. (RIROrganization)
+13335 (ASN) --> announces --> 172.66.144.0/20 (Netblock)
+13335 (ASN) --> announces --> 104.20.16.0/20 (Netblock)

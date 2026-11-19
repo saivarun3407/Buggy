@@ -166,6 +166,11 @@ jobs:
           - image: buggy-egress-guard
             dockerfile: containers/egress-guard.Dockerfile
             platforms: linux/amd64,linux/arm64
+          # Recon pipeline: pinned Go scanners + stdlib Python. Always started
+          # (`pipeline`, `pipeline-mcp`), so it must be published.
+          - image: buggy-pipeline
+            dockerfile: containers/pipeline.Dockerfile
+            platforms: linux/amd64,linux/arm64
     steps:
       - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
 
@@ -662,6 +667,7 @@ jobs:
             buggy-cli
             buggy-skillogy
             buggy-egress-guard
+            buggy-pipeline
             buggy-c2-sliver
             buggy-web
           )
@@ -692,6 +698,7 @@ jobs:
             buggy-cli
             buggy-skillogy
             buggy-egress-guard
+            buggy-pipeline
             buggy-c2-sliver
             buggy-web
           )

@@ -1,0 +1,4 @@
+{"host":"www.lab.test","ttl":600,"resolver":["127.0.0.1:5353"],"a":["192.0.2.10"],"aaaa":["2001:db8::10"],"cname":["app.lab.test"],"has_internal_ips":true,"internal_ips":["192.0.2.10","2001:db8::10"],"status_code":"NOERROR","timestamp":"2026-11-19T03:39:04.711529705Z","query-time":"4ms"}
+{"host":"api.lab.test","ttl":600,"resolver":["127.0.0.1:5353"],"a":["192.0.2.11"],"has_internal_ips":true,"internal_ips":["192.0.2.11"],"status_code":"NOERROR","timestamp":"2026-11-19T03:39:04.712185315Z","query-time":"4ms"}
+{"host":"app.lab.test","ttl":600,"resolver":["127.0.0.1:5353"],"a":["192.0.2.10"],"aaaa":["2001:db8::10"],"has_internal_ips":true,"internal_ips":["192.0.2.10","2001:db8::10"],"status_code":"NOERROR","timestamp":"2026-11-19T03:39:04.711893301Z","query-time":"5ms"}
+{"host":"lab.test","ttl":600,"resolver":["127.0.0.1:5353"],"mx":["mail.lab.test"],"txt":["v=spf1 -all"],"status_code":"NOERROR","timestamp":"2026-11-19T03:39:04.712405467Z","query-time":"5ms"}

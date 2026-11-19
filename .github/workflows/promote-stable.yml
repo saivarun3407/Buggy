@@ -103,6 +103,7 @@ jobs:
             buggy-cli
             buggy-skillogy
             buggy-egress-guard
+            buggy-pipeline
             buggy-c2-sliver
             buggy-web
           )

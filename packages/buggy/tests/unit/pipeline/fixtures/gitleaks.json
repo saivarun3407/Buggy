@@ -1,0 +1,42 @@
+[
+ {
+  "RuleID": "stripe-access-token",
+  "Description": "Found a Stripe Access Token, posing a risk to payment processing services and sensitive financial data.",
+  "StartLine": 5,
+  "EndLine": 5,
+  "StartColumn": 18,
+  "EndColumn": 74,
+  "Match": "REDACTED\"",
+  "Secret": "REDACTED",
+  "File": "js/app.js",
+  "SymlinkFile": "",
+  "Commit": "",
+  "Entropy": 2.98386,
+  "Author": "",
+  "Email": "",
+  "Date": "",
+  "Message": "",
+  "Tags": [],
+  "Fingerprint": "js/app.js:stripe-access-token:5"
+ },
+ {
+  "RuleID": "aws-access-token",
+  "Description": "Identified a pattern that may indicate AWS credentials, risking unauthorized cloud resource access and data breaches on AWS platforms.",
+  "StartLine": 3,
+  "EndLine": 3,
+  "StartColumn": 29,
+  "EndColumn": 48,
+  "Match": "REDACTED",
+  "Secret": "REDACTED",
+  "File": "js/app.js",
+  "SymlinkFile": "",
+  "Commit": "",
+  "Entropy": 3.4841838,
+  "Author": "",
+  "Email": "",
+  "Date": "",
+  "Message": "",
+  "Tags": [],
+  "Fingerprint": "js/app.js:aws-access-token:3"
+ }
+]

@@ -408,6 +408,7 @@ build-images:
 	docker build -f containers/sandbox.Dockerfile -t buggy-sandbox:stable .
 	docker build -f containers/skillogy.Dockerfile -t buggy-skillogy:stable .
 	docker build -f containers/egress-guard.Dockerfile -t buggy-egress-guard:stable .
+	docker build -f containers/pipeline.Dockerfile -t buggy-pipeline:stable .
 
 ## Scope-enforcement end-to-end test on the real compose topology: starts the
 ## egress guard, the sandbox and two local targets, then proves an

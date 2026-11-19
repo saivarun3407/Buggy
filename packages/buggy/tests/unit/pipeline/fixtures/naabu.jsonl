@@ -1,0 +1,4 @@
+{"ip":"127.0.0.1","timestamp":"2026-11-19T03:42:34.979418812Z","port":8443,"protocol":"tcp","tls":false}
+{"host":"localhost","ip":"127.0.0.1","timestamp":"2026-11-19T03:42:34.979543337Z","port":8443,"protocol":"tcp","tls":false}
+{"ip":"127.0.0.1","timestamp":"2026-11-19T03:42:34.97945728Z","port":3000,"protocol":"tcp","tls":false}
+{"host":"localhost","ip":"127.0.0.1","timestamp":"2026-11-19T03:42:34.979556937Z","port":3000,"protocol":"tcp","tls":false}
