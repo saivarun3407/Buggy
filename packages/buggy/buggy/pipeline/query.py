@@ -17,10 +17,11 @@ from pathlib import Path
 from typing import Any
 
 from buggy.pipeline import service
-from buggy.pipeline.schema import RecordType
+from buggy.pipeline.schema import RecordType, host_of
 from buggy.pipeline.store import ReconStore
 
 MAX_LIMIT = 200
+MAX_SUMMARY_GAPS = 50
 MAX_RAW_LINES = 40
 MAX_RAW_CHARS = 6000
 
@@ -65,10 +66,17 @@ class ReconQueries:
         run = self._store.latest_run(name)
         newest = self._store.latest_run(name, finished_only=False)
         current = newest if newest and newest["status"] == "running" else None
+        gaps = self._store.coverage_gaps(name)
         return {
             "engagement": name,
             "record_types": [t.value for t in RecordType],
             "records": self._store.count_records(name),
+            # Per (asset, stage) stamps. A stage that is not ``complete`` for an
+            # asset found nothing *because it did not finish*, not because the
+            # asset is clean. All zeros: no coverage was recorded at all.
+            "coverage": self._store.coverage_counts(name),
+            "coverage_gaps": gaps[:MAX_SUMMARY_GAPS],
+            "coverage_gap_assets": len({gap["asset"] for gap in gaps}),
             "current_run": (
                 {
                     "run_id": current["id"],
@@ -101,6 +109,38 @@ class ReconQueries:
         name = self._engagement(engagement)
         rows = self._store.list_assets(name, limit=self._limit(limit))
         return {"engagement": name, "assets": rows, "count": len(rows)}
+
+    def coverage(
+        self, engagement: str, asset: str = "", limit: int = MAX_LIMIT, offset: int = 0
+    ) -> dict[str, Any]:
+        """Per asset and stage: complete, partial, failed or skipped, and why.
+
+        Gaps (anything not ``complete``) come first. An asset or stage with no
+        stamp was never processed: that is "not checked", not "clean".
+        """
+        name = self._engagement(engagement)
+        wanted = asset.strip().lower()
+        rows = self._store.coverage(name, asset=wanted or None)
+        if wanted and not rows and host_of(wanted) not in ("", wanted):
+            wanted = host_of(wanted)  # a URL or host:port names its host
+            rows = self._store.coverage(name, asset=wanted)
+        rows.sort(key=lambda row: (row["status"] == "complete", row["asset"], row["stage"]))
+        counts = {"complete": 0, "partial": 0, "failed": 0, "skipped": 0}
+        for row in rows:
+            if row["status"] in counts:
+                counts[row["status"]] += 1
+        capped, start = self._limit(limit), max(0, int(offset))
+        page = rows[start : start + capped]
+        truncated = start + capped < len(rows)
+        return {
+            "engagement": name,
+            "asset": wanted,
+            "counts": counts,
+            "coverage": page,
+            "total": len(rows),
+            "truncated": truncated,
+            "next_offset": start + capped if truncated else None,
+        }
 
     def query(
         self,
@@ -236,4 +276,4 @@ class ReconQueries:
         }
 
 
-__all__ = ["MAX_LIMIT", "QueryError", "ReconQueries"]
+__all__ = ["MAX_LIMIT", "MAX_SUMMARY_GAPS", "QueryError", "ReconQueries"]

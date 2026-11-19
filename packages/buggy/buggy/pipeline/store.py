@@ -15,6 +15,8 @@ Tables
 ``stage_cache``    which (stage, input) was processed, against what input hash
 ``raw_outputs``    registry of raw tool-output files (path, sha256, argv)
 ``rerun_requests`` agent requests to re-run the pipeline for one asset
+``coverage``       per (asset, stage): did the stage complete, partly complete,
+                   fail or get skipped — so "no result" is never read as "clean"
 """
 
 from __future__ import annotations
@@ -152,7 +154,23 @@ CREATE TABLE IF NOT EXISTS rerun_requests (
     run_id TEXT
 );
 CREATE INDEX IF NOT EXISTS rerun_status ON rerun_requests (status, requested_at);
+
+CREATE TABLE IF NOT EXISTS coverage (
+    engagement TEXT NOT NULL,
+    asset TEXT NOT NULL,
+    stage TEXT NOT NULL,
+    status TEXT NOT NULL,
+    detail TEXT NOT NULL DEFAULT '',
+    run_id TEXT NOT NULL DEFAULT '',
+    updated_at REAL NOT NULL,
+    PRIMARY KEY (engagement, asset, stage)
+);
+CREATE INDEX IF NOT EXISTS coverage_status ON coverage (engagement, status);
 """
+
+#: What a coverage stamp can say about one asset in one stage.
+COVERAGE_STATUSES = ("complete", "partial", "failed", "skipped")
+MAX_COVERAGE_DETAIL = 500
 
 _RECORD_COLUMNS = (
     "id, engagement, asset, type, value, attrs, source_tool, tool_version, first_seen, "
@@ -707,6 +725,121 @@ class ReconStore:
         data["argv"] = json.loads(data.get("argv") or "[]")
         return data
 
+    # ── coverage stamps ──────────────────────────────────────────────
+
+    def set_coverage(
+        self,
+        engagement: str,
+        asset: str,
+        stage: str,
+        status: str,
+        detail: str = "",
+        run_id: str = "",
+    ) -> None:
+        """Stamp one asset for one stage; replaces the previous stamp."""
+        self.stamp_coverage(engagement, stage, {asset: (status, detail)}, run_id)
+
+    def stamp_coverage(
+        self,
+        engagement: str,
+        stage: str,
+        stamps: dict[str, tuple[str, str]],
+        run_id: str = "",
+        *,
+        keep_complete: bool = False,
+    ) -> int:
+        """Stamp ``{asset: (status, detail)}`` for one stage in one transaction.
+
+        With ``keep_complete`` an asset whose stamp is already ``complete`` is
+        left alone: used when a stage is skipped this run but its earlier
+        result is still in the store. Returns how many stamps were written.
+        """
+        if not stage:
+            raise ValueError("coverage stage is required")
+        for asset, (status, _detail) in stamps.items():
+            if not asset:
+                raise ValueError("coverage asset is required")
+            if status not in COVERAGE_STATUSES:
+                raise ValueError(
+                    f"coverage status must be one of {COVERAGE_STATUSES}, not {status!r}"
+                )
+        now = time.time()
+        written = 0
+        with self._tx() as cur:
+            for asset, (status, detail) in stamps.items():
+                if keep_complete:
+                    row = cur.execute(
+                        "SELECT status FROM coverage WHERE engagement = ? AND asset = ? "
+                        "AND stage = ?",
+                        (engagement, asset, stage),
+                    ).fetchone()
+                    if row is not None and row["status"] == "complete":
+                        continue
+                cur.execute(
+                    "INSERT OR REPLACE INTO coverage (engagement, asset, stage, status, detail, "
+                    "run_id, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?)",
+                    (
+                        engagement,
+                        asset,
+                        stage,
+                        status,
+                        str(detail or "")[:MAX_COVERAGE_DETAIL],
+                        run_id,
+                        now,
+                    ),
+                )
+                written += 1
+        return written
+
+    def clear_coverage(self, engagement: str, asset: str, stage: str) -> int:
+        """Drop the stamp of an asset that is no longer an input of ``stage``."""
+        with self._tx() as cur:
+            cur.execute(
+                "DELETE FROM coverage WHERE engagement = ? AND asset = ? AND stage = ?",
+                (engagement, asset, stage),
+            )
+            return cur.rowcount
+
+    def _coverage_rows(self, where: str, params: list[Any], order: str) -> list[dict[str, Any]]:
+        try:
+            rows = self._db.execute(
+                "SELECT asset, stage, status, detail, run_id, updated_at FROM coverage "  # noqa: S608
+                f"WHERE {where} ORDER BY {order}",
+                params,
+            ).fetchall()
+        except sqlite3.OperationalError as exc:
+            if "no such table" in str(exc):
+                return []  # a store written before coverage stamps existed: nothing recorded
+            raise
+        return [dict(row) for row in rows]
+
+    def coverage(
+        self, engagement: str, *, asset: str | None = None, stage: str | None = None
+    ) -> list[dict[str, Any]]:
+        """Every stamp of the engagement, optionally for one asset and/or one stage."""
+        clauses, params = ["engagement = ?"], [engagement]
+        if asset:
+            clauses.append("asset = ?")
+            params.append(asset)
+        if stage:
+            clauses.append("stage = ?")
+            params.append(stage)
+        return self._coverage_rows(" AND ".join(clauses), params, "asset, stage")
+
+    def coverage_gaps(self, engagement: str) -> list[dict[str, Any]]:
+        """Stamps that are not ``complete``: what was not (fully) checked, and why."""
+        return self._coverage_rows(
+            "engagement = ? AND status != 'complete'", [engagement], "stage, asset"
+        )
+
+    def coverage_counts(self, engagement: str) -> dict[str, int]:
+        """Number of stamps per status; every status is present, zero included."""
+        counts = dict.fromkeys(COVERAGE_STATUSES, 0)
+        for row in self.coverage(engagement):
+            if row["status"] in counts:
+                counts[row["status"]] += 1
+        return counts
+
     # ── re-run requests ──────────────────────────────────────────────
 
     def add_rerun_request(
@@ -766,4 +899,4 @@ class ReconStore:
         return dict(row) if row else None
 
 
-__all__ = ["ReconStore", "StoreError"]
+__all__ = ["COVERAGE_STATUSES", "ReconStore", "StoreError"]

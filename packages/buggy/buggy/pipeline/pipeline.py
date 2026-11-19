@@ -10,7 +10,10 @@ Each stage follows the same shape:
 4. run the tools on what is left;
 5. parse, then filter the *outputs* against the scope (``direction="output"``);
 6. write the survivors, with the raw-output reference, and mark the inputs
-   processed (which also retires records they no longer produce).
+   processed (which also retires records they no longer produce);
+7. stamp every input asset it handled with how the stage went for it
+   (``complete`` / ``partial`` / ``failed`` / ``skipped`` and why), so a
+   stage that did not finish is never read as "nothing found".
 
 There is no model call anywhere on this path.
 """
@@ -57,6 +60,23 @@ from buggy.pipeline.tools.subfinder import Subfinder
 log = logging.getLogger("buggy.pipeline")
 
 STAGES = ("enumerate", "dns", "live", "fingerprint", "urls", "apispec", "issues")
+
+# The live stage does two separate things to a host: the port scan (naabu) and
+# the HTTP probe (httpx). Program rules can turn the first off while the second
+# runs, so the port scan gets its own coverage stamp next to the stage's.
+COVERAGE_PORT = "port"
+COVERAGE_STAGES = (
+    "enumerate",
+    "dns",
+    COVERAGE_PORT,
+    "live",
+    "fingerprint",
+    "urls",
+    "apispec",
+    "issues",
+)
+PORT_SCAN_DISABLED = "port scan disabled by program rules"
+STAGE_DISABLED = "disabled by program rules"
 
 # Stages whose records are retired when a re-processed input stops reporting
 # them. Discovery stages (subdomains, URLs) only accumulate.
@@ -110,6 +130,41 @@ def _hash(*parts: Any) -> str:
 def _origin(url: str) -> str:
     parts = urlsplit(url)
     return f"{parts.scheme}://{parts.netloc}"
+
+
+@dataclass(frozen=True, slots=True)
+class ToolOutcome:
+    """How one tool went in a stage, for the assets it was run on."""
+
+    tool: str
+    status: str  # complete | partial | failed | skipped
+    detail: str = ""
+    assets: frozenset[str] | None = None  # None: every asset the stage handled
+
+
+def grade(asset: str, outcomes: Iterable[ToolOutcome]) -> tuple[str, str]:
+    """``(status, detail)`` of one asset in one stage, from the tools run on it.
+
+    * every tool returned and was parsed          -> ``complete``
+    * every tool was held back by program rules   -> ``skipped`` (the reason)
+    * no tool produced anything usable            -> ``failed`` (tool: why)
+    * anything in between                         -> ``partial`` (tool: why)
+    """
+    relevant = [o for o in outcomes if o.assets is None or asset in o.assets]
+    if not relevant:
+        return "skipped", "no tool ran on this asset"
+    statuses = {o.status for o in relevant}
+    if statuses == {"complete"}:
+        return "complete", ""
+    if statuses == {"skipped"}:
+        return "skipped", "; ".join(dict.fromkeys(o.detail or o.tool for o in relevant))
+    notes = [
+        f"{o.tool}: skipped ({o.detail})" if o.status == "skipped" else f"{o.tool}: {o.detail}"
+        for o in relevant
+        if o.status != "complete"
+    ]
+    status = "failed" if statuses <= {"failed", "skipped"} else "partial"
+    return status, "; ".join(dict.fromkeys(notes))
 
 
 @dataclass
@@ -185,6 +240,10 @@ class Pipeline:
         self._js_sources: dict[str, str] = {}
         self._processed_services: list[str] = []
         self._tool_versions: dict[str, str] = {}
+        # Coverage bookkeeping, reset for every stage.
+        self._outcomes: list[ToolOutcome] = []
+        self._handled: list[str] = []
+        self._live_grades: dict[str, tuple[str, str]] = {}
 
     # ── entry point ─────────────────────────────────────────────────
 
@@ -204,19 +263,24 @@ class Pipeline:
             "apispec": self._stage_apispec,
             "issues": self._stage_issues,
         }
+        current = ""
         try:
             done: list[str] = []
             for stage in STAGES:
                 stats = self.stats.setdefault(stage, StageStats())
+                current, self._outcomes, self._handled = stage, [], []
                 if stage in self.scope.limits.disabled_stages:
-                    stats.skipped = "disabled by program rules"
+                    stats.skipped = STAGE_DISABLED
+                    self._stamp_skipped(stage, STAGE_DISABLED)
                     continue
                 self.store.set_run_progress(self.run_id, stage=stage, done=list(done))
                 handlers[stage](stats)
+                self._stamp_stage(stage)
                 done.append(stage)
         except Exception as exc:  # noqa: BLE001 - the run is closed as failed, then re-raised
             status, error = "failed", f"{type(exc).__name__}: {exc}"
             log.exception("pipeline run %s failed", self.run_id)
+            self._stamp_run_failure(current, error)
             raise
         finally:
             summary = {
@@ -271,6 +335,7 @@ class Pipeline:
         """``{input_key: input_hash}`` that must be processed this run."""
         stats.inputs += len(candidates)
         self._retire_vanished(stage, stats, candidates)
+        self._prune_coverage(stage, candidates)
         pending: dict[str, str] = {}
         now = time.time()
         for key, input_hash in candidates.items():
@@ -285,7 +350,121 @@ class Pipeline:
             else:
                 pending[key] = input_hash
         stats.processed += len(pending)
+        self._handled = list(pending)
         return pending
+
+    # ── coverage stamps ─────────────────────────────────────────────
+
+    def _note(
+        self, tool: str, status: str, detail: str = "", assets: Iterable[str] | None = None
+    ) -> None:
+        """Record how ``tool`` went, for every handled asset or just ``assets``."""
+        scoped = None if assets is None else frozenset(assets)
+        self._outcomes.append(ToolOutcome(tool, status, detail, scoped))
+
+    def _note_requests(self, tool: str, tally: dict[str, list[int]]) -> None:
+        """One outcome per asset from ``{asset: [requests sent, transport errors]}``."""
+        for asset, (sent, errors) in tally.items():
+            if errors == 0:
+                self._note(tool, "complete", assets=[asset])
+            elif errors >= sent:
+                self._note(tool, "failed", f"no response to {sent} request(s)", assets=[asset])
+            else:
+                self._note(
+                    tool, "partial", f"{errors} of {sent} requests got no response", assets=[asset]
+                )
+
+    def _stamp(
+        self, stage: str, assets: Iterable[str], outcomes: Iterable[ToolOutcome]
+    ) -> dict[str, tuple[str, str]]:
+        outcomes = list(outcomes)
+        stamps = {asset: grade(asset, outcomes) for asset in assets}
+        if stamps:
+            self.store.stamp_coverage(self.engagement, stage, stamps, self.run_id)
+        return stamps
+
+    def _stamp_stage(self, stage: str) -> None:
+        """Stamp the assets this stage processed in this run.
+
+        Inputs skipped by the cache are not in ``_handled``, so they keep the
+        stamp of the run that last processed them.
+        """
+        if stage == "fingerprint":
+            return  # stamped by the handler: its inputs are the live probe's
+        assets = sorted({_asset(key) for key in self._handled})
+        if stage == "live":
+            self._stamp(COVERAGE_PORT, assets, (o for o in self._outcomes if o.tool == Naabu.name))
+            self._live_grades = self._stamp(
+                "live", assets, (o for o in self._outcomes if o.tool == Httpx.name)
+            )
+            return
+        self._stamp(stage, assets, self._outcomes)
+
+    def _stamp_skipped(self, stage: str, reason: str) -> None:
+        """Stamp a stage that program rules kept from running at all.
+
+        An asset whose stamp is already ``complete`` keeps it: the earlier
+        result is still in the store, exactly as for a cached input.
+        """
+        stamps = dict.fromkeys(self._stage_assets(stage), ("skipped", reason))
+        if not stamps:
+            return
+        for name in (COVERAGE_PORT, stage) if stage == "live" else (stage,):
+            self.store.stamp_coverage(
+                self.engagement, name, stamps, self.run_id, keep_complete=True
+            )
+
+    def _stamp_run_failure(self, stage: str, error: str) -> None:
+        """The run died inside ``stage``: its inputs were not checked."""
+        assets = sorted({_asset(key) for key in self._handled})
+        if not stage or not assets:
+            return
+        failed = dict.fromkeys(assets, ("failed", f"run failed: {error}"[:300]))
+        try:
+            if stage == "live":
+                scans = [o for o in self._outcomes if o.tool == Naabu.name]
+                if scans:
+                    self._stamp(COVERAGE_PORT, assets, scans)
+                else:
+                    self.store.stamp_coverage(self.engagement, COVERAGE_PORT, failed, self.run_id)
+            self.store.stamp_coverage(self.engagement, stage, failed, self.run_id)
+        except Exception:  # noqa: BLE001 - never mask the error that failed the run
+            log.exception("pipeline: could not stamp coverage for failed stage %s", stage)
+
+    def _prune_coverage(self, stage: str, candidates: Iterable[str]) -> None:
+        """Drop stamps of assets that are no longer inputs of ``stage``.
+
+        A host that stopped resolving or left the scope is not a gap in what
+        was checked; keeping its stamp would list it as one for ever.
+        """
+        current = {_asset(key) for key in candidates}
+        for name in (COVERAGE_PORT, stage) if stage == "live" else (stage,):
+            for row in self.store.coverage(self.engagement, stage=name):
+                asset = row["asset"]
+                if asset in current or "/" in asset:  # "/" marks a repository, not a host
+                    continue
+                if self._wanted(asset):  # an --asset run only speaks for that asset
+                    self.store.clear_coverage(self.engagement, asset, name)
+
+    def _stage_assets(self, stage: str) -> list[str]:
+        """The assets ``stage`` would take as input, from what the store holds now."""
+        if stage == "enumerate":
+            return sorted(self._enumeration_roots())
+        if stage == "dns":
+            hosts = {
+                record.asset
+                for record in self._records(RecordType.SUBDOMAIN)
+                if self._wanted(record.asset) and not _is_address(record.asset)
+            }
+        elif stage in ("live", "fingerprint"):
+            hosts = set(self._resolving_hosts())
+        else:
+            hosts = {
+                record.asset
+                for record in self._records(RecordType.HTTP_SERVICE)
+                if self._wanted(record.asset)
+            }
+        return sorted(host for host in hosts if self.scope.allows(host))
 
     def _retire_vanished(self, stage: str, stats: StageStats, candidates: dict[str, str]) -> None:
         """Retire a stage's records for inputs that are no longer candidates.
@@ -354,12 +533,18 @@ class Pipeline:
         inputs: list[str],
         *,
         scope_inputs: bool = True,
+        assets: Iterable[str] | None = None,
     ) -> tuple[str, str, str]:
-        """Run one scanner. Returns ``(raw_text, raw_ref, version)``; raw is "" on failure."""
+        """Run one scanner. Returns ``(raw_text, raw_ref, version)``; raw is "" on failure.
+
+        How the run went is noted for the coverage stamps: for every asset
+        the stage handles, or for ``assets`` only when given.
+        """
         name = wrapper.name
         entry = stats.tools.setdefault(name, {})
         if self.scope.limits.passive_only and not wrapper.passive:
             entry["skipped"] = "passive_only"
+            self._note(name, "skipped", "passive_only", assets)
             return "", "", ""
         if scope_inputs:
             inputs = self.scope.admit(inputs, stage=stage, tool=name, direction="input")
@@ -371,6 +556,7 @@ class Pipeline:
         except versions.ToolVersionError as exc:
             entry["error"] = str(exc)
             log.error("pipeline: %s unavailable: %s", name, exc)
+            self._note(name, "failed", str(exc)[:200], assets)
             return "", "", ""
         self._tool_versions[name] = version
         invocation = wrapper.invocation(binary, inputs, self.scope.limits, self._workdir())
@@ -403,6 +589,17 @@ class Pipeline:
             entry["error"] = "timed out"
         elif result.exit_code not in (0, None) and result.size == 0:
             entry["error"] = result.stderr_tail[-300:] or f"exit {result.exit_code}"
+        problem = ""
+        if result.timed_out:
+            problem = "timed out"
+        elif result.exit_code not in (0, None):
+            problem = f"exit {result.exit_code}"
+        if not problem:
+            self._note(name, "complete", assets=assets)
+        elif result.size > 0:
+            self._note(name, "partial", f"{problem}, output may be incomplete", assets)
+        else:
+            self._note(name, "failed", f"{problem}, no output", assets)
         try:
             raw = raw_path.read_text(encoding="utf-8", errors="replace")
         except OSError:
@@ -460,13 +657,7 @@ class Pipeline:
         ]
         if explicit:
             self._store("enumerate", stats, "scope", explicit, version="", raw_ref="")
-        roots = {
-            root: _hash(root, self.scope.digest)
-            for root in seeds.roots
-            if not self.only_asset
-            or self.only_asset == root
-            or self.only_asset.endswith("." + root)
-        }
+        roots = {root: _hash(root, self.scope.digest) for root in self._enumeration_roots()}
         pending = self._pending("enumerate", stats, roots)
         if not pending:
             return
@@ -492,7 +683,9 @@ class Pipeline:
             entry = stats.tools.setdefault(crtsh.NAME, {"version": versions.BUILTIN_VERSION})
             if body is None:
                 entry["error"] = "crt.sh unreachable"
+                self._note(crtsh.NAME, "failed", "crt.sh unreachable", [root])
                 continue
+            self._note(crtsh.NAME, "complete", assets=[root])
             text = body.decode("utf-8", "replace")
             ref = self._save_raw("enumerate", f"{crtsh.NAME}-{root}", text, "json")
             self._store(
@@ -504,6 +697,16 @@ class Pipeline:
                 raw_ref=ref,
             )
         self._complete("enumerate", stats, pending)
+
+    def _enumeration_roots(self) -> list[str]:
+        """Enumeration roots selected by ``only_asset`` (all of them without it)."""
+        return [
+            root
+            for root in self.scope.seeds().roots
+            if not self.only_asset
+            or self.only_asset == root
+            or self.only_asset.endswith("." + root)
+        ]
 
     @staticmethod
     def _root_of(host: str, roots: list[str]) -> str:
@@ -588,9 +791,8 @@ class Pipeline:
                     raw_ref=ref,
                 )
         else:
-            stats.tools.setdefault(naabu.name, {})["skipped"] = (
-                "port scan disabled by program rules"
-            )
+            stats.tools.setdefault(naabu.name, {})["skipped"] = PORT_SCAN_DISABLED
+            self._note(naabu.name, "skipped", PORT_SCAN_DISABLED)
 
         # A target the operator gave as a URL names its own port; probe it even
         # when the port scan is off or did not cover that port.
@@ -630,6 +832,13 @@ class Pipeline:
         stats.processed += len(inputs)
         if hasattr(self, "_live_candidates"):  # absent when the live stage did not run
             self._retire_vanished("fingerprint", stats, self._live_candidates)
+            self._prune_coverage("fingerprint", self._live_candidates)
+        # Fingerprints are read off the live probe, so their coverage is the
+        # probe's: skipped, failed or partial there means the same here.
+        if self._live_grades:
+            self.store.stamp_coverage(
+                self.engagement, "fingerprint", self._live_grades, self.run_id
+            )
         if not inputs:
             return
         ref, version = self._httpx_ref
@@ -692,9 +901,12 @@ class Pipeline:
         entry = stats.tools.setdefault(jsparse.NAME, {"version": versions.BUILTIN_VERSION})
         if self.scope.limits.passive_only:
             entry["skipped"] = "passive_only"
+            self._note(jsparse.NAME, "skipped", "passive_only")
             return
         js_files = [r for r in self._records(RecordType.JS_FILE) if r.asset in hosts][:MAX_JS_FILES]
+        tally: dict[str, list[int]] = {host: [0, 0] for host in hosts}
         if not js_files:
+            self._note_requests(jsparse.NAME, tally)
             return
         client = self._http("urls", jsparse.NAME)
         js_dir = self._workdir() / "js"
@@ -707,7 +919,11 @@ class Pipeline:
                 response = client.get(record.value)
             except OutOfScopeRequest:
                 continue
-            if response is None or response.status != 200 or not response.body:
+            tally[record.asset][0] += 1
+            if response is None:  # transport error: the script was not read
+                tally[record.asset][1] += 1
+                continue
+            if response.status != 200 or not response.body:
                 continue
             fetched += 1
             body = response.body[:MAX_JS_BYTES]
@@ -739,6 +955,7 @@ class Pipeline:
                     )
                 )
         entry["fetched"] = fetched
+        self._note_requests(jsparse.NAME, tally)
         if pairs:
             ref = self._save_raw("urls", jsparse.NAME, "\n".join(lines) + "\n")
             self._store(
@@ -750,6 +967,7 @@ class Pipeline:
     def _stage_apispec(self, stats: StageStats) -> None:
         if self.scope.limits.passive_only:
             stats.skipped = "passive_only"
+            self._stamp_skipped("apispec", "passive_only")
             return
         origins: dict[str, str] = {}
         for record in self._records(RecordType.HTTP_SERVICE):
@@ -774,7 +992,11 @@ class Pipeline:
         gql_lines: list[str] = []
         spec_records: list[tuple[Record, str]] = []
         gql_records: list[tuple[Record, str]] = []
+        spec_tally: dict[str, list[int]] = {}
+        gql_tally: dict[str, list[int]] = {}
         for origin in pending:
+            spec_sent = spec_tally.setdefault(_asset(origin), [0, 0])
+            gql_sent = gql_tally.setdefault(_asset(origin), [0, 0])
             spec_urls = [origin + path for path in apispec.OPENAPI_PATHS]
             gql_urls = [origin + path for path in apispec.GRAPHQL_PATHS]
             for url in discovered:
@@ -795,7 +1017,11 @@ class Pipeline:
                     response = client.get(url)
                 except OutOfScopeRequest:
                     continue
-                if response is None or response.status != 200:
+                spec_sent[0] += 1
+                if response is None:  # transport error: this path was not checked
+                    spec_sent[1] += 1
+                    continue
+                if response.status != 200:
                     continue
                 spec = apispec.load_spec(response.text())
                 if spec is None:
@@ -809,7 +1035,11 @@ class Pipeline:
                     response = gql_client.post_json(url, {"query": apispec.INTROSPECTION_QUERY})
                 except OutOfScopeRequest:
                     continue
-                if response is None or response.status != 200:
+                gql_sent[0] += 1
+                if response is None:  # transport error: this path was not checked
+                    gql_sent[1] += 1
+                    continue
+                if response.status != 200:
                     continue
                 try:
                     body = response.json()
@@ -822,6 +1052,8 @@ class Pipeline:
                     break
         stats.tools.setdefault(apispec.OPENAPI_TOOL, {})["requests"] = client.requests_sent
         stats.tools.setdefault(apispec.GRAPHQL_TOOL, {})["requests"] = gql_client.requests_sent
+        self._note_requests(apispec.OPENAPI_TOOL, spec_tally)
+        self._note_requests(apispec.GRAPHQL_TOOL, gql_tally)
         if spec_records:
             ref = self._save_raw("apispec", apispec.OPENAPI_TOOL, "\n".join(spec_lines) + "\n")
             self._store(
@@ -878,7 +1110,12 @@ class Pipeline:
         js_dir = self._workdir() / "js"
         if self._js_sources and js_dir.is_dir():
             raw, ref, version = self._run_binary(
-                "issues", stats, gitleaks, ["dir", str(js_dir)], scope_inputs=False
+                "issues",
+                stats,
+                gitleaks,
+                ["dir", str(js_dir)],
+                scope_inputs=False,
+                assets={host_of(url) for url in self._js_sources.values()},
             )
             if ref:
                 self._store(
@@ -920,10 +1157,15 @@ class Pipeline:
         )
         if clone.returncode != 0:
             entry.setdefault("errors", []).append(f"{repo}: {clone.stderr.strip()[-200:]}")
+            self.store.set_coverage(
+                self.engagement, asset, "issues", "failed", "git clone failed", self.run_id
+            )
             return
         raw, ref, version = self._run_binary(
-            "issues", stats, gitleaks, ["git", str(target)], scope_inputs=False
+            "issues", stats, gitleaks, ["git", str(target)], scope_inputs=False, assets=[asset]
         )
+        # The repository is its own asset: stamp it from this one scan.
+        self._stamp("issues", [asset], [o for o in self._outcomes if o.assets == {asset}])
         if ref:
             written = self.store.write_records(
                 self.run_id,
@@ -971,4 +1213,19 @@ def canonical_asset(value: str) -> str:
     return host_of(normalize_url(value) if "://" in value else value)
 
 
-__all__ = ["DEFAULT_MAX_AGE", "STAGES", "Pipeline", "canonical_asset", "default_executor"]
+def _asset(key: str) -> str:
+    """The asset a stage input (root, host, URL or origin) belongs to."""
+    return canonical_asset(key) or key
+
+
+__all__ = [
+    "COVERAGE_PORT",
+    "COVERAGE_STAGES",
+    "DEFAULT_MAX_AGE",
+    "STAGES",
+    "Pipeline",
+    "ToolOutcome",
+    "canonical_asset",
+    "default_executor",
+    "grade",
+]

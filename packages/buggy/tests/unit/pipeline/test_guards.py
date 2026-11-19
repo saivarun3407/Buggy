@@ -253,6 +253,10 @@ class TestAgentQuerySurface:
         q, _queue, run = queries
         summary = q.summary("acme")
         assert summary["records"] == {"http_service": 260} and summary["last_run"]["run_id"] == run
+        # No stage stamped anything in this fixture: zero everywhere, which the
+        # report renders as "not recorded", never as "nothing missed".
+        assert summary["coverage"] == {"complete": 0, "partial": 0, "failed": 0, "skipped": 0}
+        assert summary["coverage_gaps"] == [] and summary["coverage_gap_assets"] == 0
         page = q.query("acme", record_type="http_service", limit=10_000)
         assert len(page["records"]) == 200 and page["truncated"] and page["next_offset"] == 200
         rest = q.query("acme", record_type="http_service", offset=200, limit=200)
