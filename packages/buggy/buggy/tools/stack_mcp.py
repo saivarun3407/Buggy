@@ -26,6 +26,7 @@ from __future__ import annotations
 import asyncio
 import json
 import os
+import threading
 from typing import Any
 
 from langchain_core.tools import tool
@@ -97,6 +98,32 @@ async def call_mcp(server: str, tool_name: str, arguments: dict[str, Any]) -> st
         return json.dumps(
             {"error": f"{server} server call failed: {type(exc).__name__}: {str(exc)[:300]}"}
         )
+
+
+def call_mcp_sync(server: str, tool_name: str, arguments: dict[str, Any]) -> dict[str, Any]:
+    """Blocking :func:`call_mcp` for synchronous callers; always returns a dict.
+
+    Runs the call on its own thread and event loop, so it is safe to use from
+    code that may or may not already be inside a running loop.
+    """
+    box: dict[str, Any] = {}
+
+    def run() -> None:
+        try:
+            box["text"] = asyncio.run(call_mcp(server, tool_name, arguments))
+        except Exception as exc:  # noqa: BLE001 - reported to the caller as data
+            box["text"] = json.dumps({"error": f"{type(exc).__name__}: {str(exc)[:300]}"})
+
+    thread = threading.Thread(target=run, name=f"mcp-{server}-{tool_name}", daemon=True)
+    thread.start()
+    thread.join(CALL_TIMEOUT_SECONDS + 5)
+    if thread.is_alive():
+        return {"error": f"{server} server call timed out"}
+    try:
+        parsed = json.loads(box.get("text") or "{}")
+    except ValueError:
+        return {"error": f"{server} server returned a non-JSON result"}
+    return parsed if isinstance(parsed, dict) else {"result": parsed}
 
 
 async def _engagement_call(server: str, tool_name: str, **arguments: Any) -> str:
@@ -257,7 +284,9 @@ async def scope_check(target: str) -> str:
 
 @tool
 async def program_info() -> str:
-    """The bounty program's official scope data and rules as imported by the operator."""
+    """The bounty program's official scope data and binding rules, as imported by the operator:
+    rate limit, banned techniques (no DoS, no social engineering, no data exfiltration beyond
+    proof), excluded classes, and what a finding must contain. Read it before testing."""
     return await _engagement_call("scope", "program_info")
 
 

@@ -440,3 +440,22 @@ records the outcome and learnings to Neo4j through `kg_recorder` (off the event 
 - **Reconciliation is never prompted.** No prompt tells the exploit agent to call `reconcile_sast_to_queue`, and `queue_is_actionable` is advisory only.
 - **KG dedup is weak.** The canonical key never gets a vuln class from the recorder. `normalize_host` splits on `@` before the path. An empty target merges every finding with the same title.
 - **Devin delegation** runs completely outside the envelope.
+
+## 15. Deterministic services (bug-bounty path)
+
+Rule: anything a tool can do deterministically is code, not an agent. Agents
+query structured results and spend tokens on choosing, chaining and judging.
+
+| Service | What it does | Agent access | Doc |
+|---|---|---|---|
+| `egress-guard` | Network scope enforcement outside the sandbox (nftables + DNS proxy), drop ledger | none | `docs/security/scope-enforcement.md` |
+| `pipeline` | Recon stages as pinned tools, scope-filtered in and out, one record schema, cache and diff | none | `docs/pipeline.md` |
+| `pipeline-mcp` | Read-only queries over the recon store; re-run request for a named in-scope asset | `recon_*` | `docs/pipeline.md` |
+| `capture-mcp` | Evidence gateway (scope, approval, rate limit, record, replay) and deterministic probes | `http_*`, `capture_verify`, `probe_*` | `docs/evidence-and-probes.md` |
+| `scope-mcp` | Enforced scope and imported program rules | `scope_*`, `program_info` | `docs/evidence-and-probes.md` |
+| `browser-mcp` | Chromium with a per-request scope check | `browser_*` | `docs/evidence-and-probes.md` |
+| `operator` (profile) | The only writer of the control root: scope import/approve, approvals | none | `docs/bounty-programs.md` |
+
+Capability baseline against local vulnerable apps: `benchmark/lab/README.md`.
+Real programs (official scope import, enforce-only, approvals, finding
+requirements): `docs/bounty-programs.md`.

@@ -77,6 +77,7 @@ from buggy.middleware._command_targets import extract_targets
 from buggy.middleware._control import (
     audit_dir,
     audit_root,
+    control_dir,
     control_roe_path,
     workspace_roe_path,
 )
@@ -412,6 +413,28 @@ def _egress_refused_message(detail: str, tool_name: str, tool_call_id: str | Non
     return ToolMessage(content=body, tool_call_id=tool_call_id or "", status="error")
 
 
+def _program_refused_message(detail: str, tool_name: str, tool_call_id: str | None) -> ToolMessage:
+    body = (
+        f"[ROE_REFUSED] code=PROGRAM_REQUIRES_ENFORCE tool={tool_name}\n"
+        f"reason: {detail}\n\n"
+        "This gated call was NOT executed. Stop and report this to the operator; "
+        "the scope must be re-imported with `buggy-cli scope import`."
+    )
+    return ToolMessage(content=body, tool_call_id=tool_call_id or "", status="error")
+
+
+def _program_mode_error(state, rules: MachineEnforcement) -> str | None:
+    """Why a bounty-program engagement may not run under the loaded policy."""
+    from buggy.program.gate import mode_error  # noqa: PLC0415
+    from buggy.program.record import load_program  # noqa: PLC0415
+
+    get = _state_getter(state)
+    directory = control_dir(get("workspace_path") or None, get("engagement_name") or None)
+    if directory is None:
+        return None
+    return mode_error(load_program(directory.parent, directory.name), rules.mode.value)
+
+
 class RoEGuardrailMiddleware(AgentMiddleware):
     """Evaluate every bash tool call against the engagement's RoE.
 
@@ -658,6 +681,21 @@ class RoEGuardrailMiddleware(AgentMiddleware):
         state = getattr(request, "state", {}) or {}
         if not recorded and _roe_required():
             return _audit_refused_message(tool_name, _tcid(request))
+        program_error = _program_mode_error(state, rules)
+        if program_error is not None:
+            self._append_audit(
+                state,
+                {
+                    "ts": time.time(),
+                    "event": "program_mode_refused",
+                    "engagement": _state_getter(state)("engagement_name") or "unknown-engagement",
+                    "tool": tool_name,
+                    "decision": "refuse",
+                    "reason_code": "PROGRAM_REQUIRES_ENFORCE",
+                    "reason_detail": program_error,
+                },
+            )
+            return _program_refused_message(program_error, tool_name, _tcid(request))
         try:
             self._ensure_egress(state, rules)
         except EgressProvisioningError as exc:

@@ -12,12 +12,15 @@ empty graph and the agent can recover.
 from __future__ import annotations
 
 import json
+import os
 import re
 from pathlib import Path
 from typing import Any
 
 from langchain_core.tools import tool
 
+from buggy.program.gate import MIN_REMEDIATION_CHARS, Verifier, finding_errors, report_release
+from buggy.program.record import load_program
 from buggy.tools.proxy.tools import CaidoClient, CaidoError
 from buggy.tools.reporting.bugcrowd import render_bugcrowd_csv
 from buggy.tools.reporting.corroboration_gate import CorroborationProvider, corroboration_verdict
@@ -32,10 +35,16 @@ from buggy.tools.reporting.kg_adapter import (
     persist_closure_state,
     publish_finding_node,
 )
-from buggy.tools.reporting.proof_gate import proof_gate_strict, verify_finding
+from buggy.tools.reporting.proof_gate import (
+    LIVE_EVIDENCE_REQUIRED_ERROR,
+    GateResult,
+    proof_gate_strict,
+    verify_finding,
+)
 from buggy.tools.reporting.sarif import render_sarif
 from buggy.tools.reporting.timeline import extract_timeline
-from buggy_core.types.kg import KnowledgeGraph
+from buggy.tools.stack_mcp import call_mcp_sync
+from buggy_core.types.kg import KnowledgeGraph, NodeKind
 from buggy_core.utils.engagement_scope import get_active_engagement
 from buggy_core.utils.env import env_flag
 
@@ -62,6 +71,112 @@ def _json(data: Any) -> str:
     return json.dumps(data, indent=2, default=str, ensure_ascii=False)
 
 
+# ── bounty-program rules (buggy.program) ─────────────────────────────
+
+
+def _control_root() -> Path:
+    return Path(os.environ.get("BUGGY_CONTROL_ROOT") or "/control")
+
+
+def _audit_root() -> Path:
+    return Path(os.environ.get("BUGGY_AUDIT_ROOT") or "/audit")
+
+
+def _active_program() -> tuple[str, dict[str, Any] | None]:
+    """``(engagement, program record)``; the record is ``None`` off-program."""
+    engagement = get_active_engagement() or ""
+    if not engagement:
+        return "", None
+    return engagement, load_program(_control_root(), engagement)
+
+
+_SAFE_REPLAY_METHODS = frozenset({"GET", "HEAD", "OPTIONS"})
+
+
+def gateway_verifier(engagement: str) -> Verifier:
+    """Verify a cited capture against the evidence gateway.
+
+    The capture must exist for this engagement, target the cited host, and be
+    in the enforced scope. A request that cannot change state is also re-sent
+    once and must give the same status. A state-changing request is not
+    re-sent automatically: replaying it is the operator's decision.
+    """
+
+    def verify(capture_id: str, target: str) -> dict[str, Any]:
+        checked = call_mcp_sync(
+            "capture",
+            "capture_verify",
+            {"engagement": engagement, "capture_id": capture_id, "expect_host": target},
+        )
+        if checked.get("error"):
+            return {"valid": False, "reason": f"evidence gateway unavailable: {checked['error']}"}
+        if not checked.get("valid"):
+            return {"valid": False, "reason": str(checked.get("reason") or "did not verify")}
+        method = str((checked.get("capture") or {}).get("method") or "").upper()
+        if method not in _SAFE_REPLAY_METHODS:
+            return {"valid": True, "method": method, "reproduced": None}
+        replay = call_mcp_sync(
+            "capture", "http_replay", {"engagement": engagement, "capture_id": capture_id}
+        )
+        if replay.get("error") or replay.get("status") == "refused":
+            detail = replay.get("error") or replay.get("detail") or replay.get("code")
+            return {"valid": True, "method": method, "reproduced": False, "reason": str(detail)}
+        return {
+            "valid": True,
+            "method": method,
+            "reproduced": bool(replay.get("reproduced")),
+            "reason": "" if replay.get("reproduced") else "status changed on replay",
+        }
+
+    return verify
+
+
+def _unproven(node: Any) -> str | None:
+    """Why a graph node may not be reported to a program, or ``None``.
+
+    Only a finding recorded through ``report_record_finding`` carries verified
+    capture ids and a remediation; a node written any other way does not, and
+    is not reportable to a program however it is labelled.
+    """
+    props = getattr(node, "props", None) or {}
+    if not [c for c in props.get("capture_ids") or [] if str(c).strip()]:
+        return "no captured request (capture_ids)"
+    if len(str(props.get("remediation") or "").strip()) < MIN_REMEDIATION_CHARS:
+        return "no remediation"
+    return None
+
+
+def _release_gate(
+    finding_id: str, report_text: str, *, kind: str, nodes: list[Any]
+) -> dict[str, Any] | None:
+    """``None`` when the report may be returned; otherwise the payload to return instead."""
+    engagement, program = _active_program()
+    if program is None:
+        return None
+    if program.get("_invalid"):
+        return {"error": f"program record is unreadable: {program['_invalid']}"}
+    missing = {
+        str(getattr(node, "id", "?")): reason
+        for node in nodes
+        if (reason := _unproven(node)) is not None
+    }
+    if missing:
+        return {
+            "error": "not reportable to the program",
+            "detail": (
+                "Every reported finding needs a captured in-scope request and a remediation. "
+                "Record it with report_record_finding(capture_ids=..., remediation=...)."
+            ),
+            "findings": dict(list(missing.items())[:20]),
+        }
+    release = report_release(
+        _control_root(), _audit_root(), engagement, finding_id, report_text, kind=kind
+    )
+    if release.get("released"):
+        return None
+    return {"id": finding_id, **release}
+
+
 @tool
 def report_hackerone(finding_id: str) -> str:
     """Render a HackerOne-style markdown report for a finding or vulnerability node."""
@@ -72,6 +187,9 @@ def report_hackerone(finding_id: str) -> str:
     if not is_publishable_node(node):
         return _json({"error": f"node {finding_id} is not a confirmed, published finding"})
     md = render_hackerone_markdown(node, graph=graph)
+    held = _release_gate(finding_id, md, kind="hackerone report", nodes=[node])
+    if held is not None:
+        return _json(held)
     return _json({"id": finding_id, "markdown": md})
 
 
@@ -80,6 +198,18 @@ def report_bugcrowd_csv(min_severity: str = "medium") -> str:
     """Render the current graph as a Bugcrowd CSV submission bundle."""
     graph, _ = _load()
     csv = render_bugcrowd_csv(graph, min_severity=min_severity)
+    held = _release_gate(
+        f"bugcrowd-csv-{min_severity}",
+        csv,
+        kind="bugcrowd submission bundle",
+        nodes=[
+            n
+            for n in graph.nodes.values()
+            if n.kind in (NodeKind.FINDING, NodeKind.VULNERABILITY) and is_publishable_node(n)
+        ],
+    )
+    if held is not None:
+        return _json(held)
     return _json({"rows": csv.count("\n") - 1, "csv": csv})
 
 
@@ -198,6 +328,7 @@ def record_finding(
     client: CaidoClient | None,
     corroboration_provider: CorroborationProvider = load_corroboration_inputs,
     created_by: str = "analyst",
+    program_verifier: Verifier | None = None,
 ) -> dict[str, Any]:
     """Run a finding through the proof gate, then the corroboration gate, then publish it.
 
@@ -205,7 +336,26 @@ def record_finding(
     pass; a finding the corroboration gate holds or rules out comes back with
     its closure ``state`` and the ``reasons``.
     """
+    # Bounty-program engagements: the evidence is a request captured by the
+    # gateway against the in-scope target, and a remediation is mandatory.
+    # This runs first and cannot be relaxed by the strictness flags below.
+    program_engagement, program = _active_program()
+    if program is not None:
+        problems = finding_errors(
+            finding, program, program_verifier or gateway_verifier(program_engagement)
+        )
+        if problems:
+            return {"success": False, "error": "Program rules not met", "errors": problems}
+
     result = verify_finding(finding, client=client, strict=strict)
+    if not result.accepted and program is not None:
+        # The gateway capture is the live evidence on a program engagement; the
+        # proxy-id requirement is the one check it replaces.
+        remaining = [e for e in result.errors if e != LIVE_EVIDENCE_REQUIRED_ERROR]
+        if not remaining:
+            result = GateResult(accepted=True, http_exchange_ids=[], live_verified=True)
+        else:
+            return {"success": False, "error": "Validation failed", "errors": remaining}
     if not result.accepted:
         return {"success": False, "error": "Validation failed", "errors": result.errors}
 
@@ -296,6 +446,8 @@ def report_record_finding(
     vuln_class: str = "",
     sink_demonstrated: str = "",
     analysis_only: bool = False,
+    capture_ids: list[str] | None = None,
+    remediation: str = "",
 ) -> str:
     """Record a vulnerability finding — gated by live-evidence proof, then independent corroboration.
 
@@ -343,6 +495,12 @@ def report_record_finding(
             ``web_fetch``, ``markdown_image_load``, ``tool_call``, or
             ``file_access``.
         analysis_only: Request the proof-optional path (see strictness above).
+        capture_ids: Evidence-gateway capture ids (from ``http_send`` /
+            ``probe_run``) that demonstrate the issue. Required on a
+            bounty-program engagement: each must verify against the in-scope
+            ``target`` and, when it cannot change state, reproduce on replay.
+        remediation: What the owner should change to fix the issue. Required
+            on a bounty-program engagement.
 
     Returns:
         JSON. On publication: ``{success: true, report_id, severity,
@@ -368,6 +526,8 @@ def report_record_finding(
         "summary": summary,
         "vuln_class": vuln_class,
         "sink_demonstrated": sink_demonstrated,
+        "capture_ids": capture_ids,
+        "remediation": remediation,
     }
     return _json(record_finding(finding, strict=gate_strict, client=_new_caido_client()))
 

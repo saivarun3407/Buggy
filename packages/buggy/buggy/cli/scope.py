@@ -9,6 +9,12 @@ an operator promotes it here:
     buggy-cli scope diff    <engagement>            # draft vs enforced
     buggy-cli scope approve <engagement> [--yes]    # promote the draft
     buggy-cli scope set     <engagement> --file roe.json [--yes]
+    buggy-cli scope import  --platform hackerone --handle <program> [--csv scope.csv]
+
+``import`` builds the enforced scope from a bounty program's official scope
+data (platform API, or the scope CSV downloaded from the program page). The
+result is always enforce mode, with operator approval required for
+state-changing requests and for releasing a report.
 
 Every document is validated with the same parser the guardrail uses, so a
 policy that would be rejected at run time cannot be approved.
@@ -50,7 +56,82 @@ def _build_parser() -> argparse.ArgumentParser:
     setp.add_argument("engagement")
     setp.add_argument("--file", type=Path, required=True)
     setp.add_argument("--yes", action="store_true", help="Do not prompt for confirmation.")
+    imp = sub.add_parser(
+        "import", help="Build the enforced scope from a bounty program's official scope data."
+    )
+    imp.add_argument("--platform", required=True, choices=["hackerone", "bugcrowd"])
+    imp.add_argument("--handle", required=True, help="Program handle as it appears in its URL.")
+    imp.add_argument(
+        "--csv", type=Path, default=None, help="HackerOne scope CSV from the program page."
+    )
+    imp.add_argument(
+        "--engagement", default="", help="Engagement slug (default: <platform>-<handle>)."
+    )
+    imp.add_argument("--rps", type=int, default=None, help="Requests per second (1-20, default 5).")
+    imp.add_argument(
+        "--port-scan", action="store_true", help="Allow the pipeline's port scan (off by default)."
+    )
+    imp.add_argument("--yes", action="store_true", help="Do not prompt for confirmation.")
     return p
+
+
+def _import_program(args: argparse.Namespace, control: Path) -> int:
+    from buggy.program import importer
+    from buggy.program.record import PROGRAM_FILE
+
+    try:
+        if args.csv is not None:
+            if args.platform != "hackerone":
+                raise importer.ScopeImportError("--csv is a HackerOne scope export")
+            try:
+                text = args.csv.read_text(encoding="utf-8-sig")
+            except OSError as exc:
+                raise importer.ScopeImportError(f"cannot read {args.csv}: {exc}") from exc
+            official = importer.from_hackerone_csv(text, args.handle)
+        else:
+            official = importer.fetch_official(args.platform, args.handle)
+        slug = args.engagement or f"{official.platform}-{official.handle}"
+        roe, program, rejected = importer.build_documents(
+            official,
+            engagement=slug,
+            rps=args.rps,
+            port_scan=args.port_scan,
+            imported_by=getpass.getuser(),
+        )
+    except importer.ScopeImportError as exc:
+        print(f"error: {exc}", file=sys.stderr)
+        return EXIT_CONFIG
+
+    _validate(roe)
+    print(f"program:  {official.platform}/{official.handle}  {official.url}")
+    print(f"source:   {official.source}")
+    print(f"engagement {slug!r}:")
+    print(_summary(roe))
+    limit = program["rate_limit"]
+    print(f"  rate limit:    {limit['requests_per_second']} req/s ({limit['basis']})")
+    print(
+        f"  pipeline:      {'passive sources only' if roe['pipeline']['passive_only'] else 'active'}"
+        f", port scan {'on' if roe['pipeline']['port_scan'] else 'off'}"
+    )
+    print("  approvals:     every state-changing request; every report before release")
+    print("  banned:")
+    for entry in program["banned_techniques"]:
+        print(f"    - {entry['rule']}")
+    if official.non_network_assets:
+        print(f"  not network targets (ignored): {', '.join(official.non_network_assets)}")
+    for item in rejected:
+        print(f"  REJECTED from scope: {item['asset']} ({item['reason']})")
+    if not _confirm("Enforce this program scope?", args.yes):
+        print("not approved; nothing changed", file=sys.stderr)
+        return EXIT_CONFIG
+    path = _install(control, slug, roe, official.source)
+    program_path = path.parent / PROGRAM_FILE
+    tmp = program_path.with_suffix(".json.tmp")
+    tmp.write_text(json.dumps(program, indent=2) + "\n", encoding="utf-8")
+    tmp.replace(program_path)
+    print(f"enforced scope written: {path}")
+    print(f"program record written: {program_path}")
+    return EXIT_OK
 
 
 def _load(path: Path) -> dict[str, Any] | None:
@@ -126,6 +207,8 @@ def main(argv: list[str] | None = None) -> int:
     args = _build_parser().parse_args(argv)
     workspace = _paths.workspace_root(args.workspace_root)
     control = _paths.control_root(args.control_root)
+    if args.command == "import":
+        return _import_program(args, control)
     slug = args.engagement
     draft_path = workspace / slug / "plan" / "roe.json"
     enforced_path = control / slug / "roe.json"
@@ -176,6 +259,21 @@ def main(argv: list[str] | None = None) -> int:
         source = str(args.file)
 
     _validate(document)
+    from buggy.program.gate import mode_error
+    from buggy.program.record import load_program
+
+    program = load_program(control, slug)
+    if program is not None:
+        mode = str((document.get("machine_enforcement") or {}).get("mode", "audit"))
+        problem = mode_error(program, mode)
+        if problem is not None:
+            print(f"error: scope rejected: {problem}", file=sys.stderr)
+            return EXIT_CONFIG
+        print(
+            "warning: this engagement was imported from a bounty program; hand-edited scope "
+            "replaces the official one. Prefer `buggy-cli scope import`.",
+            file=sys.stderr,
+        )
     print(f"scope for {slug!r} (from {source}):")
     print(_summary(document))
     if not _confirm("Enforce this scope?", args.yes):

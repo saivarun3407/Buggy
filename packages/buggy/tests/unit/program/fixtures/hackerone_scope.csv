@@ -1,0 +1,9 @@
+identifier,asset_type,instruction,eligible_for_bounty,eligible_for_submission,availability_requirement,confidentiality_requirement,integrity_requirement,max_severity,system_tags,created_at,updated_at
+app.acme-bounty.example,URL,"Main application, with a comma in the note",true,true,high,high,high,critical,"",2024-01-02 10:00:00 UTC,2024-06-01 10:00:00 UTC
+*.api.acme-bounty.example,WILDCARD,All API hosts,true,true,high,high,high,critical,"",2024-01-02 10:00:00 UTC,2024-06-01 10:00:00 UTC
+https://pay.acme-bounty.example/checkout,URL,Checkout only,true,true,high,high,high,high,"",2024-01-02 10:00:00 UTC,2024-06-01 10:00:00 UTC
+198.51.100.0/28,CIDR,Edge range,true,true,high,high,high,medium,"",2024-01-02 10:00:00 UTC,2024-06-01 10:00:00 UTC
+blog.acme-bounty.example,URL,Hosted by a third party,false,false,none,none,none,none,"",2024-01-02 10:00:00 UTC,2024-06-01 10:00:00 UTC
+com.acme.mobile,GOOGLE_PLAY_APP_ID,Android app,true,true,high,high,high,high,"",2024-01-02 10:00:00 UTC,2024-06-01 10:00:00 UTC
+*.example,WILDCARD,Mis-entered by the program,true,true,high,high,high,high,"",2024-01-02 10:00:00 UTC,2024-06-01 10:00:00 UTC
+10.20.0.0/16,CIDR,Internal range listed by mistake,true,true,high,high,high,high,"",2024-01-02 10:00:00 UTC,2024-06-01 10:00:00 UTC

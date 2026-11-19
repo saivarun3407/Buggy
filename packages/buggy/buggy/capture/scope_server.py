@@ -82,11 +82,21 @@ class ScopeTools:
             "state_changing_requests": str(
                 as_dict(document.get("approvals")).get("state_changing", "required")
             ),
-            "banned_techniques": list(
-                as_dict(document.get("program")).get("banned_techniques") or []
+            "report_release": str(
+                as_dict(document.get("approvals")).get("report_submission", "not_required")
             ),
+            "banned_techniques": self._banned(engagement),
             "wildcard_note": "a * in a scope rule covers exactly one DNS label",
         }
+
+    def _banned(self, engagement: str) -> list[str]:
+        """The program's binding rules, so they arrive with the scope itself."""
+        program = self.program_info(engagement)
+        return [
+            str(entry.get("rule"))
+            for entry in program.get("banned_techniques") or []
+            if isinstance(entry, dict) and entry.get("rule")
+        ]
 
     def scope_check(self, engagement: str, target: str) -> dict[str, Any]:
         loaded = self._load(engagement)
