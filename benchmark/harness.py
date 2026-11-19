@@ -189,6 +189,34 @@ class Harness:
     def __init__(self, provider: BaseBenchmarkProvider, config: BenchmarkConfig) -> None:
         self.provider = provider
         self.config = config
+        try:
+            self._code_revision = subprocess.run(
+                ["git", "rev-parse", "HEAD"],
+                capture_output=True,
+                text=True,
+                check=True,
+                timeout=5,
+            ).stdout.strip()
+        except Exception:
+            self._code_revision = None
+        image = DEVIN_SOLVER_CONTAINER if config.solver == "devin" else "buggy-langgraph"
+        try:
+            self._image_digest = _run_docker(
+                ["inspect", "--format", "{{.Image}}", image], timeout=5
+            ).strip()
+        except Exception:
+            self._image_digest = None
+
+    def _annotate_result(self, result: ChallengeResult) -> ChallengeResult:
+        result.solver = self.config.solver
+        result.model = (
+            self.config.devin_model
+            if self.config.solver == "devin"
+            else os.getenv("BUGGY_LLM__MODEL")
+        )
+        result.code_revision = self._code_revision
+        result.image_digest = self._image_digest
+        return result
 
     @property
     def _litellm_url(self) -> str:
@@ -661,7 +689,7 @@ class Harness:
             if cost_start_iso is not None:
                 result.cost_usd = await self._query_cost(cost_start_iso, self._utc_iso())
             self.provider.teardown(challenge)
-            return result
+            return self._annotate_result(result)
 
         except asyncio.TimeoutError:
             # Cancel + verify-terminal BEFORE teardown so the graph node is
@@ -711,7 +739,7 @@ class Harness:
             if cost_start_iso is not None:
                 result.cost_usd = await self._query_cost(cost_start_iso, self._utc_iso())
             self.provider.teardown(challenge)
-            return result
+            return self._annotate_result(result)
         except Exception as exc:
             # Unexpected exception path — same discipline: cancel + verify
             # terminal before teardown so we don't tear the target out from

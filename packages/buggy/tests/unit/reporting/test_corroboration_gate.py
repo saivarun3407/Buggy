@@ -59,8 +59,8 @@ def test_same_agent_and_tool_family_counts_once() -> None:
     assert independent_corroboration_count(same_source) == 1
 
 
-def test_distinct_agents_count_separately() -> None:
-    assert independent_corroboration_count([_corr("a"), _corr("b")]) == 2
+def test_distinct_agents_need_distinct_tool_families() -> None:
+    assert independent_corroboration_count([_corr("a"), _corr("b")]) == 1
 
 
 def test_modality_alone_does_not_grant_independence() -> None:
@@ -72,8 +72,8 @@ def test_modality_alone_does_not_grant_independence() -> None:
     assert independent_corroboration_count(corroborations) == 1
 
 
-def test_same_agent_different_tool_family_counts_separately() -> None:
-    assert independent_corroboration_count([_corr("a", "sqlmap"), _corr("a", "nuclei")]) == 2
+def test_same_agent_different_tool_family_is_still_one_reviewer() -> None:
+    assert independent_corroboration_count([_corr("a", "sqlmap"), _corr("a", "nuclei")]) == 1
 
 
 def test_no_corroborations_count_zero() -> None:
@@ -173,7 +173,7 @@ class _ConfirmingCaido(CaidoClient):
         self.repeated: list[str] = []
 
     def view_request(self, request_id: str) -> dict[str, Any]:
-        return {"id": request_id}
+        return {"id": request_id, "url": "https://app.example.com/login"}
 
     def repeat_request(self, request_id: str, mutations_json: str = "") -> dict[str, Any]:
         self.repeated.append(request_id)

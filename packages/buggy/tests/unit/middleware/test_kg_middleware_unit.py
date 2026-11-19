@@ -249,6 +249,23 @@ def test_wrap_tool_call_passes_through_non_kg_tools() -> None:
     assert len(captured) == 1
 
 
+def test_wrap_tool_call_records_and_returns_evidence_id() -> None:
+    store = _store_mock()
+    store.record_tool_evidence.return_value = "evidence::tc-123"
+    mw = _middleware(store)
+    result = ToolMessage(content="raw output", tool_call_id="tc-123", name="bash")
+    out = mw.wrap_tool_call(
+        _fake_tool_request(
+            tool_name="bash",
+            state={"kg_engagement": "acme", "role": "recon"},
+        ),
+        lambda _req: result,
+    )
+    assert isinstance(out, ToolMessage)
+    assert "evidence::tc-123" in str(out.content)
+    store.record_tool_evidence.assert_called_once()
+
+
 def test_wrap_tool_call_rejects_kg_record_when_engagement_unset() -> None:
     mw = _middleware()
     captured: list[Any] = []

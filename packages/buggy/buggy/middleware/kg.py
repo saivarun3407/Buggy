@@ -29,6 +29,7 @@ Hooks:
 
 from __future__ import annotations
 
+import hashlib
 import json
 import logging
 from collections.abc import Iterable
@@ -225,14 +226,61 @@ class KGMiddleware(AgentMiddleware):
         rejection = self._maybe_reject_unscoped(request)
         if rejection is not None:
             return rejection
-        return handler(request)
+        result = handler(request)
+        return self._capture_evidence(request, result)
 
     @override
     async def awrap_tool_call(self, request: Any, handler: Any) -> Any:
         rejection = self._maybe_reject_unscoped(request)
         if rejection is not None:
             return rejection
-        return await handler(request)
+        result = await handler(request)
+        return self._capture_evidence(request, result)
+
+    def _capture_evidence(self, request: Any, result: Any) -> Any:
+        """Persist the unmodified result of a real, scoped non-KG tool call."""
+        tool = getattr(request, "tool", None)
+        tool_name = str(getattr(tool, "name", "") or "")
+        if not tool_name or tool_name in self._kg_tool_names or not isinstance(result, ToolMessage):
+            return result
+        state = getattr(request, "state", None) or {}
+        get = state.get if hasattr(state, "get") else (lambda _k, _d=None: None)
+        engagement = str(get("kg_engagement") or get("engagement_name") or "").strip()
+        tool_call_id = _extract_tool_call_id(request)
+        if not engagement or not tool_call_id:
+            return result
+        content = (
+            result.content
+            if isinstance(result.content, str)
+            else json.dumps(result.content, sort_keys=True, default=str)
+        )
+        tool_call = getattr(request, "tool_call", None)
+        args = (
+            tool_call.get("args", {})
+            if isinstance(tool_call, dict)
+            else getattr(tool_call, "args", {})
+        )
+        args_digest = hashlib.sha256(
+            json.dumps(args, sort_keys=True, default=str).encode()
+        ).hexdigest()
+        created_by = str(get("role") or get("agent_name") or get("kg_created_by") or "agent")
+        try:
+            evidence_id = self._store.record_tool_evidence(
+                engagement=engagement,
+                created_by=created_by,
+                tool_name=tool_name,
+                tool_call_id=tool_call_id,
+                content=content,
+                args_digest=args_digest,
+            )
+        except Exception as exc:  # noqa: BLE001 — evidence failure must not break the tool
+            log.warning("KGMiddleware evidence capture failed for %s: %s", tool_name, exc)
+            return result
+        if isinstance(result.content, str):
+            return result.model_copy(
+                update={"content": f"{result.content}\n\n[immutable evidence_id: {evidence_id}]"}
+            )
+        return result
 
     def _maybe_reject_unscoped(self, request: Any) -> ToolMessage | None:
         """Return a ``ToolMessage`` rejection when a KG tool is invoked

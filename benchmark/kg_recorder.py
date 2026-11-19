@@ -95,6 +95,8 @@ _STEP_ARG_KEYS = (
     "query",
 )
 
+_AUTO_STORE = object()
+
 
 def load_tag_to_skills(path: Path = _SKILL_MD_PATH) -> dict[str, list[str]]:
     """Parse the tag→skill routing table out of the benchmark SKILL.md.
@@ -139,11 +141,14 @@ class BenchmarkKGRecorder:
     def __init__(
         self,
         *,
-        store: Any | None = None,
+        store: Any = _AUTO_STORE,
         batch_id: str | None = None,
         langgraph_url: str = "http://localhost:2024",
     ) -> None:
-        self._store = store if store is not None else self._store_from_env()
+        # Omitting ``store`` enables production auto-discovery. Passing
+        # ``store=None`` explicitly is the stable opt-out used by callers that
+        # must remain disabled even when a repository .env is loaded.
+        self._store = self._store_from_env() if store is _AUTO_STORE else store
         self._batch_id = batch_id or f"batch-{datetime.now(timezone.utc).strftime('%Y%m%d_%H%M%S')}"
         self._langgraph_url = langgraph_url.rstrip("/")
         self._tag_to_skills: dict[str, list[str]] | None = None

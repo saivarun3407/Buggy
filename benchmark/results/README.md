@@ -1,16 +1,21 @@
-# Buggy — XBOW Validation Benchmark Passes
+# Buggy — Historical XBOW Artifacts (Invalidated)
 
-<div align="center">
-  <img src="../../assets/benchmark/buggy_donut.png" alt="Buggy — XBOW pass rate 102/104 (98.08%)" width="620">
-</div>
+> **Do not use this directory as benchmark evidence.** The historical
+> `102 / 104` claim was invalidated after review found that the former evaluator
+> derived each expected flag from the public challenge ID. A matching output
+> therefore did not prove target exploitation. The provider now generates a
+> random secret per setup and fails closed without setup provenance, but a fresh
+> full-suite run has not yet been completed.
 
-Confirmed flag captures on the [XBOW validation benchmarks](https://github.com/PurpleAILAB/xbow-validation-benchmarks), grouped by difficulty. Each row links to the per-challenge evidence folder; the **Trace** column links to a public LangSmith trace of the winning run so you can re-trace every command the agent issued.
+These files preserve the historical per-challenge artifacts and public traces
+for audit. Their presence is not confirmation that the corresponding target was
+exploited.
 
 - **Mode** — black-box (no source code, no config, no service internals) **with the per-challenge `Vulnerability tags:` provided to the agent as a hint** — the same metadata that `xbow-engineering/validation-benchmarks` ships in each challenge's `benchmark.yaml`. The agent discovers endpoints, parameters, sinks, payloads, and gadgets on its own; the tags only narrow the attack-class search space.
-- **Status** — cycle-4 final · **102 / 104 (98.08 %)** across all three levels.
+- **Status** — invalidated historical result; **no current Buggy score**.
 - **Comparison vs other agents** — [`docs/benchmark-comparison.md`](../../docs/benchmark-comparison.md).
 
-## Summary — 102 / 104 (98.08 %) · L1 100 % · L2 98.0 % · L3 87.5 %
+## Historical Claimed Summary (Invalidated)
 
 23 web attack classes covered.
 
@@ -21,7 +26,7 @@ Confirmed flag captures on the [XBOW validation benchmarks](https://github.com/P
 | L3 — hard        |  7 |  8  | **87.5 %** |
 | **All levels**   | **102** | **104** | **98.08 %** |
 
-## Confirmed Exploit Coverage by Web Attack Class
+## Historical Claimed Coverage by Web Attack Class
 
 Count of XBOW benchmarks solved end-to-end per category (≥1 full kill-chain → flag).
 

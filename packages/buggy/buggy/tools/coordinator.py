@@ -114,12 +114,12 @@ def render_messages(messages: list[dict]) -> str:
     return "\n\n".join(blocks)
 
 
-def build_coordinator_tools(agent_id_ref: Callable[[], str | None]) -> list:
+def build_coordinator_tools(
+    agent_id_ref: Callable[[], str | None] | None = None,
+) -> list:
     """Create the coordination tools.
 
-    ``agent_id_ref`` yields the attached agent's own id (the caller of
-    ``send_message`` / ``read_messages``). It is read at call time so the
-    id allocated during registration is visible.
+    The attached agent's invocation-scoped id is read from injected state.
     """
 
     @tool(
@@ -186,7 +186,11 @@ def build_coordinator_tools(agent_id_ref: Callable[[], str | None]) -> list:
                 "Call view_agent_graph() for valid recipient ids.",
             )
 
-        from_agent_id = agent_id_ref() or "unknown"
+        from_agent_id = str(
+            (state or {}).get("coordinator_agent_id")
+            or (agent_id_ref() if agent_id_ref else None)
+            or "unknown"
+        )
         message = {
             "message_id": uuid4().hex,
             "from_agent_id": from_agent_id,
@@ -231,15 +235,13 @@ def build_coordinator_tools(agent_id_ref: Callable[[], str | None]) -> list:
         only rewrites ``ToolMessage`` results and this tool returns a
         ``Command`` to carry the mark-read state update.
         """
-        me = agent_id_ref()
+        me = state.get("coordinator_agent_id") or (agent_id_ref() if agent_id_ref else None)
         box = (state.get("mailboxes") or {}).get(me) or []
         unread = [m for m in box if not m.get("read")]
         if not unread:
             return Command(
                 update={
-                    "messages": [
-                        ToolMessage(content=_NO_MESSAGES_LINE, tool_call_id=tool_call_id)
-                    ],
+                    "messages": [ToolMessage(content=_NO_MESSAGES_LINE, tool_call_id=tool_call_id)],
                 }
             )
 
@@ -267,9 +269,7 @@ def _error(tool_call_id: str, text: str) -> Command[Any]:
     """A failed tool call that reports ``text`` and mutates no state."""
     return Command(
         update={
-            "messages": [
-                ToolMessage(content=text, tool_call_id=tool_call_id, status="error")
-            ],
+            "messages": [ToolMessage(content=text, tool_call_id=tool_call_id, status="error")],
         }
     )
 

@@ -164,6 +164,20 @@ def test_accept_full_proof_and_existing_ids() -> None:
     assert result.http_exchange_ids == ["101", "102"]
 
 
+def test_reject_capture_from_unrelated_target_origin() -> None:
+    class WrongTarget(FakeCaido):
+        def view_request(self, request_id: str) -> dict[str, object]:
+            return {"id": request_id, "url": "https://unrelated.example/request"}
+
+    result = verify_finding(
+        _full_finding(target="https://app.example.com/login", http_exchange_ids=["101"]),
+        client=WrongTarget(existing={"101"}),
+        strict=True,
+    )
+    assert result.accepted is False
+    assert any("does not match finding target origin" in error for error in result.errors)
+
+
 # ── (b) missing required proof -> rejected with specific errors ─────────
 
 

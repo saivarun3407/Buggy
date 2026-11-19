@@ -151,6 +151,8 @@ def publish_finding_node(
     label = str(finding.get("title") or finding.get("label") or "finding")
     key = canonical_finding_key(finding)
     props = {k: v for k, v in finding.items() if k not in {"title", "label", "key"}}
+    props["closure_state"] = "confirmed"
+    props["published"] = True
     node = Node.make(NodeKind.FINDING, label, key=key, **props)
 
     if not engagement:
@@ -162,6 +164,19 @@ def publish_finding_node(
         return node.id, False
 
     try:
+        promoted = store.execute_write(
+            (
+                "MATCH (n:Candidate {key: $key}) "
+                "WHERE n.engagement = $engagement "
+                "REMOVE n:Candidate SET n:Finding, n.label = $label, "
+                "n.lastupdated = timestamp(), n += $props "
+                "RETURN n.key AS key"
+            ),
+            {"key": key, "label": label, "props": props},
+            engagement=engagement,
+        )
+        if promoted:
+            return node.id, True
         store.record_observations(
             [
                 {
@@ -183,15 +198,110 @@ def publish_finding_node(
         store.close()
 
 
+def persist_candidate_node(
+    engagement: str,
+    finding: dict[str, Any],
+    *,
+    created_by: str,
+    closure_state: str = "open_proof_gap",
+) -> tuple[str, bool]:
+    """Persist a proof-accepted finding before independent validation.
+
+    Corroboration tools need a stable graph target. A Candidate provides that
+    target without making the finding eligible for reports. Publication later
+    promotes this same node to ``:Finding`` atomically, preserving its edges
+    and original finder identity.
+    """
+    label = str(finding.get("title") or finding.get("label") or "finding")
+    key = canonical_finding_key(finding)
+    props = {k: v for k, v in finding.items() if k not in {"title", "label", "key"}}
+    props.update(
+        {
+            "closure_state": closure_state,
+            "published": False,
+            "original_created_by": created_by,
+        }
+    )
+    node = Node.make(NodeKind.CANDIDATE, label, key=key, **props)
+    if not engagement:
+        return node.id, False
+
+    try:
+        store = KGStore.from_env()
+    except (KGStoreConfigError, KGStoreUnavailableError, ImportError):
+        return node.id, False
+    try:
+        store.record_observations(
+            [
+                {
+                    "kind": NodeKind.CANDIDATE.value,
+                    "key": key,
+                    "label": label,
+                    "props": props,
+                    "edges_out": [],
+                }
+            ],
+            engagement=engagement,
+            created_by=created_by,
+            source_episode_id=f"candidate::{key}",
+        )
+        return node.id, True
+    except Exception:  # noqa: BLE001 — a held finding must still return its verdict
+        return node.id, False
+    finally:
+        store.close()
+
+
+def persist_closure_state(
+    engagement: str,
+    finding_key: str,
+    *,
+    state: str,
+    reasons: list[str],
+) -> bool:
+    """Persist a deterministic gate verdict on an existing candidate/finding."""
+    if not engagement:
+        return False
+    try:
+        store = KGStore.from_env()
+    except (KGStoreConfigError, KGStoreUnavailableError, ImportError):
+        return False
+    try:
+        rows = store.execute_write(
+            (
+                "MATCH (n {key: $key}) WHERE n.engagement = $engagement "
+                "AND (n:Candidate OR n:Finding) "
+                "SET n.closure_state = $state, n.closure_reasons = $reasons, "
+                "n.published = false, n.lastupdated = timestamp() "
+                "RETURN n.key AS key"
+            ),
+            {"key": finding_key, "state": state, "reasons": reasons},
+            engagement=engagement,
+        )
+        return bool(rows)
+    except Exception:  # noqa: BLE001 — verdict still returns if persistence is unavailable
+        return False
+    finally:
+        store.close()
+
+
+def is_publishable_node(node: Node) -> bool:
+    """Only gate-confirmed Finding nodes are publishable; vulnerabilities are unchanged."""
+    if node.kind is not NodeKind.FINDING:
+        return node.kind is NodeKind.VULNERABILITY
+    return node.props.get("published") is True and node.props.get("closure_state") == "confirmed"
+
+
 def _finding_created_by(store: KGStore, engagement: str, finding_key: str) -> str | None:
-    """The ``created_by`` of the Finding keyed ``finding_key`` in ``engagement``.
+    """The original creator of a Candidate/Finding in ``engagement``.
 
     ``None`` when no such Finding exists — the write guards fail closed on
     that, so a corroboration can never attach to a finding that is not there.
     """
     rows = store.execute_read(
-        "MATCH (f:Finding {key: $key}) WHERE f.engagement = $engagement "
-        "RETURN f.created_by AS finder LIMIT 1",
+        "MATCH (f {key: $key}) WHERE f.engagement = $engagement "
+        "AND (f:Candidate OR f:Finding) "
+        "RETURN coalesce(f.original_created_by, f.created_by) AS finder LIMIT 1",
         {"key": finding_key},
         engagement=engagement,
     )
@@ -284,7 +394,7 @@ def submit_contradiction_observation(
             f"unknown finding {finding_key!r}: no Finding node in this engagement to contradict"
         )
     key = f"contradiction::{uuid4().hex}"
-    return store.record_observations(
+    result = store.record_observations(
         [
             {
                 "kind": "Contradiction",
@@ -298,24 +408,46 @@ def submit_contradiction_observation(
         created_by=created_by,
         source_episode_id=source_episode_id,
     )
+    if _evidence_resolves(store, engagement, evidence_id):
+        store.execute_write(
+            (
+                "MATCH (n {key: $key}) WHERE n.engagement = $engagement "
+                "AND (n:Candidate OR n:Finding) "
+                "SET n.closure_state = 'ruled_out', n.published = false, "
+                "n.closure_reasons = [$reason], n.lastupdated = timestamp() "
+                "RETURN n.key AS key"
+            ),
+            {"key": finding_key, "reason": reason},
+            engagement=engagement,
+        )
+    return result
 
 
 def _evidence_resolves(store: KGStore, engagement: str, evidence_id: str) -> bool:
-    """True when ``evidence_id`` keys a node in ``engagement`` carrying a
-    non-empty ``source_episode_id`` — the immutable raw-output anchor the
-    store stamps on every observation."""
+    """True only for immutable evidence captured from a real tool result."""
     if not evidence_id:
         return False
     rows = store.execute_read(
-        "MATCH (n {key: $evidence_id}) WHERE n.engagement = $engagement "
-        "RETURN n.source_episode_id AS anchor LIMIT 1",
+        "MATCH (n:Evidence {key: $evidence_id}) WHERE n.engagement = $engagement "
+        "RETURN n.source_episode_id AS anchor, n.tool_call_id AS tool_call_id, "
+        "n.content_sha256 AS digest, n.immutable AS immutable LIMIT 1",
         {"evidence_id": evidence_id},
         engagement=engagement,
     )
     if not rows:
         return False
-    anchor = rows[0].get("anchor")
-    return isinstance(anchor, str) and bool(anchor.strip())
+    row = rows[0]
+    anchor = row.get("anchor")
+    tool_call_id = row.get("tool_call_id")
+    digest = row.get("digest")
+    return (
+        row.get("immutable") is True
+        and isinstance(anchor, str)
+        and bool(anchor.strip())
+        and anchor == tool_call_id
+        and isinstance(digest, str)
+        and len(digest) == 64
+    )
 
 
 def _read_corroboration_inputs(
@@ -324,9 +456,9 @@ def _read_corroboration_inputs(
     finder = _finding_created_by(store, engagement, finding_key)
 
     corr_rows = store.execute_read(
-        "MATCH (c:Corroboration)-[r:CORROBORATES]->(f:Finding {key: $key}) "
+        "MATCH (c:Corroboration)-[r:CORROBORATES]->(f {key: $key}) "
         "WHERE c.engagement = $engagement AND r.engagement = $engagement "
-        "  AND f.engagement = $engagement "
+        "  AND f.engagement = $engagement AND (f:Candidate OR f:Finding) "
         "RETURN c.created_by AS source_agent_id, c.tool_family AS tool_family, "
         "       c.modality AS modality, c.evidence_id AS evidence_id",
         {"key": finding_key},
@@ -352,9 +484,9 @@ def _read_corroboration_inputs(
         )
 
     contra_rows = store.execute_read(
-        "MATCH (c:Contradiction)-[r:CONTRADICTS]->(f:Finding {key: $key}) "
+        "MATCH (c:Contradiction)-[r:CONTRADICTS]->(f {key: $key}) "
         "WHERE c.engagement = $engagement AND r.engagement = $engagement "
-        "  AND f.engagement = $engagement "
+        "  AND f.engagement = $engagement AND (f:Candidate OR f:Finding) "
         "RETURN c.created_by AS source_agent_id, c.reason AS reason, "
         "       c.evidence_id AS evidence_id",
         {"key": finding_key},

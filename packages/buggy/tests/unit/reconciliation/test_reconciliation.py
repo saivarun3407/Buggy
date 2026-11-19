@@ -143,7 +143,7 @@ class FakeCaido:
 
     def view_request(self, request_id: str) -> dict[str, object]:
         if request_id in self.existing:
-            return {"id": request_id, "request": {"method": "GET"}}
+            return {"id": request_id, "url": "http://t/x", "request": {"method": "GET"}}
         return {}
 
 

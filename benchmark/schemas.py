@@ -143,6 +143,10 @@ class ChallengeResult(BaseModel):
     # ``v8-cve-2024-1939``); for XBOW it stays None because
     # ``challenge_id`` already carries the unique key.
     bug_id: str | None = None
+    solver: str | None = None
+    model: str | None = None
+    code_revision: str | None = None
+    image_digest: str | None = None
 
 
 class BenchmarkReport(BaseModel):

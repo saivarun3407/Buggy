@@ -96,9 +96,7 @@ def test_submit_corroboration_writes_node_and_edge() -> None:
         "modality": "dynamic_probe",
         "evidence_id": "exchange::101",
     }
-    assert obs["edges_out"] == [
-        {"to_key": "finding::app/login::sqli", "kind": "CORROBORATES"}
-    ]
+    assert obs["edges_out"] == [{"to_key": "finding::app/login::sqli", "kind": "CORROBORATES"}]
 
 
 # ── submit_corroboration: fail-closed guards ───────────────────────────
@@ -201,9 +199,7 @@ def test_submit_contradiction_writes_node_and_edge() -> None:
         "reason": "login actually fails for unknown users",
         "evidence_id": "exchange::9",
     }
-    assert obs["edges_out"] == [
-        {"to_key": "finding::app/login::sqli", "kind": "CONTRADICTS"}
-    ]
+    assert obs["edges_out"] == [{"to_key": "finding::app/login::sqli", "kind": "CONTRADICTS"}]
 
 
 def test_submit_contradiction_unknown_finding_fails_closed() -> None:

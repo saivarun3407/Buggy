@@ -48,6 +48,8 @@ def _seeded_graph() -> KnowledgeGraph:
             cvss_score=5.4,
             url="/login?next=//attacker",
             summary="Next-param redirects off-site.",
+            closure_state="confirmed",
+            published=True,
         )
     )
     g.upsert_node(Node.make(NodeKind.CVE, "CVE-2024-1234", score=9.8))

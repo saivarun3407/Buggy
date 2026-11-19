@@ -23,6 +23,7 @@ automatically — no Python-level lock needed.
 
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 import re
@@ -236,6 +237,51 @@ class KGStore:
         rows = self.execute_read(cypher, {"engagement": engagement}, engagement=engagement)
         rev_val = rows[0]["rev"] if rows else 0
         return f"rev-{engagement}-{int(rev_val)}"
+
+    def record_tool_evidence(
+        self,
+        *,
+        engagement: str,
+        created_by: str,
+        tool_name: str,
+        tool_call_id: str,
+        content: str,
+        args_digest: str,
+    ) -> str:
+        """Create an immutable evidence record from an actual tool result."""
+        self._check_engagement(engagement)
+        if not tool_call_id:
+            raise ValueError("tool_call_id is required for evidence")
+        digest = hashlib.sha256(content.encode("utf-8", errors="replace")).hexdigest()
+        key = f"evidence::{tool_call_id}"
+        cap = 60_000
+        rows = self.execute_write(
+            (
+                "MERGE (e:Evidence {key: $key, engagement: $engagement}) "
+                "ON CREATE SET e.label = $label, e.firstseen = timestamp(), "
+                "e.lastupdated = timestamp(), e.created_by = $created_by, "
+                "e.source_episode_id = $tool_call_id, e.tool_call_id = $tool_call_id, "
+                "e.tool_name = $tool_name, e.content = $content, "
+                "e.content_sha256 = $digest, e.args_sha256 = $args_digest, "
+                "e.content_truncated = $truncated, e.immutable = true "
+                "RETURN e.content_sha256 AS digest"
+            ),
+            {
+                "key": key,
+                "label": f"{tool_name} result {tool_call_id}",
+                "created_by": created_by,
+                "tool_call_id": tool_call_id,
+                "tool_name": tool_name,
+                "content": content[:cap],
+                "digest": digest,
+                "args_digest": args_digest,
+                "truncated": len(content) > cap,
+            },
+            engagement=engagement,
+        )
+        if not rows or rows[0].get("digest") != digest:
+            raise ValueError(f"tool_call_id {tool_call_id!r} already has different evidence")
+        return key
 
     def snapshot(self, *, engagement: str):
         """Build an EngagementSnapshot for ``cart.diff_snapshots`` consumption.

@@ -1,3 +1,4 @@
+# pyright: reportOptionalSubscript=false
 """Unit tests for :class:`CoordinatorMiddleware` and its coordination tools.
 
 Driver-free. Covers registration via ``before_agent`` (collision-free ids,
@@ -50,6 +51,8 @@ def _apply(state: dict[str, Any], update: dict[str, Any] | None) -> dict[str, An
         new_state["mailboxes"] = _merge_mailboxes(state.get("mailboxes"), update["mailboxes"])
     if "current_agent_id" in update:
         new_state["current_agent_id"] = update["current_agent_id"]
+    if "coordinator_agent_id" in update:
+        new_state["coordinator_agent_id"] = update["coordinator_agent_id"]
     return new_state
 
 
@@ -172,18 +175,17 @@ def test_before_agent_is_idempotent_when_state_is_threaded() -> None:
     assert list(state["agent_graph"]) == [first_id]
 
 
-def test_re_register_restores_lost_node_without_reminting_id() -> None:
+def test_lost_invocation_state_mints_a_new_identity() -> None:
     mw = CoordinatorMiddleware(role="buggy")
     first = mw.before_agent({}, runtime=None)
     assert first is not None
     first_id = next(iter(first["agent_graph"]))
 
-    # State lost the registration (empty graph): the agent re-emits the SAME
-    # node to restore it, keeping its id rather than minting a new one.
+    # With invocation state lost, the middleware must not recover identity
+    # from its long-lived Python instance.
     second = mw.before_agent({}, runtime=None)
     assert second is not None
-    assert second["agent_graph"] == first["agent_graph"]
-    assert next(iter(second["agent_graph"])) == first_id
+    assert next(iter(second["agent_graph"])) != first_id
 
 
 # ── _merge_agent_graph reducer ──────────────────────────────────────────
@@ -280,9 +282,7 @@ def test_merge_mailboxes_handles_empty_sides() -> None:
 
 
 def _graph_state(*agent_ids: str) -> dict[str, Any]:
-    return {
-        "agent_graph": {aid: {"agent_id": aid, "role": aid.split("-")[0]} for aid in agent_ids}
-    }
+    return {"agent_graph": {aid: {"agent_id": aid, "role": aid.split("-")[0]} for aid in agent_ids}}
 
 
 def test_send_message_appends_well_formed_message() -> None:
@@ -402,9 +402,10 @@ def test_child_posts_one_completion_message_to_parent() -> None:
 
     child = CoordinatorMiddleware(role="recon")
     child_update = child.before_agent(state, runtime=None)
+    state = _apply(state, child_update)
     child_id = child_update["current_agent_id"]
 
-    report = child.after_agent({}, runtime=None)
+    report = child.after_agent(state, runtime=None)
     (message,) = report["mailboxes"][parent_id]
     assert message["from_agent_id"] == child_id
     assert message["to_agent_id"] == parent_id
@@ -416,16 +417,20 @@ def test_completion_report_is_emitted_once() -> None:
     parent = CoordinatorMiddleware(role="buggy")
     state = _apply({}, parent.before_agent({}, runtime=None))
     child = CoordinatorMiddleware(role="recon")
-    child.before_agent(state, runtime=None)
+    state = _apply(state, child.before_agent(state, runtime=None))
 
-    assert child.after_agent({}, runtime=None) is not None
-    assert child.after_agent({}, runtime=None) is None
+    report = child.after_agent(state, runtime=None)
+    assert report is not None
+    state = _apply(state, report)
+    assert child.after_agent(state, runtime=None) is None
 
 
 def test_root_agent_posts_no_completion_message() -> None:
     root = CoordinatorMiddleware(role="buggy")
-    root.before_agent({}, runtime=None)
-    assert root.after_agent({}, runtime=None) is None
+    state = _apply({}, root.before_agent({}, runtime=None))
+    report = root.after_agent(state, runtime=None)
+    assert report is not None
+    assert "mailboxes" not in report
 
 
 # ── view_agent_graph rendering ──────────────────────────────────────────

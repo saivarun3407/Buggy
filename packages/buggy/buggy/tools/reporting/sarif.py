@@ -17,6 +17,7 @@ import re
 from collections.abc import Iterable
 from typing import Any
 
+from buggy.tools.reporting.kg_adapter import is_publishable_node
 from buggy_core.types.kg import KnowledgeGraph, Node, NodeKind
 
 SARIF_VERSION = "2.1.0"
@@ -43,7 +44,9 @@ def render_sarif(
     """
     include_set = set(include_kinds)
     nodes = [
-        n for n in sorted(graph.nodes.values(), key=lambda x: x.created_at) if n.kind in include_set
+        n
+        for n in sorted(graph.nodes.values(), key=lambda x: x.created_at)
+        if n.kind in include_set and is_publishable_node(n)
     ]
 
     rules, rule_index_by_id = _build_rules(nodes)
@@ -195,7 +198,7 @@ def _location_uri(node: Node) -> str:
     file_path = node.props.get("file")
     if isinstance(file_path, str) and file_path.strip():
         return file_path.strip()
-    url = node.props.get("url")
+    url = node.props.get("target") or node.props.get("url")
     if isinstance(url, str) and url.strip():
         return url.strip()
     return f"workspace/findings/{node.id}.md"

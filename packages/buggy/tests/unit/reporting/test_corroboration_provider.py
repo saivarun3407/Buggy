@@ -53,7 +53,15 @@ class _ReadStore:
         if "AS anchor" in cypher:
             eid = (params or {}).get("evidence_id")
             if eid in self.anchors:
-                return [{"anchor": self.anchors[eid]}]
+                tool_call_id = self.anchors[eid]
+                return [
+                    {
+                        "anchor": tool_call_id,
+                        "tool_call_id": tool_call_id,
+                        "digest": "a" * 64,
+                        "immutable": True,
+                    }
+                ]
             return []
         raise AssertionError(f"unexpected cypher: {cypher}")
 
@@ -210,7 +218,7 @@ class _ConfirmingCaido(CaidoClient):
         self.repeated: list[str] = []
 
     def view_request(self, request_id: str) -> dict[str, Any]:
-        return {"id": request_id}
+        return {"id": request_id, "url": "https://app.example.com/login"}
 
     def repeat_request(self, request_id: str, mutations_json: str = "") -> dict[str, Any]:
         self.repeated.append(request_id)
@@ -259,9 +267,7 @@ def test_record_publishes_with_two_independent_corroborations(
 
 def test_record_holds_with_single_corroboration(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("BUGGY_CORROBORATION_REQUIRED", "1")
-    store = _ReadStore(
-        finder="finder-a", corrs=[_corr_row("validator-a")], anchors={"e1": "tc-1"}
-    )
+    store = _ReadStore(finder="finder-a", corrs=[_corr_row("validator-a")], anchors={"e1": "tc-1"})
     payload, persist = _run_full(store)
     assert payload["success"] is False
     assert payload["state"] == "open_proof_gap"

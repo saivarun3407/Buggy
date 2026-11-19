@@ -125,7 +125,6 @@ def test_middleware_wrap_tool_call_rejects_kg_record_without_engagement(
     """End-to-end refusal: no engagement on state → middleware returns
     a ToolMessage and the live store is NEVER touched."""
     mw = KGMiddleware(store=kgstore)
-    kg_record = next(t for t in mw.tools if t.name == "kg_record")
 
     tool_request = SimpleNamespace(
         tool=SimpleNamespace(name="kg_record"),

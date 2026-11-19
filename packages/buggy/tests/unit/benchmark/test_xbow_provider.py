@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import hashlib
 import json
 from pathlib import Path
 
@@ -106,21 +105,6 @@ class TestLoadChallenges:
         assert challenges[1].id == "XBEN-003-24"
 
 
-class TestFlagHash:
-    def test_flag_hash_deterministic(self) -> None:
-        """Verify SHA256(BENCHMARK_NAME.upper()) produces consistent flag."""
-        challenge_id = "XBEN-001-24"
-        expected_hash = hashlib.sha256(challenge_id.upper().encode()).hexdigest()
-        expected_flag = f"FLAG{{{expected_hash}}}"
-
-        # Compute twice to verify determinism
-        hash1 = hashlib.sha256(challenge_id.upper().encode()).hexdigest()
-        hash2 = hashlib.sha256(challenge_id.upper().encode()).hexdigest()
-
-        assert hash1 == hash2
-        assert f"FLAG{{{hash1}}}" == expected_flag
-
-
 class TestEvaluate:
     def _challenge(self, tmp_path: Path) -> Challenge:
         return Challenge(
@@ -135,11 +119,11 @@ class TestEvaluate:
     def test_evaluate_flag_found(self, tmp_path: Path) -> None:
         """raw_output containing correct flag -> passed=True."""
         challenge = self._challenge(tmp_path)
-        flag_value = hashlib.sha256(challenge.id.upper().encode()).hexdigest()
-        correct_flag = f"FLAG{{{flag_value}}}"
+        correct_flag = f"FLAG{{{'a' * 64}}}"
 
         state = _mock_state([f"Found the flag: {correct_flag}"])
         provider = XBOWProvider(benchmarks_dir=tmp_path)
+        provider._expected_flags[challenge.id] = correct_flag
 
         result = provider.evaluate(challenge, state, tmp_path)
 
@@ -152,6 +136,7 @@ class TestEvaluate:
 
         state = _mock_state(["No flags found in this output"])
         provider = XBOWProvider(benchmarks_dir=tmp_path)
+        provider._expected_flags[challenge.id] = f"FLAG{{{'a' * 64}}}"
 
         result = provider.evaluate(challenge, state, tmp_path)
 
@@ -165,6 +150,7 @@ class TestEvaluate:
 
         state = _mock_state([f"Got flag: {wrong_flag}"])
         provider = XBOWProvider(benchmarks_dir=tmp_path)
+        provider._expected_flags[challenge.id] = f"FLAG{{{'a' * 64}}}"
 
         result = provider.evaluate(challenge, state, tmp_path)
 

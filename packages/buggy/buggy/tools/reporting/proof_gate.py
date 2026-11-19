@@ -37,6 +37,7 @@ import re
 from dataclasses import dataclass, field
 from enum import Enum
 from typing import Any
+from urllib.parse import urlparse
 
 from buggy.tools.proxy.tools import CaidoClient, CaidoError
 from buggy.tools.reporting.cvss import CVSSError, score_vector
@@ -387,6 +388,54 @@ def verify_http_exchange_ids(
     return request_ids, [], None
 
 
+def _captured_request_url(payload: Any) -> str:
+    if not isinstance(payload, dict):
+        return ""
+    data = payload.get("data")
+    for candidate in (
+        payload,
+        payload.get("request"),
+        data,
+        data.get("request") if isinstance(data, dict) else None,
+    ):
+        if isinstance(candidate, dict):
+            for key in ("url", "request_url", "requestUrl", "uri"):
+                value = candidate.get(key)
+                if isinstance(value, str) and value.strip():
+                    return value.strip()
+    return ""
+
+
+def target_binding_errors(
+    client: CaidoClient | None,
+    request_ids: list[str] | None,
+    target: Any,
+    *,
+    evidence_unverified: bool,
+) -> list[str]:
+    """Require verified captures to use the finding target's origin."""
+    if evidence_unverified or client is None or not request_ids:
+        return []
+    expected = urlparse(str(target or "").strip())
+    if not expected.scheme or not expected.hostname:
+        return []
+    expected_origin = (expected.scheme.lower(), expected.hostname.lower(), expected.port)
+    errors = []
+    for request_id in request_ids:
+        try:
+            actual = urlparse(_captured_request_url(client.view_request(request_id)))
+        except Exception as exc:  # noqa: BLE001 — initial probe classified availability
+            errors.append(f"http_exchange_id {request_id} target could not be verified: {exc}")
+            continue
+        actual_origin = (actual.scheme.lower(), (actual.hostname or "").lower(), actual.port)
+        if actual_origin != expected_origin:
+            errors.append(
+                f"http_exchange_id {request_id} does not match finding target origin "
+                f"{expected.scheme.lower()}://{expected.netloc}"
+            )
+    return errors
+
+
 # ── Optional CVSS validation (reuses the spine's cvss.py) ──────────────
 
 
@@ -508,6 +557,14 @@ def verify_finding(
 
     ids, id_errors, warning = verify_http_exchange_ids(client, finding.get("http_exchange_ids"))
     errors.extend(id_errors)
+    errors.extend(
+        target_binding_errors(
+            client,
+            ids,
+            finding.get("target"),
+            evidence_unverified=warning is not None,
+        )
+    )
     if strict and not id_errors and not ids:
         errors.append(LIVE_EVIDENCE_REQUIRED_ERROR)
 

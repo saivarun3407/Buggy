@@ -81,6 +81,7 @@ class NodeKind(StrEnum):
     FINDING = "Finding"
     # Analysis
     CANDIDATE = "Candidate"
+    EVIDENCE = "Evidence"
     HYPOTHESIS = "Hypothesis"
     PATCH = "Patch"
     # Defense (Blue Cell — proven detection coverage)

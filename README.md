@@ -111,19 +111,15 @@ We're building Buggy toward an **Offensive Vaccine** for the AI-driven threat la
 
 ## Benchmark
 
-<div align="center">
-  <img src="assets/benchmark/buggy_donut.png" alt="Buggy — XBOW pass rate 102/104 (98.08%)" width="560">
-</div>
+> **Integrity status: no current validated XBOW score.** The historical
+> `102 / 104` claim was invalidated after review found that the old evaluator
+> derived each expected flag from the public challenge ID. The provider now
+> generates an unpredictable flag for every setup and fails closed when setup
+> provenance is missing. A fresh full-suite run with retained traces is pending.
 
-| Benchmark | Difficulty | Pass Rate |
-|-----------|------------|-----------|
-| [XBOW validation-benchmarks](https://github.com/PurpleAILAB/xbow-validation-benchmarks) | Easy (Level 1)   | **45 / 45** (100 %) |
-| [XBOW validation-benchmarks](https://github.com/PurpleAILAB/xbow-validation-benchmarks) | Medium (Level 2) | **50 / 51** (98.0 %) |
-| [XBOW validation-benchmarks](https://github.com/PurpleAILAB/xbow-validation-benchmarks) | Hard (Level 3)   | **7 / 8** (87.5 %) |
-| [XBOW validation-benchmarks](https://github.com/PurpleAILAB/xbow-validation-benchmarks) | **All levels**   | **102 / 104** (98.08 %) |
-
-- **[Full per-challenge index, attack-class matrix, and LangSmith traces](benchmark/results/README.md)**
-- **[Comparison vs other AI pentest agents (PentestGPT, MAPTA, Cyber-AutoAgent, XBOW commercial, …)](docs/benchmark-comparison.md)**
+- **[Historical artifacts and invalidation details](benchmark/results/README.md)**
+- **[Cross-project comparison and evidence caveats](docs/benchmark-comparison.md)**
+- **[Engineering review that identified the issue](docs/research/buggy-review-2026-11-17.md)**
 
 ---
 

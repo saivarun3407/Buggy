@@ -159,6 +159,17 @@ def build_kg_tools(
                 return _err(f"observations must be valid JSON list: {exc}")
             if not isinstance(obs_list, list):
                 return _err("observations must be a JSON list of observation dicts")
+            forbidden = [
+                str(observation.get("kind"))
+                for observation in obs_list
+                if isinstance(observation, dict)
+                and observation.get("kind") in {"Candidate", "Finding"}
+            ]
+            if forbidden:
+                return _err(
+                    "kg_record cannot create Candidate/Finding nodes; "
+                    "use report_record_finding so proof and corroboration gates run"
+                )
 
             try:
                 result = store.record_observations(

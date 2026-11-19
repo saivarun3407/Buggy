@@ -3,44 +3,50 @@
 Side-by-side numbers for AI / LLM pentesting agents that have **publicly released results on the
 [XBOW Validation Benchmark](https://github.com/xbow-engineering/validation-benchmarks)** (104 web-app CTF challenges, 3 difficulty tiers).
 
-<div align="center">
-  <img src="../assets/benchmark/leaderboard.png" alt="XBOW leaderboard — Buggy at 98.08 %" width="780">
-</div>
+> **Buggy is currently unranked.** Its historical `102 / 104` claim is
+> invalid because the former evaluator derived the expected flag from the
+> public challenge ID. That result cannot establish exploitation and must not
+> be compared with other systems. The provider now uses a random per-run secret;
+> no fresh full-suite result has been published.
 
-- **Buggy mode** — black-box (no source code, no config, no service internals). The agent receives the per-challenge `benchmark.yaml` metadata as engagement context: the one-line `description`, the `Vulnerability tags:` list (e.g. `idor`, `default_credentials`, `ssti`), and the flag format. The agent discovers endpoints, parameters, sinks, payloads, and gadgets on its own.
-- **Buggy status** — cycle-4 final · 102 / 104 (98.08 %). L1 complete; L2 50/51 (one outstanding); L3 7/8 (one outstanding).
-- **Per-challenge evidence + LangSmith traces** — [`benchmark/results/README.md`](../benchmark/results/README.md).
+- **Historical mode** — black-box (no source code, config, or service internals), with challenge vulnerability tags supplied as engagement context.
+- **Historical artifacts** — retained for audit, not as performance evidence, in [`benchmark/results/README.md`](../benchmark/results/README.md).
+- **Review evidence** — [`docs/research/buggy-review-2026-11-17.md`](research/buggy-review-2026-11-17.md).
 
 ## Leaderboard
 
 | # | System | XBOW Score | Mode | Source |
 |--:|---|---|---|---|
-|  **1** | **Buggy** *(this repo)*     | **98.08 %** (102 / 104) — L1: 100 % (45/45) · L2: 98.0 % (50/51) · L3: 87.5 % (7/8) | **black-box**, LangGraph multi-agent | [github](https://github.com/saivarun3407/buggy) |
-|  2 | **PentestGPT** (USENIX '24)          | **86.5 %** (90 / 104)   | black-box                 | [github](https://github.com/GreyDGL/PentestGPT) · [paper](https://www.usenix.org/conference/usenixsecurity24/presentation/deng) |
-|  3 | **Red-MIRROR**                       | **86.0 %**              | black-box, multi-agent + RAG | arXiv [2603.27127](https://arxiv.org/abs/2603.27127) |
-|  4 | **XBOW** (commercial)                | **≈85 %**               | black-box, proprietary    | [xbow.com/blog/benchmarks](https://xbow.com/blog/benchmarks) |
-|  5 | **Cyber-AutoAgent** (westonbrown)    | **84.62 %** (88 / 104) — v0.1.3 [archived]; 81 % v0.1.1; 45.92 % (45/98) v0.1.0 | black-box, meta-agent | [github](https://github.com/westonbrown/Cyber-AutoAgent) |
-|  6 | **MAPTA**                            | **76.9 %** (80 / 104)   | black-box, multi-agent    | arXiv [2508.20816](https://arxiv.org/abs/2508.20816) |
-|  7 | PentestAgent                         | 50.0 % [^retest]        | black-box                 | arXiv 2411.05185; re-tested in Red-MIRROR |
-|  8 | AutoPT                               | 46.0 % [^retest]        | black-box                 | re-tested in Red-MIRROR |
-|  9 | VulnBot                              |  6.0 % [^retest]        | black-box, baseline       | arXiv [2501.13411](https://arxiv.org/abs/2501.13411); re-tested in Red-MIRROR |
+| — | **Buggy** *(this repo)* | **No valid current score** — historical result invalidated | black-box, LangGraph multi-agent | [review](research/buggy-review-2026-11-17.md) |
+| 1 | **PentestGPT** (USENIX '24)          | **86.5 %** (90 / 104)   | black-box                 | [github](https://github.com/GreyDGL/PentestGPT) · [paper](https://www.usenix.org/conference/usenixsecurity24/presentation/deng) |
+| 2 | **Red-MIRROR**                       | **86.0 %**              | black-box, multi-agent + RAG | arXiv [2603.27127](https://arxiv.org/abs/2603.27127) |
+| 3 | **XBOW** (commercial)                | **≈85 %**               | black-box, proprietary    | [xbow.com/blog/benchmarks](https://xbow.com/blog/benchmarks) |
+| 4 | **Cyber-AutoAgent** (westonbrown)    | **84.62 %** (88 / 104) — v0.1.3 [archived]; 81 % v0.1.1; 45.92 % (45/98) v0.1.0 | black-box, meta-agent | [github](https://github.com/westonbrown/Cyber-AutoAgent) |
+| 5 | **MAPTA**                            | **76.9 %** (80 / 104)   | black-box, multi-agent    | arXiv [2508.20816](https://arxiv.org/abs/2508.20816) |
+| 6 | PentestAgent                         | 50.0 % [^retest]        | black-box                 | arXiv 2411.05185; re-tested in Red-MIRROR |
+| 7 | AutoPT                               | 46.0 % [^retest]        | black-box                 | re-tested in Red-MIRROR |
+| 8 | VulnBot                              |  6.0 % [^retest]        | black-box, baseline       | arXiv [2501.13411](https://arxiv.org/abs/2501.13411); re-tested in Red-MIRROR |
 
 
 [^retest]: 50 % / 46 % / 6 % numbers come from the **Red-MIRROR ablation** re-running these systems on XBOW, not from the systems' own papers (VulnBot's own paper uses AutoPenBench).
 
 ## Per-Difficulty (where published)
 
-![Pass rate by difficulty — PentestGPT · Buggy](../assets/benchmark/difficulty.png)
-
 | System | L1 | L2 | L3 | Total |
 |---|---|---|---|---|
 | **PentestGPT**  | 42 / 46 — 91.1 %     | 43 / 50 — 74.5 %             | 5 / 8 — 62.5 %    | **86.5 %**  |
-| **Buggy**  | **45 / 45 — 100 %**  | **50 / 51 — 98.0 %**  | **7 / 8 — 87.5 %**  | **98.08 %** (102 / 104) |
+
+Buggy's former per-difficulty values are omitted because they came from the
+invalidated evaluation.
 
 PentestGPT per-level avg cost / time: L1 $0.65 / 4.4 min · L2 $1.33 / 6.9 min · L3 $3.03 / 12.9 min (median across all 104: $0.42 / 3.3 min).
 XBOW commercial does not publish a per-difficulty breakdown for its own agent — only the headline 85 % vs the senior pentester's 85 % in 40 hours.
 
-## Per-Vulnerability
+## Historical Buggy Per-Vulnerability Artifact
+
+The table below was generated from the invalidated Buggy result set. It is
+retained only to preserve the audit trail and must not be interpreted as
+confirmed exploit coverage or compared with valid benchmark results.
 
 | Class | Total | Solved | Rate |
 |---|---:|---:|---:|
@@ -55,7 +61,8 @@ XBOW commercial does not publish a per-difficulty breakdown for its own agent �
 
 **MAPTA** per-class (overall 76.9 %): SSRF 100 % · Misconfig 100 % · SSTI 85 % · SQLi 83 % · Broken Authz 83 % · Cmd-Inj 75 % · XSS 57 % · Blind SQLi 0 %.
 
-**Buggy** per-class — see [`benchmark/results/README.md`](../benchmark/results/README.md). 23 classes covered; top: XSS (14), Cmd-Inj (8), Default Creds (8), SSTI (7), LFI (6), IDOR (6).
+Historical Buggy per-class artifacts are indexed in
+[`benchmark/results/README.md`](../benchmark/results/README.md).
 
 ## Adjacent — Don't Publish XBOW (different benchmark)
 

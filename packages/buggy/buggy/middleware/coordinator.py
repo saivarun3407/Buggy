@@ -165,6 +165,9 @@ class CoordinatorState(AgentState):
     that id as parent. Unset at the root, giving the root ``parent_id``
     ``None``."""
 
+    coordinator_agent_id: Annotated[NotRequired[str | None], OmitFromInput, reduce_converging_value]
+    """Identity of this specific agent invocation, never middleware-instance state."""
+
 
 COORDINATOR_SYSTEM_PROMPT = (
     "## Agent coordination\n"
@@ -194,15 +197,7 @@ class CoordinatorMiddleware(AgentMiddleware):
     def __init__(self, *, role: str) -> None:
         super().__init__()
         self._role = role
-        self._agent_id: str | None = None
-        self._node: AgentNode | None = None
-        self._completion_reported = False
-        # The caller of send_message/read_messages is always THIS agent, so
-        # the tools resolve the caller id from the instance rather than from
-        # state. The instance id is pollution-immune. A returning child merges
-        # its own current_agent_id back up, so reading the caller id from state
-        # would misattribute a send after the first child returns.
-        self.tools = build_coordinator_tools(lambda: self._agent_id)
+        self.tools = build_coordinator_tools()
 
     @override
     def before_agent(self, state: Any, runtime: Any) -> dict[str, Any] | None:
@@ -225,12 +220,13 @@ class CoordinatorMiddleware(AgentMiddleware):
         get = state.get if hasattr(state, "get") else (lambda _k, _d=None: _d)
         graph = get("agent_graph") or {}
 
-        if self._node is not None:
-            if graph.get(self._agent_id) == self._node:
+        existing_id = get("coordinator_agent_id")
+        existing = graph.get(existing_id) if existing_id else None
+        if existing and existing.get("role") == self._role and existing.get("status") == "running":
+            if get("current_agent_id") == existing_id:
                 return None
             return {
-                "agent_graph": {self._agent_id: self._node},
-                "current_agent_id": self._agent_id,
+                "current_agent_id": existing_id,
             }
 
         parent_id = get("current_agent_id")
@@ -247,17 +243,18 @@ class CoordinatorMiddleware(AgentMiddleware):
         return {
             "agent_graph": {agent_id: dict(node)},
             "current_agent_id": agent_id,
+            "coordinator_agent_id": agent_id,
         }
 
     @override
     def after_agent(self, state: Any, runtime: Any) -> dict[str, Any] | None:
-        return self._report_completion()
+        return self._report_completion(state)
 
     @override
     async def aafter_agent(self, state: Any, runtime: Any) -> dict[str, Any] | None:
-        return self._report_completion()
+        return self._report_completion(state)
 
-    def _report_completion(self) -> dict[str, Any] | None:
+    def _report_completion(self, state: Any) -> dict[str, Any] | None:
         """Post one completion message to the parent's mailbox, once.
 
         Mirrors strix's ``agent_finish``-to-parent. A root agent (no parent)
@@ -265,33 +262,38 @@ class CoordinatorMiddleware(AgentMiddleware):
         ``after_agent`` call from minting a second message with a fresh id,
         which would survive the mailbox reducer's dedupe as a duplicate.
         """
-        if self._node is None or self._completion_reported:
+        get = state.get if hasattr(state, "get") else (lambda _k, _d=None: _d)
+        agent_id = get("coordinator_agent_id")
+        node = (get("agent_graph") or {}).get(agent_id)
+        if not agent_id or not node or node.get("status") == "finished":
             return None
-        parent_id = self._node.get("parent_id")
+        completed = {**node, "status": "finished"}
+        update: dict[str, Any] = {"agent_graph": {agent_id: completed}}
+        parent_id = node.get("parent_id")
         if not parent_id:
-            return None
-        self._completion_reported = True
+            return update
         message: Message = {
             "message_id": uuid4().hex,
-            "from_agent_id": cast("str", self._agent_id),
+            "from_agent_id": agent_id,
             "to_agent_id": parent_id,
             "type": "information",
             "priority": "normal",
-            "body": f"Agent {self._agent_id} ({self._role}) finished.",
+            "body": f"Agent {agent_id} ({self._role}) finished.",
             "sent_at": datetime.now(timezone.utc).isoformat(),
             "read": False,
         }
-        return {"mailboxes": {parent_id: [dict(message)]}}
+        update["mailboxes"] = {parent_id: [dict(message)]}
+        return update
 
     @override
     def after_model(self, state: Any, runtime: Any) -> dict[str, Any] | None:
-        return self._reassert_current()
+        return self._reassert_current(state)
 
     @override
     async def aafter_model(self, state: Any, runtime: Any) -> dict[str, Any] | None:
-        return self._reassert_current()
+        return self._reassert_current(state)
 
-    def _reassert_current(self) -> dict[str, Any] | None:
+    def _reassert_current(self, state: Any) -> dict[str, Any] | None:
         """Re-point ``current_agent_id`` at this agent after each model turn.
 
         A child merges its own ``current_agent_id`` up into the parent on
@@ -303,9 +305,10 @@ class CoordinatorMiddleware(AgentMiddleware):
         children would thread to a prior sibling and misroute their
         completion reports.
         """
-        if self._agent_id is None:
+        agent_id = state.get("coordinator_agent_id") if hasattr(state, "get") else None
+        if not agent_id:
             return None
-        return {"current_agent_id": self._agent_id}
+        return {"current_agent_id": agent_id}
 
     @override
     def wrap_model_call(self, request: Any, handler: Any) -> Any:

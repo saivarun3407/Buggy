@@ -25,8 +25,11 @@ from buggy.tools.reporting.executive import render_executive_summary
 from buggy.tools.reporting.hackerone import render_hackerone_markdown
 from buggy.tools.reporting.kg_adapter import (
     canonical_finding_key,
+    is_publishable_node,
     load_corroboration_inputs,
     load_engagement_graph,
+    persist_candidate_node,
+    persist_closure_state,
     publish_finding_node,
 )
 from buggy.tools.reporting.proof_gate import proof_gate_strict, verify_finding
@@ -66,6 +69,8 @@ def report_hackerone(finding_id: str) -> str:
     node = graph.nodes.get(finding_id)
     if node is None:
         return _json({"error": f"no node {finding_id} in graph"})
+    if not is_publishable_node(node):
+        return _json({"error": f"node {finding_id} is not a confirmed, published finding"})
     md = render_hackerone_markdown(node, graph=graph)
     return _json({"id": finding_id, "markdown": md})
 
@@ -192,6 +197,7 @@ def record_finding(
     strict: bool,
     client: CaidoClient | None,
     corroboration_provider: CorroborationProvider = load_corroboration_inputs,
+    created_by: str = "analyst",
 ) -> dict[str, Any]:
     """Run a finding through the proof gate, then the corroboration gate, then publish it.
 
@@ -202,6 +208,13 @@ def record_finding(
     result = verify_finding(finding, client=client, strict=strict)
     if not result.accepted:
         return {"success": False, "error": "Validation failed", "errors": result.errors}
+
+    engagement = get_active_engagement() or ""
+    candidate_id, candidate_persisted = persist_candidate_node(
+        engagement,
+        finding,
+        created_by=created_by,
+    )
 
     # On by default: the KG provider now reads real CORROBORATES / CONTRADICTS
     # edges, so a proven finding publishes only when independent sources
@@ -218,11 +231,19 @@ def record_finding(
             evidence_resolves=evidence_resolves,
         )
         if not verdict.published:
+            persisted_state = persist_closure_state(
+                engagement,
+                canonical_finding_key(finding),
+                state=verdict.state.value,
+                reasons=verdict.reasons,
+            )
             return {
                 "success": False,
                 "error": "Not published",
                 "state": verdict.state.value,
                 "reasons": verdict.reasons,
+                "candidate_id": candidate_id,
+                "persisted": candidate_persisted and persisted_state,
             }
 
     # Mint human-reviewable replay artifacts for live-verified evidence —
@@ -240,7 +261,7 @@ def record_finding(
     if replay:
         node_fields["replay"] = replay
 
-    node_id, persisted = publish_finding_node(get_active_engagement() or "", node_fields)
+    node_id, persisted = publish_finding_node(engagement, node_fields, created_by=created_by)
 
     payload: dict[str, Any] = {
         "success": True,

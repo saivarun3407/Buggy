@@ -71,12 +71,16 @@ def validate_ruled_out(r: RuledOut) -> list[str]:
 
 
 def independent_corroboration_count(corroborations: Iterable[Corroboration]) -> int:
-    """Count distinct ``(source_agent_id, tool_family)`` sources.
+    """Count signals that are independent by both agent and tool family.
 
-    Agreement from one agent through one tool family is a single signal
-    repeated, whatever its modality.
+    Two tool families run by one agent are not two independent reviewers, and
+    two agents repeating one tool family are not two independent methods.
     """
-    return len({(c.source_agent_id, c.tool_family) for c in corroborations})
+    values = list(corroborations)
+    return min(
+        len({c.source_agent_id for c in values if c.source_agent_id}),
+        len({c.tool_family for c in values if c.tool_family}),
+    )
 
 
 def corroboration_verdict(

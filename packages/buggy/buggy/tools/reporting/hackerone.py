@@ -22,6 +22,7 @@ class HackerOneReport:
     cvss_vector: str = ""
     cvss_score: float | None = None
     summary: str = ""
+    target: str = ""
     steps: list[str] = field(default_factory=list)
     impact: str = ""
     poc: str = ""
@@ -41,6 +42,10 @@ class HackerOneReport:
         out.append("## Summary")
         out.append(self.summary or "_(pending)_")
         out.append("")
+        if self.target:
+            out.append("## Affected Target")
+            out.append(self.target)
+            out.append("")
 
         out.append("## Steps to Reproduce")
         if self.steps:
@@ -87,13 +92,22 @@ def render_hackerone_markdown(finding_node: Node, *, graph: KnowledgeGraph) -> s
     cvss_vector = props.get("cvss_vector") or ""
     cvss_score = props.get("cvss_score")
     summary = props.get("summary") or props.get("description") or ""
-    poc = props.get("poc_command") or props.get("stdout_excerpt") or ""
+    poc = (
+        props.get("poc_script_code")
+        or props.get("poc_command")
+        or props.get("stdout_excerpt")
+        or ""
+    )
     impact = props.get("impact") or ""
     remediation = props.get("remediation") or ""
     references: list[Any] = list(props.get("references") or [])
 
     # Auto-build step list when none provided
     steps: list[str] = list(props.get("steps") or [])
+    if not steps and props.get("poc_description"):
+        steps = [
+            line.strip() for line in str(props["poc_description"]).splitlines() if line.strip()
+        ]
     if not steps and poc:
         steps = [f"Run the PoC: ``{poc.strip().splitlines()[0] if poc else ''}``"]
         steps.append("Observe the response matches the success patterns described above.")
@@ -123,6 +137,7 @@ def render_hackerone_markdown(finding_node: Node, *, graph: KnowledgeGraph) -> s
         cvss_vector=cvss_vector,
         cvss_score=cvss_score if isinstance(cvss_score, (int, float)) else None,
         summary=summary,
+        target=str(props.get("target") or props.get("url") or ""),
         steps=steps,
         impact=impact,
         poc=poc,

@@ -14,6 +14,7 @@ import csv
 import io
 from typing import Iterable
 
+from buggy.tools.reporting.kg_adapter import is_publishable_node
 from buggy_core.types.kg import KnowledgeGraph, NodeKind
 
 _HEADER: tuple[str, ...] = (
@@ -47,6 +48,8 @@ def render_bugcrowd_csv(
     for node in sorted(graph.nodes.values(), key=lambda n: n.created_at):
         if node.kind not in include_set:
             continue
+        if not is_publishable_node(node):
+            continue
         sev = node.props.get("severity", "info")
         if sev not in severity_order or severity_order.index(sev) < min_rank:
             continue
@@ -60,10 +63,15 @@ def render_bugcrowd_csv(
                 node.label[:240],
                 sev,
                 cwe,
-                node.props.get("url") or node.props.get("file") or "",
+                node.props.get("target") or node.props.get("url") or node.props.get("file") or "",
                 (node.props.get("description") or node.props.get("summary") or "")[:2000],
                 node.props.get("recommendation") or "",
-                (node.props.get("poc_command") or node.props.get("stdout_excerpt") or "")[:2000],
+                (
+                    node.props.get("poc_script_code")
+                    or node.props.get("poc_command")
+                    or node.props.get("stdout_excerpt")
+                    or ""
+                )[:2000],
                 node.props.get("cvss_vector") or "",
                 node.props.get("cvss_score") or "",
             ]
