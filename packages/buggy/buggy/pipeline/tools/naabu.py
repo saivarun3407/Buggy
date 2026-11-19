@@ -16,6 +16,9 @@ class Naabu:
     name = "naabu"
     passive = False
 
+    def __init__(self, resolvers: tuple[str, ...] = ()) -> None:
+        self._resolvers = resolvers
+
     def invocation(
         self, binary: str, inputs: list[str], limits: PipelineLimits, workdir: Path
     ) -> Invocation:
@@ -32,12 +35,14 @@ class Naabu:
             "-c", str(limits.concurrency),
             "-retries", "1",
         ]  # fmt: skip
+        if self._resolvers:
+            argv += ["-r", ",".join(self._resolvers)]
         return Invocation(argv=argv, timeout=3600)
 
     def parse(self, raw: str) -> Iterator[Record]:
         for line, obj in iter_jsonl(raw):
             try:
-                port = int(obj.get("port"))
+                port = int(obj.get("port") or 0)
             except (TypeError, ValueError):
                 continue
             if not 0 < port < 65536:

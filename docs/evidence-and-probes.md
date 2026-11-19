@@ -1,0 +1,86 @@
+# Evidence gateway, probes and the stack's MCP servers
+
+Agents do not run scanners and do not send evidence requests themselves. They
+query four services over MCP; each service is plain code with its own scope
+check. The engagement is bound from the run and is never a tool argument the
+model chooses.
+
+| Service | Port | Code | Agent tools |
+|---|---|---|---|
+| `pipeline-mcp` | 9460 | `buggy/pipeline/mcp_server.py` | `recon_summary`, `recon_assets`, `recon_query`, `recon_record`, `recon_diff`, `recon_scope_drops`, `recon_raw`, `recon_request_rerun`, `recon_rerun_status` |
+| `capture-mcp` | 9461 | `buggy/capture/mcp_server.py` | `http_send`, `http_replay`, `http_capture`, `http_captures`, `capture_verify`, `probe_list`, `probe_run` |
+| `scope-mcp` | 9462 | `buggy/capture/scope_server.py` | `scope_show`, `scope_check`, `program_info` |
+| `browser-mcp` | 9463 | `buggy/scoped_browser/mcp_server.py` | `browser_open`, `browser_click`, `browser_fill`, `browser_eval`, `browser_text`, `browser_html`, `browser_screenshot`, `browser_cookies`, `browser_requests`, `browser_close` |
+
+Agent-side wrappers: `buggy/tools/stack_mcp.py`. Read-only roles get recon and
+scope; testing roles get all four.
+
+## Evidence gateway (`capture-mcp`)
+
+Every `http_send` goes through, in order:
+
+1. **Scope** — the URL's host must be in the enforced `roe.json`
+   (`OUT_OF_SCOPE`, `NO_ENFORCED_SCOPE`).
+2. **Internal addresses** — an in-scope name that resolves to a private,
+   loopback or link-local address is refused (`INTERNAL_ADDRESS`) unless that
+   address is itself in scope or the engagement sets
+   `network.allow_private_targets` (labs, internal assessments).
+3. **Approval** — any method other than GET/HEAD/OPTIONS is held until the
+   operator allows that exact request (`APPROVAL_REQUIRED`), unless the
+   engagement sets `approvals.state_changing: "not_required"` (labs only).
+4. **Rate limit** — the engagement's `pipeline.rate_limit_rps`.
+5. **Send** — redirects are returned, never followed.
+6. **Record** — full request and response in the capture store, plus a
+   hash-chained line in `audit/<engagement>/captures.jsonl`.
+
+`http_replay` re-sends a capture; `capture_verify` re-sends it and reports
+whether the result matches and whether the host is in scope. A finding's PoC
+is a capture id that verifies.
+
+## Probes
+
+`probe_run` executes one deterministic check through the gateway and returns
+`vulnerable: true | false | null`, a summary, the capture ids, and a
+remediation. `null` means "could not tell" and is never reported as a pass.
+
+| Probe | Class | Lab test that proves it |
+|---|---|---|
+| `jwt_alg_none` | auth / session | `test_jwt_probe_finds_unsigned_token_acceptance` |
+| `idor` | access control | `test_idor_probe_finds_basket_idor` |
+| `ssrf_canary` | SSRF | `test_ssrf_probe_finds_profile_image_ssrf` |
+| `numeric_boundary` | business logic | `test_boundary_probe_finds_negative_quantity` |
+| `mass_assignment` | API | `test_mass_assignment_probe_finds_admin_registration` |
+| `graphql_checks` | GraphQL | `test_graphql_probe_finds_introspection_suggestions_and_private_data` |
+
+Tests live in `packages/buggy/tests/lab/test_probes_find_known_bugs.py` and
+run against real Juice Shop and DVGA containers (`BUGGY_LAB=1`). Each probe
+also has a negative control.
+
+The SSRF probe needs a callback listener the target can reach:
+`BUGGY_CANARY_BASE_URL` (a hostname you control that forwards to port 9470 of
+`capture-mcp`). Without it the probe returns `null`.
+
+## Scoped browser (`browser-mcp`)
+
+Chromium with a route handler on every request: out-of-scope and
+internal-address requests are aborted and listed in `browser_requests`. While
+the engagement requires approval for state-changing requests, the browser
+only lets GET/HEAD/OPTIONS through.
+
+## Trust boundaries
+
+- None of these services is on the sandbox network; the agent's shell cannot
+  reach them. Only langgraph calls them.
+- All mount the control root read-only. Only `capture-mcp` writes the capture
+  store. `scope-mcp` has no network egress.
+- None carries model credentials.
+
+Invariants are pinned in `tests/test_compose_network_isolation.py`.
+
+## Known limits
+
+- The older in-process tools (`http_request`, `browser_action`, `proxy_*`)
+  still exist and are checked by the RoE parser only, not by the gateway.
+  Use `http_send` / `browser_*` for anything that counts as evidence.
+- The MCP servers have no authentication of their own; they rely on network
+  placement (management network only).

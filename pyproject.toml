@@ -19,6 +19,9 @@ dependencies = [
 # root activates the framework's neo4j driver. Without this, the extra
 # is invisible at root because uv treats extras as per-project.
 neo4j = ["buggy[neo4j]"]
+# The MCP SDK: the agents' client for the stack's own MCP servers (recon data,
+# capture gateway, scope, browser) and the ``buggy-mcp`` control server.
+mcp = ["buggy[mcp]"]
 
 [tool.uv]
 # Virtual root — no wheel built from the workspace umbrella. Real
@@ -150,6 +153,7 @@ markers = [
     "asyncio: mark test as async (pytest-asyncio)",
     "slow: integration-style tests that hit wall-clock timeouts or otherwise take seconds; deselected from the PR fast lane",
     "e2e: tests that start real containers with docker compose; skipped unless BUGGY_E2E=1",
+    "lab: tests against local intentionally vulnerable applications; skipped unless BUGGY_LAB=1",
 ]
 addopts = [
     "--strict-markers",

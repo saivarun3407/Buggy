@@ -1,0 +1,406 @@
+{
+  "app": "juice-shop",
+  "image": "bkimminich/juice-shop:v17.1.1",
+  "source": "OWASP Juice Shop challenge catalogue (https://pwning.owasp-juice.shop/companion-guide/latest/part2/challenges.html) for v17.1.1",
+  "notes": "A subset of the application's documented challenges, chosen to cover each scored class. `verified_by` names the lab test in this repository that reproduces the entry against the running container; entries without one are taken from the upstream catalogue and were not reproduced here.",
+  "entries": [
+    {
+      "id": "js-sqli-login",
+      "class": "injection",
+      "title": "SQL injection in login allows authentication bypass",
+      "method": "POST",
+      "location": "^/rest/user/login",
+      "cwe": 89,
+      "keywords": [
+        "login",
+        "sql"
+      ],
+      "verified_by": null
+    },
+    {
+      "id": "js-sqli-search",
+      "class": "injection",
+      "title": "UNION-based SQL injection in product search",
+      "method": "GET",
+      "location": "^/rest/products/search",
+      "cwe": 89,
+      "keywords": [
+        "search",
+        "sql"
+      ],
+      "verified_by": null
+    },
+    {
+      "id": "js-nosqli-reviews",
+      "class": "injection",
+      "title": "NoSQL injection in product review update",
+      "method": "PATCH",
+      "location": "^/rest/products/reviews",
+      "cwe": 943,
+      "keywords": [
+        "review",
+        "nosql"
+      ],
+      "verified_by": null
+    },
+    {
+      "id": "js-jwt-unsigned",
+      "class": "auth_session",
+      "title": "JWT with alg=none is accepted",
+      "method": "ANY",
+      "location": "^/(api|rest)/",
+      "cwe": 347,
+      "keywords": [
+        "jwt",
+        "unsigned",
+        "alg"
+      ],
+      "verified_by": "packages/buggy/tests/lab/test_probes_find_known_bugs.py::test_jwt_probe_finds_unsigned_token_acceptance"
+    },
+    {
+      "id": "js-weak-admin-password",
+      "class": "auth_session",
+      "title": "Administrator account uses a guessable password",
+      "method": "POST",
+      "location": "^/rest/user/login",
+      "cwe": 521,
+      "keywords": [
+        "admin",
+        "password",
+        "default",
+        "weak"
+      ],
+      "verified_by": null
+    },
+    {
+      "id": "js-reset-security-question",
+      "class": "auth_session",
+      "title": "Password reset protected only by a guessable security question",
+      "method": "POST",
+      "location": "^/rest/user/reset-password",
+      "cwe": 640,
+      "keywords": [
+        "reset",
+        "security question"
+      ],
+      "verified_by": null
+    },
+    {
+      "id": "js-idor-basket",
+      "class": "access_control",
+      "title": "Any authenticated user can read another user's basket",
+      "method": "GET",
+      "location": "^/rest/basket/\\d+",
+      "cwe": 639,
+      "keywords": [
+        "basket",
+        "idor"
+      ],
+      "verified_by": "packages/buggy/tests/lab/test_probes_find_known_bugs.py::test_idor_probe_finds_basket_idor"
+    },
+    {
+      "id": "js-forged-feedback",
+      "class": "access_control",
+      "title": "Feedback can be posted as another user (UserId is client-controlled)",
+      "method": "POST",
+      "location": "^/api/Feedbacks",
+      "cwe": 639,
+      "keywords": [
+        "feedback",
+        "userid"
+      ],
+      "verified_by": null
+    },
+    {
+      "id": "js-forged-review",
+      "class": "access_control",
+      "title": "Product reviews can be edited by any user",
+      "method": "PATCH",
+      "location": "^/rest/products/reviews",
+      "cwe": 639,
+      "keywords": [
+        "review"
+      ],
+      "verified_by": null
+    },
+    {
+      "id": "js-users-list",
+      "class": "access_control",
+      "title": "Any authenticated user can list all user accounts",
+      "method": "GET",
+      "location": "^/api/Users/?$",
+      "cwe": 862,
+      "keywords": [
+        "users",
+        "list"
+      ],
+      "verified_by": null
+    },
+    {
+      "id": "js-admin-config-unauth",
+      "class": "access_control",
+      "title": "Application configuration is readable without authentication",
+      "method": "GET",
+      "location": "^/rest/admin/application-configuration",
+      "cwe": 862,
+      "keywords": [
+        "admin",
+        "configuration"
+      ],
+      "verified_by": null
+    },
+    {
+      "id": "js-ssrf-profile-image",
+      "class": "ssrf",
+      "title": "Profile image URL upload fetches arbitrary URLs server-side",
+      "method": "POST",
+      "location": "^/profile/image/url",
+      "cwe": 918,
+      "keywords": [
+        "profile",
+        "image",
+        "url"
+      ],
+      "verified_by": "packages/buggy/tests/lab/test_probes_find_known_bugs.py::test_ssrf_probe_finds_profile_image_ssrf"
+    },
+    {
+      "id": "js-negative-quantity",
+      "class": "business_logic",
+      "title": "Negative basket quantity credits the wallet at checkout",
+      "method": "PUT",
+      "location": "^/api/BasketItems",
+      "cwe": 20,
+      "keywords": [
+        "quantity",
+        "negative",
+        "basket"
+      ],
+      "verified_by": "packages/buggy/tests/lab/test_probes_find_known_bugs.py::test_boundary_probe_finds_negative_quantity"
+    },
+    {
+      "id": "js-zero-star-feedback",
+      "class": "business_logic",
+      "title": "Feedback accepts a rating outside the allowed range",
+      "method": "POST",
+      "location": "^/api/Feedbacks",
+      "cwe": 20,
+      "keywords": [
+        "rating",
+        "feedback"
+      ],
+      "verified_by": null
+    },
+    {
+      "id": "js-mass-assignment-admin",
+      "class": "api",
+      "title": "User registration accepts a client-supplied role (admin)",
+      "method": "POST",
+      "location": "^/api/Users",
+      "cwe": 915,
+      "keywords": [
+        "role",
+        "admin",
+        "registration",
+        "mass assignment"
+      ],
+      "verified_by": "packages/buggy/tests/lab/test_probes_find_known_bugs.py::test_mass_assignment_probe_finds_admin_registration"
+    },
+    {
+      "id": "js-password-hash-exposure",
+      "class": "api",
+      "title": "User API responses and JWT payload include the password hash",
+      "method": "GET",
+      "location": "^/(api/Users|rest/user)",
+      "cwe": 213,
+      "keywords": [
+        "password",
+        "hash"
+      ],
+      "verified_by": null
+    },
+    {
+      "id": "js-xss-reflected-track-order",
+      "class": "xss",
+      "title": "Reflected XSS in order tracking id",
+      "method": "GET",
+      "location": "^/rest/track-order",
+      "cwe": 79,
+      "keywords": [
+        "track",
+        "xss"
+      ],
+      "verified_by": null
+    },
+    {
+      "id": "js-xss-dom-search",
+      "class": "xss",
+      "title": "DOM XSS in the search query",
+      "method": "GET",
+      "location": "^/(#/search|search)",
+      "cwe": 79,
+      "keywords": [
+        "search",
+        "xss",
+        "dom"
+      ],
+      "verified_by": null
+    },
+    {
+      "id": "js-xxe-file-upload",
+      "class": "file_handling",
+      "title": "XML external entities are resolved in complaint file upload",
+      "method": "POST",
+      "location": "^/file-upload",
+      "cwe": 611,
+      "keywords": [
+        "xxe",
+        "upload",
+        "xml"
+      ],
+      "verified_by": null
+    },
+    {
+      "id": "js-ftp-null-byte",
+      "class": "file_handling",
+      "title": "Null-byte bypass of the /ftp file-type filter",
+      "method": "GET",
+      "location": "^/ftp/",
+      "cwe": 22,
+      "keywords": [
+        "ftp",
+        "null byte",
+        "%2500"
+      ],
+      "verified_by": null
+    },
+    {
+      "id": "js-csrf-profile",
+      "class": "csrf",
+      "title": "Profile username can be changed cross-site",
+      "method": "POST",
+      "location": "^/profile",
+      "cwe": 352,
+      "keywords": [
+        "csrf",
+        "profile"
+      ],
+      "verified_by": null
+    },
+    {
+      "id": "js-open-redirect",
+      "class": "open_redirect",
+      "title": "Redirect allow-list can be bypassed",
+      "method": "GET",
+      "location": "^/redirect",
+      "cwe": 601,
+      "keywords": [
+        "redirect"
+      ],
+      "verified_by": null
+    },
+    {
+      "id": "js-md5-passwords",
+      "class": "crypto",
+      "title": "Passwords are stored as unsalted MD5",
+      "method": "ANY",
+      "location": "^/",
+      "cwe": 328,
+      "keywords": [
+        "md5",
+        "hash"
+      ],
+      "verified_by": null
+    },
+    {
+      "id": "js-cors-wildcard",
+      "class": "misconfiguration",
+      "title": "Access-Control-Allow-Origin: * on every response",
+      "method": "ANY",
+      "location": "^/",
+      "cwe": 942,
+      "keywords": [
+        "cors"
+      ],
+      "verified_by": null,
+      "pipeline_signals": [
+        {
+          "type": "header",
+          "value_contains": "access-control-allow-origin",
+          "attr": "value",
+          "attr_equals": "*"
+        }
+      ]
+    },
+    {
+      "id": "js-error-stack-trace",
+      "class": "misconfiguration",
+      "title": "Unhandled errors return a stack trace",
+      "method": "GET",
+      "location": "^/rest/",
+      "cwe": 209,
+      "keywords": [
+        "stack",
+        "error"
+      ],
+      "verified_by": null
+    },
+    {
+      "id": "js-metrics-exposed",
+      "class": "info_exposure",
+      "title": "Prometheus metrics endpoint is public",
+      "method": "GET",
+      "location": "^/metrics",
+      "cwe": 200,
+      "keywords": [
+        "metrics",
+        "prometheus"
+      ],
+      "verified_by": null,
+      "pipeline_signals": [
+        {
+          "type": "vulnerability",
+          "value_contains": "prometheus-metrics"
+        }
+      ]
+    },
+    {
+      "id": "js-ftp-directory",
+      "class": "info_exposure",
+      "title": "Public /ftp directory lists confidential documents",
+      "method": "GET",
+      "location": "^/ftp/?",
+      "cwe": 548,
+      "keywords": [
+        "ftp",
+        "directory",
+        "confidential"
+      ],
+      "verified_by": null,
+      "pipeline_signals": [
+        {
+          "type": "url",
+          "value_regex": "/ftp(/|$)"
+        }
+      ]
+    },
+    {
+      "id": "js-api-docs-exposed",
+      "class": "info_exposure",
+      "title": "Swagger UI for the B2B API is public",
+      "method": "GET",
+      "location": "^/api-docs",
+      "cwe": 200,
+      "keywords": [
+        "swagger",
+        "api-docs"
+      ],
+      "verified_by": null,
+      "pipeline_signals": [
+        {
+          "type": "api_spec",
+          "value_contains": "api-docs"
+        }
+      ]
+    }
+  ]
+}

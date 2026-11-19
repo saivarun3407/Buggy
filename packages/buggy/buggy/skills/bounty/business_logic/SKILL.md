@@ -13,6 +13,34 @@ These are flaws in what the app is *supposed* to allow — there is no
 signature for "the discount stacked." Find them by understanding intent,
 then violating it.
 
+## 0. Deterministic first
+
+Do not hand-craft what code already does. Before any manual testing:
+
+1. `recon_summary`, then `recon_query` for the record types this class needs
+   (`api_operation`, `endpoint` (cart, order, transfer, coupon, quantity, amount)). The pipeline has already enumerated them; never re-crawl.
+2. Run the probe below through `probe_run`. It sends the requests through the
+   evidence gateway (scope-checked, rate-limited, recorded) and returns
+   `vulnerable: true | false | null` with capture ids. `null` means the probe
+   could not tell — it is not a negative.
+3. Spend reasoning only on what the probe cannot decide: which objects and
+   accounts to feed it, and how a confirmed primitive chains to impact.
+
+**Probe `numeric_boundary`** — params `url`, `method`, a valid JSON `body`,
+`field` (dotted path of the numeric field), optional `values` (default
+`[-1]`), `headers`. Reports `true` when the server accepts and stores a
+negative or zero value. State-changing: use a test account's own cart/order,
+and clean up after.
+
+Evidence: every finding cites the capture ids returned by the probe or by
+`http_send`, and must pass `capture_verify` (the request replays against the
+in-scope target with the same result). State-changing probes are held for the
+operator's approval on real programs.
+
+Proven in the lab: `packages/buggy/tests/lab/test_probes_find_known_bugs.py::test_boundary_probe_finds_negative_quantity` finds Juice
+Shop's negative-quantity basket item; `::test_boundary_probe_does_not_flag_a_validated_field`
+is the negative control.
+
 ## 1. Reconstruct intent
 
 Map the workflow / state machine and its invariants: order of steps,

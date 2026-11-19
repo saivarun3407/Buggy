@@ -13,6 +13,37 @@ Modern bounties live in APIs because authorization is business logic and
 scanners can't reason about it. The single most important habit:
 **always test with two accounts.**
 
+## 0. Deterministic first
+
+Do not hand-craft what code already does. Before any manual testing:
+
+1. `recon_summary`, then `recon_query` for the record types this class needs
+   (`api_spec`, `api_operation`, `endpoint`). The pipeline has already enumerated them; never re-crawl.
+2. Run the probe below through `probe_run`. It sends the requests through the
+   evidence gateway (scope-checked, rate-limited, recorded) and returns
+   `vulnerable: true | false | null` with capture ids. `null` means the probe
+   could not tell — it is not a negative.
+3. Spend reasoning only on what the probe cannot decide: which objects and
+   accounts to feed it, and how a confirmed primitive chains to impact.
+
+**Probe `mass_assignment`** — params `url`, `method`, a valid JSON `body`,
+`extra_fields` (fields the client must not control, e.g. `{"role":"admin"}`),
+optional `readback_url`, `headers`. Reports `true` only when the privileged
+value is read back from the server. State-changing.
+
+**Probe `idor`** — for object-level authorisation (BOLA) on every
+`api_operation` with an id in the path: params `url`, `owner_headers`,
+`attacker_headers`, optional `markers`.
+
+Evidence: every finding cites the capture ids returned by the probe or by
+`http_send`, and must pass `capture_verify` (the request replays against the
+in-scope target with the same result). State-changing probes are held for the
+operator's approval on real programs.
+
+Proven in the lab: `packages/buggy/tests/lab/test_probes_find_known_bugs.py::test_mass_assignment_probe_finds_admin_registration`
+finds Juice Shop's admin registration; `::test_mass_assignment_probe_does_not_flag_an_ignored_field`
+is the negative control.
+
 ## 1. Build the API surface
 
 - Pull specs when available: OpenAPI/Swagger (`/openapi.json`,

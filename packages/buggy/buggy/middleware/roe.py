@@ -113,6 +113,12 @@ GATED_TOOL_NAMES: frozenset[str] = frozenset(
         "web_fetch",
         "web_search",
         "detect_tech_stack",
+        # Stack MCP tools that reach a target. The capture gateway and the
+        # scoped browser enforce scope themselves; gating them here as well
+        # gives the model an early refusal and puts the call in the ledger.
+        "http_send",
+        "browser_open",
+        "probe_run",
     }
 )
 
@@ -144,6 +150,20 @@ def _hosts_from_browser_action(args: dict[str, Any]) -> list[str]:
     return _host_from_url(params.get("url"))
 
 
+def _hosts_from_probe_run(args: dict[str, Any]) -> list[str]:
+    """Hosts named in a probe's parameters (``url`` and ``readback_url``)."""
+    raw = args.get("params_json")
+    if not isinstance(raw, str) or not raw:
+        return []
+    try:
+        params = json.loads(raw)
+    except (json.JSONDecodeError, ValueError):
+        return []
+    if not isinstance(params, dict):
+        return []
+    return [h for key in ("url", "readback_url") for h in _host_from_url(params.get(key))]
+
+
 def _hosts_from_web_search(_args: dict[str, Any]) -> list[str]:
     """OSINT exemption: web_search hits an allowlisted provider, not a target.
 
@@ -160,6 +180,9 @@ NETWORK_TARGET_EXTRACTORS: dict[str, Callable[[dict[str, Any]], list[str]]] = {
     "web_search": _hosts_from_web_search,
     "detect_tech_stack": _hosts_from_url_arg,
     "browser_action": _hosts_from_browser_action,
+    "http_send": _hosts_from_url_arg,
+    "browser_open": _hosts_from_url_arg,
+    "probe_run": _hosts_from_probe_run,
 }
 
 

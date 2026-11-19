@@ -171,6 +171,10 @@ jobs:
           - image: buggy-pipeline
             dockerfile: containers/pipeline.Dockerfile
             platforms: linux/amd64,linux/arm64
+          # Scoped browser (`browser-mcp`): Playwright Chromium + MCP server.
+          - image: buggy-browser
+            dockerfile: containers/browser.Dockerfile
+            platforms: linux/amd64,linux/arm64
     steps:
       - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
 
@@ -668,6 +672,7 @@ jobs:
             buggy-skillogy
             buggy-egress-guard
             buggy-pipeline
+            buggy-browser
             buggy-c2-sliver
             buggy-web
           )
@@ -699,6 +704,7 @@ jobs:
             buggy-skillogy
             buggy-egress-guard
             buggy-pipeline
+            buggy-browser
             buggy-c2-sliver
             buggy-web
           )

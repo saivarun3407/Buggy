@@ -1,0 +1,186 @@
+{
+  "app": "dvwa",
+  "image": "vulnerables/web-dvwa:latest",
+  "source": "DVWA module list at security level 'low' (https://github.com/digininja/DVWA)",
+  "notes": "All modules sit behind the application's login. None of these entries has been reproduced by a test in this repository.",
+  "entries": [
+    {
+      "id": "dvwa-brute-force",
+      "class": "auth_session",
+      "title": "Login form has no lockout or rate limit",
+      "method": "GET",
+      "location": "^/vulnerabilities/brute",
+      "cwe": 307,
+      "keywords": [
+        "brute"
+      ],
+      "verified_by": null
+    },
+    {
+      "id": "dvwa-weak-session-id",
+      "class": "auth_session",
+      "title": "Predictable session identifier",
+      "method": "POST",
+      "location": "^/vulnerabilities/weak_id",
+      "cwe": 330,
+      "keywords": [
+        "session",
+        "weak"
+      ],
+      "verified_by": null
+    },
+    {
+      "id": "dvwa-authz-bypass",
+      "class": "access_control",
+      "title": "Non-admin can reach the user-management function",
+      "method": "GET",
+      "location": "^/vulnerabilities/authbypass",
+      "cwe": 862,
+      "keywords": [
+        "authbypass",
+        "authoris"
+      ],
+      "verified_by": null
+    },
+    {
+      "id": "dvwa-cmd-injection",
+      "class": "injection",
+      "title": "OS command injection in ping",
+      "method": "POST",
+      "location": "^/vulnerabilities/exec",
+      "cwe": 78,
+      "keywords": [
+        "command",
+        "exec"
+      ],
+      "verified_by": null
+    },
+    {
+      "id": "dvwa-sqli",
+      "class": "injection",
+      "title": "SQL injection in user id",
+      "method": "GET",
+      "location": "^/vulnerabilities/sqli/",
+      "cwe": 89,
+      "keywords": [
+        "sql"
+      ],
+      "verified_by": null
+    },
+    {
+      "id": "dvwa-sqli-blind",
+      "class": "injection",
+      "title": "Blind SQL injection in user id",
+      "method": "GET",
+      "location": "^/vulnerabilities/sqli_blind",
+      "cwe": 89,
+      "keywords": [
+        "blind",
+        "sql"
+      ],
+      "verified_by": null
+    },
+    {
+      "id": "dvwa-xss-reflected",
+      "class": "xss",
+      "title": "Reflected XSS",
+      "method": "GET",
+      "location": "^/vulnerabilities/xss_r",
+      "cwe": 79,
+      "keywords": [
+        "reflected",
+        "xss"
+      ],
+      "verified_by": null
+    },
+    {
+      "id": "dvwa-xss-stored",
+      "class": "xss",
+      "title": "Stored XSS in guestbook",
+      "method": "POST",
+      "location": "^/vulnerabilities/xss_s",
+      "cwe": 79,
+      "keywords": [
+        "stored",
+        "xss"
+      ],
+      "verified_by": null
+    },
+    {
+      "id": "dvwa-xss-dom",
+      "class": "xss",
+      "title": "DOM XSS",
+      "method": "GET",
+      "location": "^/vulnerabilities/xss_d",
+      "cwe": 79,
+      "keywords": [
+        "dom",
+        "xss"
+      ],
+      "verified_by": null
+    },
+    {
+      "id": "dvwa-file-inclusion",
+      "class": "file_handling",
+      "title": "Local/remote file inclusion",
+      "method": "GET",
+      "location": "^/vulnerabilities/fi",
+      "cwe": 98,
+      "keywords": [
+        "inclusion",
+        "lfi"
+      ],
+      "verified_by": null
+    },
+    {
+      "id": "dvwa-file-upload",
+      "class": "file_handling",
+      "title": "Unrestricted file upload",
+      "method": "POST",
+      "location": "^/vulnerabilities/upload",
+      "cwe": 434,
+      "keywords": [
+        "upload"
+      ],
+      "verified_by": null
+    },
+    {
+      "id": "dvwa-csrf",
+      "class": "csrf",
+      "title": "Password change has no CSRF protection",
+      "method": "GET",
+      "location": "^/vulnerabilities/csrf",
+      "cwe": 352,
+      "keywords": [
+        "csrf"
+      ],
+      "verified_by": null
+    },
+    {
+      "id": "dvwa-open-redirect",
+      "class": "open_redirect",
+      "title": "Open redirect",
+      "method": "GET",
+      "location": "^/vulnerabilities/open_redirect",
+      "cwe": 601,
+      "keywords": [
+        "redirect"
+      ],
+      "verified_by": null
+    },
+    {
+      "id": "dvwa-default-credentials",
+      "class": "auth_session",
+      "title": "Default administrator credentials",
+      "method": "POST",
+      "location": "^/login\\.php",
+      "cwe": 798,
+      "keywords": [
+        "default",
+        "admin",
+        "password"
+      ],
+      "verified_by": null
+    }
+  ]
+}

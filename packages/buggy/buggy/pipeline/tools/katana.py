@@ -29,10 +29,16 @@ class Katana:
     name = "katana"
     passive = False
 
+    def __init__(self, resolvers: tuple[str, ...] = ()) -> None:
+        self._resolvers = resolvers
+
     def invocation(
         self, binary: str, inputs: list[str], limits: PipelineLimits, workdir: Path
     ) -> Invocation:
         urls = write_lines(workdir / "katana-urls.txt", inputs)
+        extra = ["-r", ",".join(self._resolvers)] if self._resolvers else []
+        for pattern in limits.crawl_exclude:
+            extra += ["-cos", pattern]
         return Invocation(
             argv=[
                 binary,
@@ -60,6 +66,7 @@ class Katana:
                 "10m",
                 "-timeout",
                 "10",
+                *extra,
             ],  # fmt: skip
             timeout=3600,
         )

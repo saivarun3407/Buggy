@@ -612,3 +612,49 @@ def test_recon_store_is_read_only_for_the_agent_facing_server():
         ]
         assert not leaked, f"{name} must not carry model credentials: {leaked}"
         assert services[name].get("cap_drop") == ["ALL"] and services[name].get("read_only") is True
+
+
+# ── Evidence gateway, scope lookup and browser invariants ────────────
+
+EVIDENCE_SERVICES = ("capture-mcp", "scope-mcp", "browser-mcp")
+
+
+def test_evidence_services_are_out_of_the_sandbox_and_cannot_change_scope():
+    services = _rendered_compose()["services"]
+    for name in EVIDENCE_SERVICES:
+        service = services[name]
+        assert SANDBOX_NET not in _service_networks(service), (
+            f"{name} is reachable from the sandbox"
+        )
+        assert MGMT_NET in _service_networks(service), f"langgraph cannot reach {name}"
+        assert _mounts(service)["/control"].get("read_only") is True, f"{name} can write scope"
+        assert "/workspace" not in _mounts(service), f"{name} mounts the agent-writable tree"
+        assert service.get("read_only") is True and service.get("cap_drop") == ["ALL"]
+        assert "no-new-privileges:true" in (service.get("security_opt") or [])
+        assert not service.get("ports"), f"{name} publishes a port"
+        leaked = [
+            k
+            for k in _environment(service)
+            if any(s in k for s in ("API_KEY", "LITELLM", "ANTHROPIC", "OPENAI", "SANDBOX_TOKEN"))
+        ]
+        assert not leaked, f"{name} must not carry credentials: {leaked}"
+    # Scope lookup is read-only everywhere and has no way out.
+    assert _service_networks(services["scope-mcp"]) == {MGMT_NET}
+    assert "/audit" not in _mounts(services["scope-mcp"])
+
+
+def test_captured_evidence_is_written_by_the_gateway_only():
+    services = _rendered_compose()["services"]
+    holders = {name for name, svc in services.items() if "/data/capture" in _mounts(svc)}
+    assert holders == {"capture-mcp"}
+    assert _mounts(services["capture-mcp"])["/data/capture"].get("read_only") is not True
+    # The ledger the gateway and browser append to is never in the sandbox.
+    assert "/audit" not in _mounts(services["sandbox"])
+
+
+def test_langgraph_is_pointed_at_every_stack_mcp_server():
+    env = _environment(_rendered_compose()["services"]["langgraph"])
+    assert env["BUGGY_MCP_RECON_URL"] == "http://pipeline-mcp:9460/mcp"
+    assert env["BUGGY_MCP_CAPTURE_URL"] == "http://capture-mcp:9461/mcp"
+    assert env["BUGGY_MCP_SCOPE_URL"] == "http://scope-mcp:9462/mcp"
+    assert env["BUGGY_MCP_BROWSER_URL"] == "http://browser-mcp:9463/mcp"

@@ -14,6 +14,35 @@ its attack surface. Find the endpoint (`/graphql`, `/api/graphql`,
 `/v1/graphql`, GraphQL-over-GET), fingerprint the engine, then attack
 the recovered schema.
 
+## 0. Deterministic first
+
+Do not hand-craft what code already does. Before any manual testing:
+
+1. `recon_summary`, then `recon_query` for the record types this class needs
+   (`graphql` (introspection result, type and field names), `endpoint`). The pipeline has already enumerated them; never re-crawl.
+2. Run the probe below through `probe_run`. It sends the requests through the
+   evidence gateway (scope-checked, rate-limited, recorded) and returns
+   `vulnerable: true | false | null` with capture ids. `null` means the probe
+   could not tell — it is not a negative.
+3. Spend reasoning only on what the probe cannot decide: which objects and
+   accounts to feed it, and how a confirmed primitive chains to impact.
+
+**Probe `graphql_checks`** — params `url`, optional `headers`,
+`unauthenticated_query` (a query that should need credentials) and `markers`
+(strings that identify sensitive data in its result). Reports introspection,
+field suggestions and data returned without credentials, each with its own
+capture. Not state-changing. Never run batching/depth "DoS" checks against a
+program.
+
+Evidence: every finding cites the capture ids returned by the probe or by
+`http_send`, and must pass `capture_verify` (the request replays against the
+in-scope target with the same result). State-changing probes are held for the
+operator's approval on real programs.
+
+Proven in the lab: `packages/buggy/tests/lab/test_probes_find_known_bugs.py::test_graphql_probe_finds_introspection_suggestions_and_private_data`
+finds all three on DVGA; `::test_graphql_probe_does_not_flag_a_rest_endpoint` is the negative
+control.
+
 ## 1. Discover & fingerprint
 
 - Locate endpoint(s); fingerprint engine with `graphw00f` (Apollo,

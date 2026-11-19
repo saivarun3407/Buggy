@@ -173,8 +173,11 @@ class Pipeline:
         self._passive_fetch = passive_fetch or (
             lambda url: fetch_passive(url, limiter=self._limiter)
         )
-        self._dnsx = Dnsx(resolvers=dns_resolvers)
-        self._nuclei = Nuclei(templates_dir=nuclei_templates)
+        # Custom resolvers go to every scanner: each ships its own public
+        # resolver list and would otherwise not see internal (lab) names.
+        self._resolvers = tuple(dns_resolvers)
+        self._dnsx = Dnsx(resolvers=self._resolvers)
+        self._nuclei = Nuclei(templates_dir=nuclei_templates, resolvers=self._resolvers)
         self.run_id = ""
         self.stats: dict[str, StageStats] = {}
         self._fingerprints: list[tuple[Record, str]] = []
@@ -560,7 +563,7 @@ class Pipeline:
             return
         hosts = list(pending)
         ports: dict[str, list[int]] = {}
-        naabu = Naabu()
+        naabu = Naabu(resolvers=self._resolvers)
         if self.scope.limits.port_scan:
             raw, ref, version = self._run_binary("live", stats, naabu, hosts)
             if raw:
@@ -586,7 +589,7 @@ class Pipeline:
             targets.extend(
                 f"{host}:{port}" for port in open_ports
             ) if open_ports else targets.append(host)
-        httpx = Httpx()
+        httpx = Httpx(resolvers=self._resolvers)
         raw, ref, version = self._run_binary("live", stats, httpx, targets)
         if not ref:
             return
@@ -634,7 +637,7 @@ class Pipeline:
         self._processed_services = list(pending)
         if not pending:
             return
-        katana = Katana()
+        katana = Katana(resolvers=self._resolvers)
         raw, ref, version = self._run_binary("urls", stats, katana, list(pending))
         if raw:
             self._store(

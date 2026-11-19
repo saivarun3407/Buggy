@@ -1,0 +1,203 @@
+{
+  "app": "crapi",
+  "image": "crapi/crapi-* (OWASP crAPI docker-compose)",
+  "source": "OWASP crAPI challenge list (https://github.com/OWASP/crAPI/blob/main/docs/challenges.md)",
+  "notes": "crAPI needs seven containers. It is defined in the lab under the `crapi` profile. None of these entries has been reproduced by a test in this repository.",
+  "entries": [
+    {
+      "id": "crapi-bola-vehicle-location",
+      "class": "access_control",
+      "title": "Vehicle location of another user by vehicle id (BOLA)",
+      "method": "GET",
+      "location": "^/identity/api/v2/vehicle/[^/]+/location",
+      "cwe": 639,
+      "keywords": [
+        "vehicle",
+        "location"
+      ],
+      "verified_by": null
+    },
+    {
+      "id": "crapi-bola-mechanic-report",
+      "class": "access_control",
+      "title": "Mechanic reports of other users by report id (BOLA)",
+      "method": "GET",
+      "location": "^/workshop/api/mechanic/mechanic_report",
+      "cwe": 639,
+      "keywords": [
+        "mechanic",
+        "report"
+      ],
+      "verified_by": null
+    },
+    {
+      "id": "crapi-bfla-delete-video",
+      "class": "access_control",
+      "title": "User can delete another user's video via the admin endpoint (BFLA)",
+      "method": "DELETE",
+      "location": "^/identity/api/v2/admin/videos",
+      "cwe": 285,
+      "keywords": [
+        "video",
+        "delete",
+        "admin"
+      ],
+      "verified_by": null
+    },
+    {
+      "id": "crapi-unauth-orders",
+      "class": "access_control",
+      "title": "Order details are readable without authentication",
+      "method": "GET",
+      "location": "^/workshop/api/shop/orders/\\d+",
+      "cwe": 862,
+      "keywords": [
+        "orders",
+        "unauthenticated"
+      ],
+      "verified_by": null
+    },
+    {
+      "id": "crapi-otp-bruteforce",
+      "class": "auth_session",
+      "title": "Password-reset OTP can be brute-forced on the v2 endpoint",
+      "method": "POST",
+      "location": "^/identity/api/auth/v2/check-otp",
+      "cwe": 307,
+      "keywords": [
+        "otp",
+        "reset"
+      ],
+      "verified_by": null
+    },
+    {
+      "id": "crapi-jwt-weak",
+      "class": "auth_session",
+      "title": "JWT validation flaws (algorithm confusion / unsigned)",
+      "method": "ANY",
+      "location": "^/identity/api/",
+      "cwe": 347,
+      "keywords": [
+        "jwt"
+      ],
+      "verified_by": null
+    },
+    {
+      "id": "crapi-excessive-data-posts",
+      "class": "api",
+      "title": "Forum posts expose other users' vehicle id and email",
+      "method": "GET",
+      "location": "^/community/api/v2/community/posts",
+      "cwe": 213,
+      "keywords": [
+        "posts",
+        "exposure"
+      ],
+      "verified_by": null
+    },
+    {
+      "id": "crapi-excessive-data-video",
+      "class": "api",
+      "title": "Video API exposes an internal property",
+      "method": "GET",
+      "location": "^/identity/api/v2/user/videos",
+      "cwe": 213,
+      "keywords": [
+        "video",
+        "conversion_params"
+      ],
+      "verified_by": null
+    },
+    {
+      "id": "crapi-mass-assignment-order",
+      "class": "api",
+      "title": "Order status can be set by the client to obtain a refund",
+      "method": "PUT",
+      "location": "^/workshop/api/shop/orders/\\d+",
+      "cwe": 915,
+      "keywords": [
+        "order",
+        "status",
+        "returned"
+      ],
+      "verified_by": null
+    },
+    {
+      "id": "crapi-mass-assignment-video",
+      "class": "api",
+      "title": "Internal video property can be written by the client",
+      "method": "PUT",
+      "location": "^/identity/api/v2/user/videos/\\d+",
+      "cwe": 915,
+      "keywords": [
+        "conversion_params"
+      ],
+      "verified_by": null
+    },
+    {
+      "id": "crapi-ssrf-contact-mechanic",
+      "class": "ssrf",
+      "title": "contact_mechanic fetches a client-supplied mechanic_api URL",
+      "method": "POST",
+      "location": "^/workshop/api/merchant/contact_mechanic",
+      "cwe": 918,
+      "keywords": [
+        "mechanic_api",
+        "ssrf"
+      ],
+      "verified_by": null
+    },
+    {
+      "id": "crapi-nosqli-coupon",
+      "class": "injection",
+      "title": "NoSQL injection in coupon validation",
+      "method": "POST",
+      "location": "^/community/api/v2/coupon/validate-coupon",
+      "cwe": 943,
+      "keywords": [
+        "coupon",
+        "nosql"
+      ],
+      "verified_by": null
+    },
+    {
+      "id": "crapi-sqli-coupon",
+      "class": "injection",
+      "title": "SQL injection in coupon redemption",
+      "method": "POST",
+      "location": "^/workshop/api/shop/apply_coupon",
+      "cwe": 89,
+      "keywords": [
+        "coupon",
+        "sql"
+      ],
+      "verified_by": null
+    },
+    {
+      "id": "crapi-negative-quantity",
+      "class": "business_logic",
+      "title": "Negative order quantity increases the account balance",
+      "method": "POST",
+      "location": "^/workshop/api/shop/orders",
+      "cwe": 20,
+      "keywords": [
+        "quantity",
+        "balance"
+      ],
+      "verified_by": null
+    },
+    {
+      "id": "crapi-rate-limit-contact-mechanic",
+      "class": "misconfiguration",
+      "title": "contact_mechanic can be made to repeat requests without limit",
+      "method": "POST",
+      "location": "^/workshop/api/merchant/contact_mechanic",
+      "cwe": 770,
+      "keywords": [
+        "repeat_request"
+      ],
+      "verified_by": null,
+      "prohibited": true
+    }
+  ]
+}

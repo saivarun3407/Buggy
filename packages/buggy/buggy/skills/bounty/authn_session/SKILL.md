@@ -14,6 +14,35 @@ it lives in the seams between identity components. The deliverable is a
 proven takeover — you control the victim's session/account — not a
 theoretical weakness.
 
+## 0. Deterministic first
+
+Do not hand-craft what code already does. Before any manual testing:
+
+1. `recon_summary`, then `recon_query` for the record types this class needs
+   (`endpoint`, `api_operation`, `js_file`, `header`). The pipeline has already enumerated them; never re-crawl.
+2. Run the probe below through `probe_run`. It sends the requests through the
+   evidence gateway (scope-checked, rate-limited, recorded) and returns
+   `vulnerable: true | false | null` with capture ids. `null` means the probe
+   could not tell — it is not a negative.
+3. Spend reasoning only on what the probe cannot decide: which objects and
+   accounts to feed it, and how a confirmed primitive chains to impact.
+
+**Probe `jwt_alg_none`** — params `url` (a GET endpoint that requires the
+token), `token` (a valid JWT for a test account), optional `header`,
+`claim_overrides`, `headers`. It first proves the token works, then that a
+garbage token is rejected, then sends the same claims with the signature
+removed. Run it against several routes: frameworks often verify on one
+middleware chain and not another. Not state-changing.
+
+Evidence: every finding cites the capture ids returned by the probe or by
+`http_send`, and must pass `capture_verify` (the request replays against the
+in-scope target with the same result). State-changing probes are held for the
+operator's approval on real programs.
+
+Proven in the lab: `packages/buggy/tests/lab/test_probes_find_known_bugs.py::test_jwt_probe_finds_unsigned_token_acceptance` finds
+Juice Shop's unsigned-JWT acceptance; `::test_jwt_probe_does_not_flag_a_route_that_binds_tokens_to_sessions`
+is the negative control.
+
 ## 1. Map the auth surface
 
 Login, registration, password reset, MFA enrolment/verification,

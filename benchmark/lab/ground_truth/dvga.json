@@ -1,0 +1,207 @@
+{
+  "app": "dvga",
+  "image": "dolevf/dvga:latest",
+  "source": "Damn Vulnerable GraphQL Application scenario list (https://github.com/dolevf/Damn-Vulnerable-GraphQL-Application#scenarios)",
+  "notes": "Denial-of-service scenarios are listed for completeness and marked prohibited: they are never tested and never counted as missed.",
+  "entries": [
+    {
+      "id": "dvga-introspection",
+      "class": "graphql",
+      "title": "GraphQL introspection is enabled",
+      "method": "POST",
+      "location": "^/graphql",
+      "cwe": 200,
+      "keywords": [
+        "introspection"
+      ],
+      "verified_by": "packages/buggy/tests/lab/test_probes_find_known_bugs.py::test_graphql_probe_finds_introspection_suggestions_and_private_data",
+      "pipeline_signals": [
+        {
+          "type": "graphql",
+          "attr": "introspection_enabled",
+          "attr_equals": true
+        }
+      ]
+    },
+    {
+      "id": "dvga-graphiql",
+      "class": "graphql",
+      "title": "GraphiQL interface is exposed",
+      "method": "GET",
+      "location": "^/graphiql",
+      "cwe": 200,
+      "keywords": [
+        "graphiql"
+      ],
+      "verified_by": null
+    },
+    {
+      "id": "dvga-field-suggestions",
+      "class": "graphql",
+      "title": "Field suggestions leak schema names",
+      "method": "POST",
+      "location": "^/graphql",
+      "cwe": 200,
+      "keywords": [
+        "suggestion",
+        "did you mean"
+      ],
+      "verified_by": "packages/buggy/tests/lab/test_probes_find_known_bugs.py::test_graphql_probe_finds_introspection_suggestions_and_private_data",
+      "pipeline_signals": [
+        {
+          "type": "vulnerability",
+          "value_contains": "graphql-field-suggestion"
+        }
+      ]
+    },
+    {
+      "id": "dvga-deny-list-bypass",
+      "class": "graphql",
+      "title": "systemHealth query deny-list is bypassed with an operation name",
+      "method": "POST",
+      "location": "^/graphql",
+      "cwe": 863,
+      "keywords": [
+        "deny",
+        "operation name",
+        "systemhealth"
+      ],
+      "verified_by": null
+    },
+    {
+      "id": "dvga-private-pastes",
+      "class": "access_control",
+      "title": "Private pastes are returned to any caller",
+      "method": "POST",
+      "location": "^/graphql",
+      "cwe": 639,
+      "keywords": [
+        "paste",
+        "private",
+        "public"
+      ],
+      "verified_by": "packages/buggy/tests/lab/test_probes_find_known_bugs.py::test_graphql_probe_finds_introspection_suggestions_and_private_data"
+    },
+    {
+      "id": "dvga-jwt-forge",
+      "class": "auth_session",
+      "title": "The `me` query accepts a forged JWT (signature not verified)",
+      "method": "POST",
+      "location": "^/graphql",
+      "cwe": 347,
+      "keywords": [
+        "jwt",
+        "me",
+        "token"
+      ],
+      "verified_by": null
+    },
+    {
+      "id": "dvga-ssrf-import-paste",
+      "class": "ssrf",
+      "title": "importPaste mutation fetches arbitrary URLs server-side",
+      "method": "POST",
+      "location": "^/graphql",
+      "cwe": 918,
+      "keywords": [
+        "importpaste",
+        "ssrf"
+      ],
+      "verified_by": null
+    },
+    {
+      "id": "dvga-cmd-injection-import-paste",
+      "class": "injection",
+      "title": "OS command injection in importPaste",
+      "method": "POST",
+      "location": "^/graphql",
+      "cwe": 78,
+      "keywords": [
+        "importpaste",
+        "command"
+      ],
+      "verified_by": null
+    },
+    {
+      "id": "dvga-cmd-injection-diagnostics",
+      "class": "injection",
+      "title": "OS command injection in systemDiagnostics",
+      "method": "POST",
+      "location": "^/graphql",
+      "cwe": 78,
+      "keywords": [
+        "systemdiagnostics",
+        "command"
+      ],
+      "verified_by": null
+    },
+    {
+      "id": "dvga-sqli-pastes-filter",
+      "class": "injection",
+      "title": "SQL injection in the pastes filter argument",
+      "method": "POST",
+      "location": "^/graphql",
+      "cwe": 89,
+      "keywords": [
+        "filter",
+        "sql",
+        "pastes"
+      ],
+      "verified_by": null
+    },
+    {
+      "id": "dvga-stored-xss-paste",
+      "class": "xss",
+      "title": "Stored XSS in paste title/content",
+      "method": "POST",
+      "location": "^/graphql",
+      "cwe": 79,
+      "keywords": [
+        "paste",
+        "xss"
+      ],
+      "verified_by": null
+    },
+    {
+      "id": "dvga-stack-trace",
+      "class": "info_exposure",
+      "title": "Verbose errors expose stack traces",
+      "method": "POST",
+      "location": "^/graphql",
+      "cwe": 209,
+      "keywords": [
+        "stack",
+        "trace",
+        "error"
+      ],
+      "verified_by": null
+    },
+    {
+      "id": "dvga-batch-dos",
+      "class": "graphql",
+      "title": "Unbounded query batching",
+      "method": "POST",
+      "location": "^/graphql",
+      "cwe": 770,
+      "keywords": [
+        "batch"
+      ],
+      "verified_by": null,
+      "prohibited": true
+    },
+    {
+      "id": "dvga-deep-recursion-dos",
+      "class": "graphql",
+      "title": "Unbounded query depth",
+      "method": "POST",
+      "location": "^/graphql",
+      "cwe": 674,
+      "keywords": [
+        "depth",
+        "recursion"
+      ],
+      "verified_by": null,
+      "prohibited": true
+    }
+  ]
+}

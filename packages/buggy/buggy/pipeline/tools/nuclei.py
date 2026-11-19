@@ -52,8 +52,11 @@ class Nuclei:
     name = "nuclei"
     passive = False
 
-    def __init__(self, templates_dir: str = NUCLEI_TEMPLATES_DIR) -> None:
+    def __init__(
+        self, templates_dir: str = NUCLEI_TEMPLATES_DIR, resolvers: tuple[str, ...] = ()
+    ) -> None:
         self._templates = Path(templates_dir)
+        self._resolvers = resolvers
 
     def template_paths(self) -> list[str]:
         return [str(self._templates / directory) for directory in TEMPLATE_DIRS]
@@ -76,6 +79,10 @@ class Nuclei:
             "-timeout", "10",
             "-retries", "1",
         ]  # fmt: skip
+        if self._resolvers:
+            # nuclei takes its resolver list as a file.
+            resolvers = write_lines(workdir / "nuclei-resolvers.txt", list(self._resolvers))
+            argv += ["-r", str(resolvers)]
         return Invocation(argv=argv, timeout=4 * 3600)
 
     def parse(self, raw: str) -> Iterator[Record]:

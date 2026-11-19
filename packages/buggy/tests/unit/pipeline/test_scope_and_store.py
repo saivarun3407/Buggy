@@ -113,6 +113,29 @@ class TestProgramLimits:
         assert limits.rate_limit_rps == 2
         assert limits.concurrency == 2  # never more workers than requests per second
 
+    def test_crawler_exclusions(self, tmp_path: Path) -> None:
+        import re
+
+        from buggy.pipeline.tools.katana import Katana
+
+        defaults = ScopeFilter.from_document(SCOPE).limits.crawl_exclude
+        for url in (
+            "https://a.test/logout",
+            "https://a.test/account/sign-out",
+            "https://a.test/items/3/delete",
+        ):
+            assert any(re.search(p, url) for p in defaults), url
+        assert not any(re.search(p, "https://a.test/catalogue") for p in defaults)
+        document = _doc(
+            {"mode": "enforce", "in_scope": ["a.test"]},
+            {"crawl_exclude": ["/difficulty/", "(unbalanced", 7, "x" * 300]},
+        )
+        limits = ScopeFilter.from_document(document).limits
+        assert limits.crawl_exclude == (*defaults, "/difficulty/")  # invalid patterns dropped
+        argv = Katana().invocation("katana", ["https://a.test/"], limits, tmp_path).argv
+        excluded = [argv[i + 1] for i, a in enumerate(argv) if a == "-cos"]
+        assert excluded == list(limits.crawl_exclude)
+
     def test_pipeline_block(self) -> None:
         document = _doc(
             {"mode": "enforce", "in_scope": ["a.test"]},

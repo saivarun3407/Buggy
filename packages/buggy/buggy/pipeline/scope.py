@@ -35,6 +35,8 @@ from buggy_core.types.roe_document import InvalidRoEError, parse_roe_document
 # Largest CIDR the pipeline will expand into individual hosts.
 MAX_CIDR_HOSTS = 1024
 
+DEFAULT_CRAWL_EXCLUDE = (r"(?i)(log|sign)[-_]?(out|off)", r"(?i)/(delete|remove|destroy)(/|\?|$)")
+
 DropLogger = Callable[[str, str, str, str, str], None]  # stage, tool, direction, candidate, reason
 
 
@@ -54,6 +56,10 @@ class PipelineLimits:
     crawl_depth: int = 2
     nuclei_severities: tuple[str, ...] = ("low", "medium", "high", "critical")
     disabled_stages: tuple[str, ...] = ()
+    # URL regexes the crawler must not follow. A GET link can change state
+    # (log out, switch a mode, delete); the defaults cover session teardown
+    # and the program can add its own.
+    crawl_exclude: tuple[str, ...] = DEFAULT_CRAWL_EXCLUDE
 
     @classmethod
     def from_roe(cls, rules: MachineEnforcement, document: dict[str, Any]) -> PipelineLimits:
@@ -91,7 +97,24 @@ class PipelineLimits:
             disabled_stages=tuple(
                 str(s) for s in block.get("disabled_stages") or [] if isinstance(s, str)
             ),
+            crawl_exclude=(*DEFAULT_CRAWL_EXCLUDE, *_valid_regexes(block.get("crawl_exclude"))),
         )
+
+
+def _valid_regexes(value: Any) -> tuple[str, ...]:
+    """Patterns from the scope file that compile; anything else is ignored."""
+    import re  # noqa: PLC0415
+
+    kept: list[str] = []
+    for pattern in value if isinstance(value, list) else []:
+        if not isinstance(pattern, str) or not pattern.strip() or len(pattern) > 200:
+            continue
+        try:
+            re.compile(pattern)
+        except re.error:
+            continue
+        kept.append(pattern)
+    return tuple(kept)
 
 
 def _positive_int(value: Any, default: int) -> int:

@@ -518,6 +518,14 @@ def build_tools(
         if base["capability_search"] is _default_capability_search:
             base["capability_search"] = make_capability_search(role)
 
+    # The stack's own MCP servers (recon data, capture gateway, scope,
+    # browser). Offered only when their URLs are configured, and only to
+    # roles that should have them; a plugin disable below still applies.
+    from buggy.tools.stack_mcp import stack_mcp_tools_for
+
+    for stack_tool in stack_mcp_tools_for(role):
+        base.setdefault(stack_tool.name, stack_tool)
+
     for name in resolved.tool_disable:
         base.pop(name, None)
     base.update(resolved.tool_replace)

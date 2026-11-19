@@ -484,6 +484,13 @@ services:
       # Scope enforcement (docs/security/scope-enforcement.md). A run aborts
       # when the guard cannot confirm the engagement's policy is loaded.
       - BUGGY_EGRESS_GUARD_URL=http://egress-guard-control:9440
+      # Deterministic services the agents query instead of running tools
+      # themselves (tools/stack_mcp.py). The engagement is bound from the run,
+      # never chosen by the model.
+      - BUGGY_MCP_RECON_URL=http://pipeline-mcp:9460/mcp
+      - BUGGY_MCP_CAPTURE_URL=http://capture-mcp:9461/mcp
+      - BUGGY_MCP_SCOPE_URL=http://scope-mcp:9462/mcp
+      - BUGGY_MCP_BROWSER_URL=http://browser-mcp:9463/mcp
       - EGRESS_GUARD_TOKEN=${EGRESS_GUARD_TOKEN:?EGRESS_GUARD_TOKEN must be set - run scripts/ensure-stack-secrets.sh or `buggy onboard`}
       # Gated tools are refused unless the operator-controlled roe.json
       # exists. Set 0 only for local labs that have no policy.
@@ -600,7 +607,9 @@ services:
     read_only: true
     tmpfs:
       - /tmp
-      - /home/pipeline
+      # The scanners write their config and caches under $HOME; the image
+      # runs as uid 10001, so the tmpfs must be owned by it.
+      - /home/pipeline:uid=10001,gid=10001,mode=0700
     mem_limit: 2g
     pids_limit: 1024
     environment:
@@ -657,6 +666,133 @@ services:
       start_period: 10s
     networks:
       - buggy-net
+    restart: unless-stopped
+    logging: *default-logging
+
+  # Evidence gateway — the only way an agent sends a request that counts as
+  # evidence. Each call is checked against the enforced scope, held for the
+  # operator's approval when it changes state, rate limited, recorded in full
+  # and written to the audit ledger. Deterministic probes (IDOR, JWT, SSRF
+  # canary, GraphQL, mass assignment, numeric bounds) run here too, as code.
+  # It has its own way out (pipeline-net) and is on the management network
+  # only so langgraph can call it; the sandbox cannot reach it.
+  capture-mcp:
+    image: buggy-pipeline:${BUGGY_VERSION:-stable}
+    container_name: buggy${BUGGY_STACK_NAME:+-${BUGGY_STACK_NAME}}-capture-mcp
+    entrypoint: ["python", "-m", "buggy.capture.mcp_server"]
+    command: []
+    user: "0:0"
+    cap_drop:
+      - ALL
+    cap_add:
+      - DAC_OVERRIDE  # append to the bind-mounted audit ledger
+    security_opt:
+      - no-new-privileges:true
+    read_only: true
+    tmpfs:
+      - /tmp
+    mem_limit: 512m
+    pids_limit: 256
+    environment:
+      - BUGGY_CONTROL_ROOT=/control
+      - BUGGY_AUDIT_ROOT=/audit
+      - BUGGY_CAPTURE_DATA=/data/capture
+      - BUGGY_CAPTURE_MCP_PORT=9461
+      # Out-of-band callback listener for the SSRF probe. Empty = the probe
+      # reports "cannot tell" instead of guessing. The base URL must be an
+      # address the *target* can reach (a public hostname you control that
+      # forwards to this port); the lab overlay sets it to a lab-net alias.
+      - BUGGY_CANARY_BASE_URL=${BUGGY_CANARY_BASE_URL:-}
+      - BUGGY_CANARY_BIND=${BUGGY_CANARY_BIND:-0.0.0.0:9470}
+      - BUGGY_AUDIT_HMAC_KEY=${BUGGY_AUDIT_HMAC_KEY:-}
+    volumes:
+      - capture_data:/data/capture
+      - ${BUGGY_HOME:-~/.buggy}/control:/control:ro
+      - ${BUGGY_HOME:-~/.buggy}/audit:/audit
+    healthcheck:
+      test: ["CMD", "python", "-c", "import socket; socket.create_connection(('127.0.0.1', 9461), 2).close()"]
+      interval: 5s
+      timeout: 3s
+      retries: 12
+      start_period: 10s
+    networks:
+      - buggy-net
+      - pipeline-net
+    restart: unless-stopped
+    logging: *default-logging
+
+  # Scope lookup — the enforced scope and the imported program data
+  # (rate limits, banned techniques), read-only.
+  scope-mcp:
+    image: buggy-pipeline:${BUGGY_VERSION:-stable}
+    container_name: buggy${BUGGY_STACK_NAME:+-${BUGGY_STACK_NAME}}-scope-mcp
+    entrypoint: ["python", "-m", "buggy.capture.scope_server"]
+    command: []
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    read_only: true
+    tmpfs:
+      - /tmp
+    mem_limit: 256m
+    pids_limit: 64
+    environment:
+      - BUGGY_CONTROL_ROOT=/control
+      - BUGGY_SCOPE_MCP_PORT=9462
+    volumes:
+      - ${BUGGY_HOME:-~/.buggy}/control:/control:ro
+    healthcheck:
+      test: ["CMD", "python", "-c", "import socket; socket.create_connection(('127.0.0.1', 9462), 2).close()"]
+      interval: 5s
+      timeout: 3s
+      retries: 12
+      start_period: 10s
+    networks:
+      - buggy-net
+    restart: unless-stopped
+    logging: *default-logging
+
+  # Scoped browser — Chromium whose every request is checked against the
+  # enforced scope before it leaves; read-only (no state-changing requests)
+  # while the engagement requires approval for them.
+  browser-mcp:
+    image: buggy-browser:${BUGGY_VERSION:-stable}
+    build:
+      context: .
+      dockerfile: containers/browser.Dockerfile
+    container_name: buggy${BUGGY_STACK_NAME:+-${BUGGY_STACK_NAME}}-browser-mcp
+    user: "0:0"
+    cap_drop:
+      - ALL
+    cap_add:
+      - DAC_OVERRIDE  # append to the bind-mounted audit ledger
+    security_opt:
+      - no-new-privileges:true
+    read_only: true
+    tmpfs:
+      - /tmp
+      - /root
+    shm_size: 512m
+    mem_limit: 2g
+    pids_limit: 1024
+    environment:
+      - BUGGY_CONTROL_ROOT=/control
+      - BUGGY_AUDIT_ROOT=/audit
+      - BUGGY_BROWSER_MCP_PORT=9463
+      - BUGGY_AUDIT_HMAC_KEY=${BUGGY_AUDIT_HMAC_KEY:-}
+    volumes:
+      - ${BUGGY_HOME:-~/.buggy}/control:/control:ro
+      - ${BUGGY_HOME:-~/.buggy}/audit:/audit
+    healthcheck:
+      test: ["CMD", "python", "-c", "import socket; socket.create_connection(('127.0.0.1', 9463), 2).close()"]
+      interval: 5s
+      timeout: 3s
+      retries: 12
+      start_period: 15s
+    networks:
+      - buggy-net
+      - pipeline-net
     restart: unless-stopped
     logging: *default-logging
 
@@ -1060,6 +1196,8 @@ volumes:
   # queue of agent re-run requests.
   pipeline_data:
   pipeline_queue:
+  # Captured request/response pairs (evidence), written by capture-mcp only.
+  capture_data:
   postgres_data:
   sliver_data:
   neo4j_data:

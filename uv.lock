@@ -1,5 +1,5 @@
 version = 1
-revision = 5
+revision = 3
 requires-python = ">=3.13"
 resolution-markers = [
     "python_full_version >= '3.15'",
@@ -332,6 +332,9 @@ dependencies = [
 ]
 
 [package.optional-dependencies]
+mcp = [
+    { name = "buggy", extra = ["mcp"] },
+]
 neo4j = [
     { name = "buggy", extra = ["neo4j"] },
 ]
@@ -359,11 +362,12 @@ lint = [
 [package.metadata]
 requires-dist = [
     { name = "buggy", editable = "packages/buggy" },
+    { name = "buggy", extras = ["mcp"], marker = "extra == 'mcp'", editable = "packages/buggy" },
     { name = "buggy", extras = ["neo4j"], marker = "extra == 'neo4j'", editable = "packages/buggy" },
     { name = "buggy-core", editable = "packages/buggy-core" },
     { name = "buggy-sdk", editable = "packages/buggy-sdk" },
 ]
-provides-extras = ["neo4j"]
+provides-extras = ["neo4j", "mcp"]
 
 [package.metadata.requires-dev]
 dev = [

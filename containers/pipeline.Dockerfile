@@ -74,13 +74,21 @@ ENV PYTHONPATH=/opt \
     HOME=/home/pipeline
 COPY packages/buggy/buggy/__init__.py /opt/buggy/__init__.py
 COPY packages/buggy/buggy/pipeline /opt/buggy/pipeline
+# Evidence gateway, probes and scope lookup (capture-mcp, scope-mcp services)
+# run from this image; the ledger writer is shared with the egress guard.
+COPY packages/buggy/buggy/capture /opt/buggy/capture
+COPY packages/buggy/buggy/egress_guard /opt/buggy/egress_guard
 COPY packages/buggy-core/buggy_core /opt/buggy_core
 
 # Fails the build if any pinned tool is missing or reports another version.
 RUN python -m buggy.pipeline.versions --write-manifest /opt/buggy/pipeline-tools.json
 
+# Earlier steps ran as root with HOME set, so the home directory may already
+# exist and be root-owned; own it explicitly. The data directories are created
+# here so that named volumes mounted over them start out writable by this user.
 RUN useradd --uid 10001 --create-home --home-dir /home/pipeline pipeline \
-    && mkdir -p /data/pipeline && chown -R pipeline:pipeline /data/pipeline
+    && mkdir -p /data/pipeline /data/queue /data/capture \
+    && chown -R pipeline:pipeline /home/pipeline /data/pipeline /data/queue /data/capture
 USER pipeline
 WORKDIR /home/pipeline
 

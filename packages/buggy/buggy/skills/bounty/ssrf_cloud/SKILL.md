@@ -13,6 +13,36 @@ SSRF is the gateway to the internal network and the cloud control plane.
 A single SSRF into a metadata endpoint can yield IAM credentials and
 full account compromise — but metadata is **off by default** here.
 
+## 0. Deterministic first
+
+Do not hand-craft what code already does. Before any manual testing:
+
+1. `recon_summary`, then `recon_query` for the record types this class needs
+   (`endpoint`, `api_operation` (parameters named `url`, `uri`, `image`, `callback`, `webhook`, `import`)). The pipeline has already enumerated them; never re-crawl.
+2. Run the probe below through `probe_run`. It sends the requests through the
+   evidence gateway (scope-checked, rate-limited, recorded) and returns
+   `vulnerable: true | false | null` with capture ids. `null` means the probe
+   could not tell — it is not a negative.
+3. Spend reasoning only on what the probe cannot decide: which objects and
+   accounts to feed it, and how a confirmed primitive chains to impact.
+
+**Probe `ssrf_canary`** — params `url`, `method`, `body` with `{{CANARY}}`
+where the URL goes, optional `headers`, `wait_seconds`. It mints a one-time
+callback URL, sends the request, and reports `true` only when the server
+actually fetched it. No callback listener configured → `null`, never a guess.
+State-changing (the endpoint usually stores something). Do not point SSRF at
+cloud-metadata or internal addresses unless the program's scope names them;
+the gateway refuses internal addresses that are not in scope.
+
+Evidence: every finding cites the capture ids returned by the probe or by
+`http_send`, and must pass `capture_verify` (the request replays against the
+in-scope target with the same result). State-changing probes are held for the
+operator's approval on real programs.
+
+Proven in the lab: `packages/buggy/tests/lab/test_probes_find_known_bugs.py::test_ssrf_probe_finds_profile_image_ssrf` finds Juice
+Shop's profile-image SSRF by callback; `::test_ssrf_probe_does_not_flag_an_endpoint_that_stores_text`
+is the negative control.
+
 ## 1. Scope gate (read first)
 
 Cloud-metadata endpoints (`169.254.169.254`, `fd00:ec2::254`, GCP

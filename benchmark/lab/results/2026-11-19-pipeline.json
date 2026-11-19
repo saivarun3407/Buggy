@@ -1,0 +1,399 @@
+{
+  "apps": {
+    "dvga": {
+      "classes": {
+        "access_control": {
+          "duplicates": 0,
+          "found": 0,
+          "found_ids": [],
+          "known": 1,
+          "missed": 1,
+          "missed_ids": [
+            "dvga-private-pastes"
+          ],
+          "recall": 0.0,
+          "unmatched": 0,
+          "unmatched_titles": []
+        },
+        "auth_session": {
+          "duplicates": 0,
+          "found": 0,
+          "found_ids": [],
+          "known": 1,
+          "missed": 1,
+          "missed_ids": [
+            "dvga-jwt-forge"
+          ],
+          "recall": 0.0,
+          "unmatched": 0,
+          "unmatched_titles": []
+        },
+        "graphql": {
+          "duplicates": 0,
+          "found": 2,
+          "found_ids": [
+            "dvga-introspection",
+            "dvga-field-suggestions"
+          ],
+          "known": 4,
+          "missed": 2,
+          "missed_ids": [
+            "dvga-graphiql",
+            "dvga-deny-list-bypass"
+          ],
+          "recall": 0.5,
+          "unmatched": 4,
+          "unmatched_titles": [
+            "GraphQL Alias-based Batching",
+            "GraphQL Array-based Batching",
+            "GraphQL API Detection",
+            "GraphQL CSRF / GET method"
+          ]
+        },
+        "info_exposure": {
+          "duplicates": 0,
+          "found": 0,
+          "found_ids": [],
+          "known": 1,
+          "missed": 1,
+          "missed_ids": [
+            "dvga-stack-trace"
+          ],
+          "recall": 0.0,
+          "unmatched": 0,
+          "unmatched_titles": []
+        },
+        "injection": {
+          "duplicates": 0,
+          "found": 0,
+          "found_ids": [],
+          "known": 3,
+          "missed": 3,
+          "missed_ids": [
+            "dvga-cmd-injection-import-paste",
+            "dvga-cmd-injection-diagnostics",
+            "dvga-sqli-pastes-filter"
+          ],
+          "recall": 0.0,
+          "unmatched": 0,
+          "unmatched_titles": []
+        },
+        "misconfiguration": {
+          "duplicates": 0,
+          "found": 0,
+          "found_ids": [],
+          "known": 0,
+          "missed": 0,
+          "missed_ids": [],
+          "recall": null,
+          "unmatched": 13,
+          "unmatched_titles": [
+            "Cookies without HttpOnly attribute - Detect",
+            "Cookies without Secure attribute - Detect",
+            "HTTP Missing Security Headers",
+            "HTTP Missing Security Headers",
+            "HTTP Missing Security Headers",
+            "HTTP Missing Security Headers",
+            "HTTP Missing Security Headers",
+            "HTTP Missing Security Headers",
+            "HTTP Missing Security Headers",
+            "HTTP Missing Security Headers",
+            "HTTP Missing Security Headers",
+            "HTTP Missing Security Headers",
+            "Missing Cookie SameSite Strict"
+          ]
+        },
+        "ssrf": {
+          "duplicates": 0,
+          "found": 0,
+          "found_ids": [],
+          "known": 1,
+          "missed": 1,
+          "missed_ids": [
+            "dvga-ssrf-import-paste"
+          ],
+          "recall": 0.0,
+          "unmatched": 0,
+          "unmatched_titles": []
+        },
+        "unclassified": {
+          "duplicates": 0,
+          "found": 0,
+          "found_ids": [],
+          "known": 0,
+          "missed": 0,
+          "missed_ids": [],
+          "recall": null,
+          "unmatched": 1,
+          "unmatched_titles": [
+            "Wappalyzer Technology Detection"
+          ]
+        },
+        "xss": {
+          "duplicates": 0,
+          "found": 0,
+          "found_ids": [],
+          "known": 1,
+          "missed": 1,
+          "missed_ids": [
+            "dvga-stored-xss-paste"
+          ],
+          "recall": 0.0,
+          "unmatched": 0,
+          "unmatched_titles": []
+        }
+      },
+      "records": 42,
+      "totals": {
+        "duplicates": 0,
+        "found": 2,
+        "known": 12,
+        "missed": 10,
+        "unmatched": 18
+      }
+    },
+    "juice-shop": {
+      "classes": {
+        "access_control": {
+          "duplicates": 0,
+          "found": 0,
+          "found_ids": [],
+          "known": 5,
+          "missed": 5,
+          "missed_ids": [
+            "js-idor-basket",
+            "js-forged-feedback",
+            "js-forged-review",
+            "js-users-list",
+            "js-admin-config-unauth"
+          ],
+          "recall": 0.0,
+          "unmatched": 0,
+          "unmatched_titles": []
+        },
+        "api": {
+          "duplicates": 0,
+          "found": 0,
+          "found_ids": [],
+          "known": 2,
+          "missed": 2,
+          "missed_ids": [
+            "js-mass-assignment-admin",
+            "js-password-hash-exposure"
+          ],
+          "recall": 0.0,
+          "unmatched": 0,
+          "unmatched_titles": []
+        },
+        "auth_session": {
+          "duplicates": 0,
+          "found": 0,
+          "found_ids": [],
+          "known": 3,
+          "missed": 3,
+          "missed_ids": [
+            "js-jwt-unsigned",
+            "js-weak-admin-password",
+            "js-reset-security-question"
+          ],
+          "recall": 0.0,
+          "unmatched": 0,
+          "unmatched_titles": []
+        },
+        "business_logic": {
+          "duplicates": 0,
+          "found": 0,
+          "found_ids": [],
+          "known": 2,
+          "missed": 2,
+          "missed_ids": [
+            "js-negative-quantity",
+            "js-zero-star-feedback"
+          ],
+          "recall": 0.0,
+          "unmatched": 0,
+          "unmatched_titles": []
+        },
+        "crypto": {
+          "duplicates": 0,
+          "found": 0,
+          "found_ids": [],
+          "known": 1,
+          "missed": 1,
+          "missed_ids": [
+            "js-md5-passwords"
+          ],
+          "recall": 0.0,
+          "unmatched": 0,
+          "unmatched_titles": []
+        },
+        "csrf": {
+          "duplicates": 0,
+          "found": 0,
+          "found_ids": [],
+          "known": 1,
+          "missed": 1,
+          "missed_ids": [
+            "js-csrf-profile"
+          ],
+          "recall": 0.0,
+          "unmatched": 0,
+          "unmatched_titles": []
+        },
+        "file_handling": {
+          "duplicates": 0,
+          "found": 0,
+          "found_ids": [],
+          "known": 2,
+          "missed": 2,
+          "missed_ids": [
+            "js-xxe-file-upload",
+            "js-ftp-null-byte"
+          ],
+          "recall": 0.0,
+          "unmatched": 0,
+          "unmatched_titles": []
+        },
+        "info_exposure": {
+          "duplicates": 0,
+          "found": 3,
+          "found_ids": [
+            "js-metrics-exposed",
+            "js-ftp-directory",
+            "js-api-docs-exposed"
+          ],
+          "known": 3,
+          "missed": 0,
+          "missed_ids": [],
+          "recall": 1.0,
+          "unmatched": 2,
+          "unmatched_titles": [
+            "FingerprintHub Technology Fingerprint",
+            "Public Swagger API - Detect"
+          ]
+        },
+        "injection": {
+          "duplicates": 0,
+          "found": 0,
+          "found_ids": [],
+          "known": 3,
+          "missed": 3,
+          "missed_ids": [
+            "js-sqli-login",
+            "js-sqli-search",
+            "js-nosqli-reviews"
+          ],
+          "recall": 0.0,
+          "unmatched": 0,
+          "unmatched_titles": []
+        },
+        "misconfiguration": {
+          "duplicates": 0,
+          "found": 1,
+          "found_ids": [
+            "js-cors-wildcard"
+          ],
+          "known": 2,
+          "missed": 1,
+          "missed_ids": [
+            "js-error-stack-trace"
+          ],
+          "recall": 0.5,
+          "unmatched": 8,
+          "unmatched_titles": [
+            "HTTP Missing Security Headers",
+            "HTTP Missing Security Headers",
+            "HTTP Missing Security Headers",
+            "HTTP Missing Security Headers",
+            "HTTP Missing Security Headers",
+            "HTTP Missing Security Headers",
+            "HTTP Missing Security Headers",
+            "HTTP Missing Security Headers"
+          ]
+        },
+        "open_redirect": {
+          "duplicates": 0,
+          "found": 0,
+          "found_ids": [],
+          "known": 1,
+          "missed": 1,
+          "missed_ids": [
+            "js-open-redirect"
+          ],
+          "recall": 0.0,
+          "unmatched": 0,
+          "unmatched_titles": []
+        },
+        "ssrf": {
+          "duplicates": 0,
+          "found": 0,
+          "found_ids": [],
+          "known": 1,
+          "missed": 1,
+          "missed_ids": [
+            "js-ssrf-profile-image"
+          ],
+          "recall": 0.0,
+          "unmatched": 0,
+          "unmatched_titles": []
+        },
+        "unclassified": {
+          "duplicates": 0,
+          "found": 0,
+          "found_ids": [],
+          "known": 0,
+          "missed": 0,
+          "missed_ids": [],
+          "recall": null,
+          "unmatched": 2,
+          "unmatched_titles": [
+            "Missing Subresource Integrity",
+            "OWASP Juice Shop"
+          ]
+        },
+        "xss": {
+          "duplicates": 0,
+          "found": 0,
+          "found_ids": [],
+          "known": 2,
+          "missed": 2,
+          "missed_ids": [
+            "js-xss-reflected-track-order",
+            "js-xss-dom-search"
+          ],
+          "recall": 0.0,
+          "unmatched": 0,
+          "unmatched_titles": []
+        }
+      },
+      "records": 174,
+      "totals": {
+        "duplicates": 0,
+        "found": 4,
+        "known": 28,
+        "missed": 24,
+        "unmatched": 12
+      }
+    }
+  },
+  "baseline": "pipeline",
+  "cost_usd": 0.0,
+  "engagement": "lab",
+  "llm_calls": 0,
+  "run_id": "run-20261119T043741-88990597",
+  "seconds": 529.3,
+  "tokens": 0,
+  "tool_versions": {
+    "dnsx": "1.3.1",
+    "gau": "2.2.4",
+    "gitleaks": "8.30.1",
+    "graphql": "builtin-1",
+    "httpx": "1.12.0",
+    "jsparse": "builtin-1",
+    "katana": "1.8.0",
+    "naabu": "2.7.0",
+    "nuclei": "3.11.1",
+    "openapi": "builtin-1",
+    "waybackurls": "0.1.0"
+  }
+}

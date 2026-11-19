@@ -659,7 +659,8 @@ class ReconStore:
     def scope_drops(
         self, engagement: str, *, run_id: str | None = None, limit: int = 500
     ) -> list[dict[str, Any]]:
-        clauses, params = ["engagement = ?"], [engagement]
+        clauses: list[str] = ["engagement = ?"]
+        params: list[Any] = [engagement]
         if run_id:
             clauses.append("run_id = ?")
             params.append(run_id)

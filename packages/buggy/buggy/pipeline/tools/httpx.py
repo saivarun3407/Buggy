@@ -54,10 +54,14 @@ class Httpx:
     name = "httpx"
     passive = False
 
+    def __init__(self, resolvers: tuple[str, ...] = ()) -> None:
+        self._resolvers = resolvers
+
     def invocation(
         self, binary: str, inputs: list[str], limits: PipelineLimits, workdir: Path
     ) -> Invocation:
         targets = write_lines(workdir / "httpx-targets.txt", inputs)
+        extra = ["-r", ",".join(self._resolvers)] if self._resolvers else []
         return Invocation(
             argv=[
                 binary,
@@ -87,6 +91,7 @@ class Httpx:
                 "10",
                 "-retries",
                 "1",
+                *extra,
             ],  # fmt: skip
             timeout=3600,
         )

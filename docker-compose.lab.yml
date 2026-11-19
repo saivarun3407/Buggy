@@ -1,0 +1,78 @@
+# Lab overlay: local, intentionally vulnerable applications for the capability
+# baseline (benchmark/lab). Nothing here is reachable from, or can reach, the
+# internet.
+#
+#   docker compose -f docker-compose.yml -f docker-compose.lab.yml \
+#       up -d juice-shop dvga dvwa
+#   uv run python -m benchmark.lab scope --engagement lab
+#   docker compose -f docker-compose.yml -f docker-compose.lab.yml \
+#       run --rm pipeline run lab
+#   uv run python -m benchmark.lab pipeline-baseline --engagement lab
+#
+# The targets sit on `lab-net`, an internal network: they have no route out,
+# so an SSRF or callback test against them cannot leave the host. The egress
+# guard joins lab-net and treats it as a target network; the engagement's RoE
+# (written by `benchmark.lab scope`) puts the lab hostnames in scope and
+# nothing else. The pipeline joins lab-net to scan them and uses Docker's
+# resolver, since the lab names do not exist in public DNS.
+services:
+  egress-guard:
+    environment:
+      - BUGGY_GUARD_LOCAL_TARGET_CIDRS=${BUGGY_LAB_SUBNET:-172.30.252.0/24}
+    networks:
+      lab-net: {}
+
+  pipeline:
+    environment:
+      - BUGGY_PIPELINE_DNS_RESOLVERS=127.0.0.11:53
+    networks:
+      lab-net: {}
+
+  # The evidence gateway and the browser reach the lab targets directly, and
+  # the targets reach the canary listener by its lab-net alias — so the SSRF
+  # probe can prove a callback without anything leaving the host.
+  capture-mcp:
+    environment:
+      - BUGGY_CANARY_BASE_URL=http://canary.lab:9470
+      - BUGGY_CANARY_BIND=0.0.0.0:9470
+    networks:
+      lab-net:
+        aliases: [canary.lab]
+
+  browser-mcp:
+    networks:
+      lab-net: {}
+
+  juice-shop:
+    image: ${LAB_JUICE_SHOP_IMAGE:-bkimminich/juice-shop:v17.1.1}
+    networks:
+      lab-net:
+        aliases: [juice-shop.lab]
+    mem_limit: 1g
+    restart: "no"
+
+  dvga:
+    image: ${LAB_DVGA_IMAGE:-dolevf/dvga:latest}
+    environment:
+      - WEB_HOST=0.0.0.0
+    networks:
+      lab-net:
+        aliases: [dvga.lab]
+    mem_limit: 1g
+    restart: "no"
+
+  dvwa:
+    image: ${LAB_DVWA_IMAGE:-vulnerables/web-dvwa:latest}
+    networks:
+      lab-net:
+        aliases: [dvwa.lab]
+    mem_limit: 1g
+    restart: "no"
+
+networks:
+  lab-net:
+    driver: bridge
+    internal: true
+    ipam:
+      config:
+        - subnet: ${BUGGY_LAB_SUBNET:-172.30.252.0/24}
