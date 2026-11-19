@@ -1,9 +1,9 @@
 """Deterministic recon report: what the pipeline found, with no LLM involved.
 
 ``render_report`` turns recon records into Markdown a person can act on:
-known issues by severity, live services, APIs, and a short list of the places
-most worth testing next. ``rank_candidates`` is the same prioritisation as
-data, for the agents.
+known issues by severity, what was *not* checked, live services, APIs, and a
+short list of the places most worth testing next. ``rank_candidates`` is the
+same prioritisation as data, for the agents.
 
 Everything here is derived from stored records. Nothing is inferred beyond
 simple, stated rules (a path parameter that looks like an identifier is an
@@ -39,6 +39,19 @@ REMEDIATION_HINTS: tuple[tuple[str, str], ...] = (
 
 #: Candidates no deterministic probe covers; the agent tests them with http_send.
 MANUAL = "http_send"
+
+#: Coverage stamps in pipeline order, with what each one checks.
+COVERAGE_STAGE_LABELS: tuple[tuple[str, str], ...] = (
+    ("enumerate", "subdomain enumeration"),
+    ("dns", "DNS resolution"),
+    ("port", "port scan"),
+    ("live", "live-service probe"),
+    ("fingerprint", "technology, TLS and header fingerprints"),
+    ("urls", "URL and endpoint discovery"),
+    ("apispec", "API specification discovery"),
+    ("issues", "known-issue and secret scanning"),
+)
+MAX_GAPS_PER_STAGE = 50
 
 #: An identifier that follows a named collection: /orders/123, /users/{userId}.
 #: A bare number such as "/10" is not an object reference.
@@ -183,6 +196,81 @@ def rank_candidates(
     return sorted(out, key=lambda c: (order.get(c["class"], 9), c["where"]))
 
 
+def coverage_overview(summary: dict[str, Any]) -> dict[str, Any]:
+    """Coverage as the report needs it, from a ``recon_summary`` result.
+
+    ``recorded`` is false when the store holds no stamp at all (no run yet, or
+    a store written before stamps existed): then nothing is known to have been
+    checked, which is not the same as nothing being missed.
+    """
+    raw = summary.get("coverage")
+    counts = {
+        status: int((raw if isinstance(raw, dict) else {}).get(status) or 0)
+        for status in ("complete", "partial", "failed", "skipped")
+    }
+    gaps = [
+        gap
+        for gap in summary.get("coverage_gaps") or []
+        if isinstance(gap, dict) and gap.get("asset") and gap.get("status") != "complete"
+    ]
+    gap_total = max(counts["partial"] + counts["failed"] + counts["skipped"], len(gaps))
+    listed_assets = len({str(gap["asset"]) for gap in gaps})
+    try:
+        gap_assets = max(int(summary.get("coverage_gap_assets") or 0), listed_assets)
+    except (TypeError, ValueError):
+        gap_assets = listed_assets
+    return {
+        "recorded": sum(counts.values()) > 0 or bool(gaps),
+        "counts": counts,
+        "gaps": gaps,
+        "gap_total": gap_total,
+        "gap_assets": gap_assets,
+    }
+
+
+def _not_checked(coverage: dict[str, Any]) -> list[str]:
+    """The "Not checked" section: gaps grouped by stage, each with its reason."""
+    lines = ["## Not checked", ""]
+    if not coverage["recorded"]:
+        return lines + [
+            "No coverage was recorded for this engagement, so nothing here can be assumed "
+            "to have been checked.",
+            "",
+        ]
+    if not coverage["gap_total"]:
+        return lines + ["Every stage completed for every asset it was run on.", ""]
+    lines += [
+        "A stage listed here did not complete for the asset. That it reported nothing "
+        "there means the asset was not checked, not that it is clean.",
+        "",
+    ]
+    order = [stage for stage, _label in COVERAGE_STAGE_LABELS]
+    labels = dict(COVERAGE_STAGE_LABELS)
+    grouped: dict[str, list[dict[str, Any]]] = {}
+    for gap in coverage["gaps"]:
+        grouped.setdefault(str(gap.get("stage") or "unknown"), []).append(gap)
+    for stage in sorted(grouped, key=lambda s: (order.index(s) if s in order else len(order), s)):
+        rows = sorted(grouped[stage], key=lambda gap: str(gap["asset"]))
+        lines += [f"### {stage}" + (f" — {labels[stage]}" if stage in labels else ""), ""]
+        lines += _table(
+            ["Asset", "Status", "Reason"],
+            [
+                [str(gap["asset"]), str(gap.get("status") or ""), str(gap.get("detail") or "")]
+                for gap in rows[:MAX_GAPS_PER_STAGE]
+            ],
+        )
+        if len(rows) > MAX_GAPS_PER_STAGE:
+            lines += ["", f"…and {len(rows) - MAX_GAPS_PER_STAGE} more in this stage."]
+        lines.append("")
+    if coverage["gap_total"] > len(coverage["gaps"]):
+        lines += [
+            f"Showing {len(coverage['gaps'])} of {coverage['gap_total']} gaps; the recon "
+            "coverage query lists the rest.",
+            "",
+        ]
+    return lines
+
+
 def _table(headers: list[str], rows: list[list[str]]) -> list[str]:
     def cell(text: str) -> str:
         return str(text).replace("|", "\\|").replace("\n", " ")
@@ -212,6 +300,7 @@ def render_report(
         lines.append("")
 
     issues = group_issues(records.get("vulnerability", []))
+    coverage = coverage_overview(summary)
     by_severity = {s: sum(1 for i in issues if i["severity"] == s) for s in SEVERITY_ORDER}
     lines += ["## Summary", ""]
     duration = ""
@@ -229,6 +318,10 @@ def render_report(
             ["Known issues (distinct)", str(len(issues))],
             ["Exposed secrets", str(counts.get("secret", 0))],
             ["Candidates dropped as out of scope", str(run.get("scope_drops", 0))],
+            [
+                "Assets with incomplete coverage",
+                str(coverage["gap_assets"]) if coverage["recorded"] else "not recorded",
+            ],
         ],
     )
     lines.append("")
@@ -244,6 +337,18 @@ def render_report(
     lines.append("")
 
     lines += ["## Known issues", ""]
+    if coverage["gap_total"]:
+        lines += [
+            f"This list is not complete: {coverage['gap_assets']} asset(s) were not fully "
+            'checked (see "Not checked").',
+            "",
+        ]
+    elif not coverage["recorded"]:
+        lines += [
+            "This list cannot be taken as complete: no coverage was recorded for this "
+            'engagement (see "Not checked").',
+            "",
+        ]
     if not issues:
         lines += ["None reported by the scanner templates that were run.", ""]
     for issue in issues:
@@ -287,6 +392,8 @@ def render_report(
             "Values are not printed here. Rotate each one and remove it from the source.",
             "",
         ]
+
+    lines += _not_checked(coverage)
 
     services = records.get("http_service", [])
     lines += ["## Live services", ""]
@@ -349,4 +456,11 @@ def render_report(
     return "\n".join(lines)
 
 
-__all__ = ["SEVERITY_ORDER", "group_issues", "remediation_for", "render_report", "rank_candidates"]
+__all__ = [
+    "SEVERITY_ORDER",
+    "coverage_overview",
+    "group_issues",
+    "rank_candidates",
+    "remediation_for",
+    "render_report",
+]

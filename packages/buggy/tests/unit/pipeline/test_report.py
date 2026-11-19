@@ -153,6 +153,9 @@ def test_report_renders_without_data_and_never_prints_secret_values() -> None:
     empty = render_report("acme", {"records": {}, "last_run": None}, {}, generated_at=0)
     assert "None reported by the scanner templates" in empty
     assert "No live web service was found" in empty and "Nothing stood out" in empty
+    # No coverage in the summary: the report says so instead of implying a full check.
+    assert "| Assets with incomplete coverage | not recorded |" in empty
+    assert "## Not checked" in empty and "No coverage was recorded" in empty
 
     text = render_report(
         "acme",
@@ -183,3 +186,38 @@ def test_report_renders_without_data_and_never_prints_secret_values() -> None:
     assert "aws-access-token" in text and "https://a.test/app.js" in text
     assert "AKIAEXAMPLEEXAMPLE" not in text
     assert "completed, 60 s" in text and "| Candidates dropped as out of scope | 4 |" in text
+
+
+def test_report_lists_coverage_gaps_by_stage_and_flags_the_issue_list() -> None:
+    def summary(gaps: list[dict], **counts: int) -> dict:
+        return {
+            "records": {},
+            "last_run": None,
+            "coverage": {"complete": 0, "partial": 0, "failed": 0, "skipped": 0, **counts},
+            "coverage_gaps": gaps,
+            "coverage_gap_assets": len({g["asset"] for g in gaps}),
+        }
+
+    gaps = [
+        {"asset": "b.test", "stage": "issues", "status": "partial", "detail": "nuclei: timed out"},
+        {"asset": "a.test", "stage": "issues", "status": "failed", "detail": "nuclei: exit 2"},
+        {"asset": "a.test", "stage": "port", "status": "skipped", "detail": "port scan disabled"},
+    ]
+    text = render_report(
+        "acme", summary(gaps, complete=9, partial=1, failed=1, skipped=1), {}, generated_at=0
+    )
+    assert "| Assets with incomplete coverage | 2 |" in text
+    section = text.split("## Not checked\n", 1)[1].split("\n## ", 1)[0]
+    assert section.index("### port — port scan") < section.index("### issues — known-issue")
+    assert section.index("| a.test | failed | nuclei: exit 2 |") < section.index(
+        "| b.test | partial | nuclei: timed out |"
+    )
+    assert "| a.test | skipped | port scan disabled |" in section
+    known = text.split("## Known issues\n", 1)[1].strip().splitlines()[0]
+    assert known.startswith("This list is not complete: 2 asset(s)")
+
+    # Control: stamps exist and none is a gap, so nothing is flagged.
+    clean = render_report("acme", summary([], complete=12), {}, generated_at=0)
+    assert "| Assets with incomplete coverage | 0 |" in clean
+    assert "not complete" not in clean and "Every stage completed" in clean
+    assert clean.split("## Known issues\n", 1)[1].strip().startswith("None reported")
