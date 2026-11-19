@@ -2,7 +2,6 @@ package cmd
 
 import (
 	"fmt"
-	"os"
 
 	"github.com/saivarun3407/buggy/clients/launcher/internal/engagement"
 	"github.com/spf13/cobra"
@@ -65,8 +64,8 @@ func runBounty(cmd *cobra.Command, args []string) error {
 	// The Scout ingests scope at runtime, so always drive the orchestrator
 	// (buggy) — even on a fresh engagement that has no plan bundle yet.
 	choice.AssistantID = engagement.AssistantBuggy
-	if err := os.Setenv("BUGGY_ENGAGEMENT_WORKSPACE", choice.WorkspacePath); err != nil {
-		return fmt.Errorf("set engagement workspace env: %w", err)
+	if err := bindEngagementDirs(home, choice); err != nil {
+		return err
 	}
 
 	if err := startServices(env); err != nil {

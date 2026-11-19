@@ -149,6 +149,7 @@ testpaths = [
 markers = [
     "asyncio: mark test as async (pytest-asyncio)",
     "slow: integration-style tests that hit wall-clock timeouts or otherwise take seconds; deselected from the PR fast lane",
+    "e2e: tests that start real containers with docker compose; skipped unless BUGGY_E2E=1",
 ]
 addopts = [
     "--strict-markers",

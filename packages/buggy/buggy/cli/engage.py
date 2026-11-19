@@ -120,6 +120,16 @@ def _build_parser() -> argparse.ArgumentParser:
         ),
     )
     p.add_argument(
+        "--control-root",
+        type=Path,
+        default=None,
+        help=(
+            "Operator-controlled root; default $BUGGY_ENGAGEMENT_CONTROL or "
+            "~/.buggy/control. The ENFORCED scope is written to "
+            "<control-root>/<slug>/roe.json, outside the agent-writable tree."
+        ),
+    )
+    p.add_argument(
         "--plan-only",
         action="store_true",
         help="Write the plan bundle and exit without dispatching (review gate).",
@@ -276,8 +286,14 @@ def _write_plan_bundle(
     mode: str,
     forbidden_commands: list[str],
     instruction: str,
+    control_root: Path | None = None,
 ) -> Path:
     """Write ``plan/roe.json`` + ``plan/conops.md`` under <root>/<slug>/.
+
+    When ``control_root`` is given the same RoE document is also written to
+    ``<control_root>/<slug>/roe.json``. That copy is the one the guardrail
+    enforces; the one under ``plan/`` is a readable draft the agent can see
+    but whose edits change nothing.
 
     The bundle is what Soundwave's interview produces interactively; the
     CLI emits the same contract files non-interactively. Returns the plan
@@ -305,6 +321,10 @@ def _write_plan_bundle(
     }
     roe_path = plan_dir / "roe.json"
     roe_path.write_text(json.dumps(roe_doc, indent=2) + "\n", encoding="utf-8")
+    if control_root is not None:
+        from buggy.cli._paths import write_control_roe  # noqa: PLC0415
+
+        write_control_roe(control_root, slug, roe_doc)
 
     conops = plan_dir / "conops.md"
     conops.write_text(
@@ -505,6 +525,9 @@ def main(argv: list[str] | None = None) -> int:
 
     slug = _resolve_engagement_name(args.engagement_name)
     root = _workspace_root(args)
+    from buggy.cli._paths import control_root as _control_root  # noqa: PLC0415
+
+    control = _control_root(args.control_root)
     try:
         plan_dir = _write_plan_bundle(
             root=root,
@@ -515,13 +538,21 @@ def main(argv: list[str] | None = None) -> int:
             mode=args.mode,
             forbidden_commands=args.forbidden_command,
             instruction=args.instruction,
+            control_root=control,
         )
     except OSError as exc:
-        print(f"error: failed to write plan bundle: {exc}", file=sys.stderr)
+        print(
+            f"error: failed to write plan bundle: {exc}\n"
+            "The enforced scope lives under the operator-controlled root, which the "
+            "langgraph service mounts read-only. Run this command on the host, or with "
+            "`docker compose --profile operator run --rm operator buggy-cli ...`.",
+            file=sys.stderr,
+        )
         return EXIT_CONFIG
 
     print(f"engagement: {slug}", file=sys.stderr)
     print(f"plan bundle: {plan_dir}", file=sys.stderr)
+    print(f"enforced scope: {control / slug / 'roe.json'}", file=sys.stderr)
     print(
         f"scope: {len(in_scope)} in / {len(out_of_scope)} out (mode={args.mode})",
         file=sys.stderr,
@@ -561,7 +592,7 @@ def main(argv: list[str] | None = None) -> int:
     else:
         print("findings: none recorded (see workspace + audit/ for activity)", file=sys.stderr)
     print(
-        f"audit ledger: {engagement_dir}/audit/roe-decisions.jsonl (verify with `buggy-cli audit`)",
+        f"audit ledger: <audit-root>/{slug}/roe-decisions.jsonl (verify with `buggy-cli audit`)",
         file=sys.stderr,
     )
     return EXIT_OK

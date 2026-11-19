@@ -29,12 +29,12 @@ layering rationale.
 
 Auth model
 ----------
-`SANDBOX_TOKEN` env: when set, every request must carry
-``Authorization: Bearer <token>``. When unset (typical dev), the
-daemon answers any caller. Cloud Run multi-container sibling traffic
-on loopback isn't routable from outside the service, so the token is
-defence-in-depth rather than the primary authn mechanism — but it's
-the right thing to ship as the default.
+`SANDBOX_TOKEN` env is required: every request must carry
+``Authorization: Bearer <token>``. The daemon refuses to start without a
+token, because it executes arbitrary commands for whoever can reach its
+port. ``SANDBOX_ALLOW_UNAUTHENTICATED=1`` is the explicit opt-out for unit
+tests and throwaway local experiments; it is never set by the shipped
+compose file.
 """
 
 from __future__ import annotations
@@ -288,6 +288,19 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
                 "SAAS_SANDBOX_TOKEN is deprecated and will be removed; set SANDBOX_TOKEN instead."
             )
             _required_token = legacy_token
+    if _required_token is None:
+        if os.environ.get("SANDBOX_ALLOW_UNAUTHENTICATED", "").strip().lower() not in {
+            "1",
+            "true",
+            "yes",
+        }:
+            raise RuntimeError(
+                "SANDBOX_TOKEN is not set. The sandbox daemon executes commands for any "
+                "caller that reaches it, so it will not start unauthenticated. Set "
+                "SANDBOX_TOKEN (and the same value for the langgraph service), or set "
+                "SANDBOX_ALLOW_UNAUTHENTICATED=1 for an isolated test."
+            )
+        log.warning("SANDBOX_ALLOW_UNAUTHENTICATED is set: the daemon answers any caller")
 
     # Zombie reaping is delegated to the container init process (tini),
     # enabled via ``init: true`` on the sandbox compose service. tini

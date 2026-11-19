@@ -62,7 +62,6 @@ from buggy.middleware.opscontrol_notifications import (
 )
 from buggy.middleware.prompt_injection_shield import PromptInjectionShieldMiddleware
 from buggy.middleware.proxy_key_override import ProxyKeyOverrideMiddleware
-from buggy.middleware.roe import build_default_sink
 from buggy.middleware.subagent_transcript_state import SubagentTranscriptState
 from buggy_core.contracts.slots import (
     SAFETY_CRITICAL_SLOTS,
@@ -129,17 +128,14 @@ def _make_engagement_context(**_: Any):
 
 
 def _make_roe_guardrail(*, role: str, **_: Any):
-    """Build the RoE guardrail middleware with a per-engagement sink.
+    """Build the RoE guardrail middleware.
 
-    The sink path defaults to ``<workspace>/audit/roe-decisions.jsonl``
-    and is resolved lazily on first tool call (workspace_path is not
-    yet hydrated at slot-build time). Operators can pin a path with
-    ``BUGGY_ROE_AUDIT_PATH``.
+    No sink is bound here: the engagement is unknown at slot-build time, so
+    the middleware resolves ``<audit>/<engagement>/roe-decisions.jsonl`` from
+    the request state on each call (see ``roe.default_audit_path``).
+    Operators can pin a path with ``BUGGY_ROE_AUDIT_PATH``.
     """
-    import os
-
-    sink = build_default_sink(os.environ.get("BUGGY_WORKSPACE_PATH"))
-    return RoEGuardrailMiddleware(sink=sink)
+    return RoEGuardrailMiddleware()
 
 
 def _make_untrusted_output(*, role: str, **_: Any):
@@ -433,8 +429,10 @@ def _make_hitl(*, role: str, **_: Any):
     per request from ``request.state['workspace_path']`` — standard graphs
     are built once at import but a long-lived server serves many
     engagements, so the workspace can't be bound at build time. The
-    resolved transport writes ``<workspace>/approvals/{requests,
-    decisions}.jsonl`` — a contract shared with the web bridge.
+    resolved transport writes requests under the audit root and reads
+    decisions from the operator-controlled root (see
+    ``hitl.approval_paths``) — a contract shared with the web bridge and
+    ``buggy-cli approvals``.
     """
     import os
 

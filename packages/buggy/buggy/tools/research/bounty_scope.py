@@ -16,11 +16,15 @@ definition, two enforcement points:
     allowlist, so a packet to an out-of-scope host cannot leave the
     sandbox even when the parser misses the target.
 
-Writing the block in ``enforce`` mode is therefore the hard-enforcement
-switch the bug-bounty workflow needs: out-of-scope hosts are blocked at
-both the command parser and the network boundary. Cloud-metadata
-endpoints (169.254.169.254 et al.) stay denied unless the operator
-explicitly opts in.
+What this tool writes is a **draft**. The guardrail enforces only the
+operator-controlled copy at ``<control>/<engagement>/roe.json``, which no
+agent tool can write. A draft becomes the enforced scope when the operator
+runs ``buggy-cli scope approve <engagement>`` (or imports the program's
+official scope with ``buggy-cli scope import``). Until then, with RoE
+required (the default), every gated tool is refused.
+
+Cloud-metadata endpoints (169.254.169.254 et al.) stay denied unless the
+operator explicitly opts in.
 """
 
 from __future__ import annotations
@@ -64,6 +68,43 @@ _ASSET_RE = re.compile(
 
 def _workspace_path() -> Path:
     return Path(os.environ.get(_WORKSPACE_ENV) or _DEFAULT_WORKSPACE)
+
+
+def _enforcement_status(
+    workspace: Path, machine_enforcement: dict[str, Any], wrote: bool
+) -> tuple[bool, str]:
+    """Whether the block just drafted is the one the guardrail enforces.
+
+    Returns ``(enforced, note)``. With RoE required, only an identical
+    operator-controlled copy counts; the note tells the agent what the
+    operator has to do. Without it (labs), a written draft is what the
+    guardrail reads.
+    """
+    from buggy.middleware._control import control_roe_path  # noqa: PLC0415
+    from buggy.middleware.roe import _roe_required  # noqa: PLC0415
+
+    control = control_roe_path(str(workspace), os.environ.get("BUGGY_ENGAGEMENT_ID") or None)
+    approved: Any = None
+    if control is not None:
+        try:
+            document = json.loads(control.read_text(encoding="utf-8"))
+            approved = document.get("machine_enforcement") if isinstance(document, dict) else None
+        except (OSError, ValueError):
+            approved = None
+    if approved is not None:
+        if approved == machine_enforcement:
+            return True, ""
+        return False, (
+            "this scope is a DRAFT that differs from the operator-approved scope; the approved "
+            "scope stays in force until the operator runs `buggy-cli scope approve`."
+        )
+    if _roe_required():
+        return False, (
+            "this scope is a DRAFT and is NOT enforced: gated tools stay refused until the "
+            "operator approves it with `buggy-cli scope approve <engagement>`. Ask the operator "
+            "to do that now; do not attempt any testing first."
+        )
+    return wrote, ""
 
 
 def _parse_json_array(raw: str) -> list[str]:
@@ -299,13 +340,29 @@ def ingest_bounty_scope(
     existing.setdefault("out_of_scope", out_scope_assets)
 
     wrote = True
+    draft = json.dumps(existing, indent=2, sort_keys=False)
     try:
         roe_path.parent.mkdir(parents=True, exist_ok=True)
-        roe_path.write_text(json.dumps(existing, indent=2, sort_keys=False), encoding="utf-8")
-    except OSError as exc:
-        wrote = False
-        warnings.append(f"failed to write roe.json: {exc}")
-        log.warning("ingest_bounty_scope: write failed: %s", exc)
+        roe_path.write_text(draft, encoding="utf-8")
+    except OSError as local_exc:
+        # In the shipped stack the workspace is read-only in this process;
+        # the draft is written through the sandbox, which owns /workspace.
+        try:
+            from buggy.backends.factory import build_sandbox_backend  # noqa: PLC0415
+
+            responses = build_sandbox_backend().upload_files(
+                [(str(roe_path), draft.encode("utf-8"))]
+            )
+            if any(getattr(r, "error", None) for r in responses):
+                raise OSError(f"sandbox refused the draft: {responses[0].error}")
+        except Exception as exc:  # noqa: BLE001 - reported to the caller as a warning
+            wrote = False
+            warnings.append(f"failed to write roe.json draft: {local_exc}; {exc}")
+            log.warning("ingest_bounty_scope: write failed: %s; %s", local_exc, exc)
+
+    enforced, enforcement_note = _enforcement_status(workspace, machine_enforcement, wrote)
+    if enforcement_note:
+        warnings.append(enforcement_note)
 
     # Compile the egress policy from the same block so the operator can see
     # exactly what the sandbox network boundary will enforce.
@@ -333,7 +390,8 @@ def ingest_bounty_scope(
             "min_inter_request_delay_ms": delay_ms,
             "max_concurrent_connections": max_conn or None,
             "egress_policy": egress_preview,
-            "hard_enforced": mode_norm == EnforcementMode.ENFORCE.value and wrote,
+            "draft_only": not enforced,
+            "hard_enforced": mode_norm == EnforcementMode.ENFORCE.value and enforced,
             "warnings": warnings,
         },
         indent=2,

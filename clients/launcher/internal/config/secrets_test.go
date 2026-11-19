@@ -1,6 +1,7 @@
 package config
 
 import (
+	"os"
 	"strings"
 	"testing"
 )
@@ -58,5 +59,46 @@ func TestNewInstallationSecrets_generates_independent_values(t *testing.T) {
 	}
 	if len(values) != generatedSecretCount {
 		t.Fatalf("generated %d unique values, want %d", len(values), generatedSecretCount)
+	}
+}
+
+func TestEnsureScopeSecrets_generates_missing_and_keeps_existing(t *testing.T) {
+	// Given an .env that already holds one of the three scope secrets
+	path := t.TempDir() + "/.env"
+	if err := os.WriteFile(path, []byte("SANDBOX_TOKEN=keep-me\nOTHER=1\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	env := map[string]string{"SANDBOX_TOKEN": "keep-me", "OTHER": "1"}
+
+	// When the launcher ensures the scope secrets
+	generated, err := EnsureScopeSecrets(path, env)
+
+	// Then only the missing ones are generated, on disk and in memory
+	if err != nil {
+		t.Fatalf("EnsureScopeSecrets() error = %v", err)
+	}
+	if len(generated) != 2 {
+		t.Fatalf("generated = %v, want the two missing keys", generated)
+	}
+	onDisk, err := LoadEnv(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if onDisk["SANDBOX_TOKEN"] != "keep-me" || env["SANDBOX_TOKEN"] != "keep-me" {
+		t.Fatal("existing SANDBOX_TOKEN was rotated")
+	}
+	for _, key := range []string{"EGRESS_GUARD_TOKEN", "BUGGY_AUDIT_HMAC_KEY"} {
+		if len(onDisk[key]) != 64 || onDisk[key] != env[key] {
+			t.Fatalf("%s = %q on disk, %q in memory; want one 64-hex value", key, onDisk[key], env[key])
+		}
+	}
+	if onDisk["EGRESS_GUARD_TOKEN"] == onDisk["BUGGY_AUDIT_HMAC_KEY"] {
+		t.Fatal("secrets must be independent")
+	}
+
+	// And a second call changes nothing
+	again, err := EnsureScopeSecrets(path, env)
+	if err != nil || len(again) != 0 {
+		t.Fatalf("second call generated %v (err %v), want nothing", again, err)
 	}
 }

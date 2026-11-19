@@ -222,7 +222,7 @@ declaration order of `MiddlewareSlot` (`buggy-core/contracts/slots.py`). Each ro
 | # | Slot | Implementation | What it does |
 |---|---|---|---|
 | 1 | **engagement-context** | `middleware/engagement.py` | Injects engagement, RoE and scope into every call |
-| 2 | **roe-guardrail** | `middleware/roe.py`, `_command_targets.py`, `_audit_sink.py` | Pulls targets from each tool call, then checks scope, forbidden targets and commands, and time windows. Appends to the HMAC-chained `audit/roe-decisions.jsonl`. |
+| 2 | **roe-guardrail** | `middleware/roe.py`, `_command_targets.py`, `_audit_sink.py` | Pulls targets from each tool call, then checks scope, forbidden targets and commands, and time windows. Reads the operator-controlled `control/<engagement>/roe.json`, provisions the egress guard (aborting the run on failure), and appends to the HMAC-chained `audit/<engagement>/roe-decisions.jsonl` outside the sandbox. See `docs/security/scope-enforcement.md`. |
 | 3 | hitl-approval | `middleware/hitl.py` | Operator approval for high-impact actions (opt-in, `BUGGY_HITL__ENABLED`) |
 | 4 | parsing-firewall | `middleware/parsing_firewall.py` *(fork)* | Trims and structures large tool output before it reaches the model |
 | 5 | **untrusted-output** | `middleware/untrusted_output.py` | Wraps tool output in an untrusted envelope |
@@ -324,7 +324,7 @@ The model actually served is logged for audit. The removed `claude4_compat` evas
 | **BHCE** | AD graph from SharpHound ZIPs | `bhce_ingest_zip` | `bhce_cypher` |
 | **PostgreSQL** | LiteLLM spend and keys, dashboard data, BHCE DB | LiteLLM, web, BHCE | same |
 | **LangGraph checkpoints** | thread state | LangGraph | LangGraph |
-| **workspace/** (per engagement) | `plan/` (roe.json, conops, OPPLAN), `FIND-*.md`, PoCs, `sessions/<host>.json`, `audit/roe-decisions.jsonl`, event log, `.scratch/` | agents, middleware | agents, reports, operator |
+| **workspace/** (per engagement) | `plan/` (roe.json draft, conops, OPPLAN), `FIND-*.md`, PoCs, `sessions/<host>.json`, event log, `.scratch/`. The enforced `roe.json`, approvals and audit ledgers live in the separate `control/` and `audit/` trees | agents, middleware | agents, reports, operator |
 
 ---
 
@@ -427,7 +427,7 @@ records the outcome and learnings to Neo4j through `kg_recorder` (off the event 
 | Boundary | Mechanism |
 |---|---|
 | Scope | RoE guardrail on every tool call, plus the sandbox nftables egress allowlist (the authoritative layer) |
-| Accountability | HMAC-chained `audit/roe-decisions.jsonl` |
+| Accountability | HMAC-chained `audit/<engagement>/roe-decisions.jsonl` and `audit/egress-guard/egress-decisions.jsonl` |
 | Prompt injection | untrusted-output envelope + injection shield (safety-critical, locked) |
 | Credentials | provider keys live only on buggy-net; the sandbox never sees them |
 | Infra | the sandbox cannot route to the management plane |

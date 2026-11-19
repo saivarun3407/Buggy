@@ -179,6 +179,11 @@ services:
     networks:
       - sandbox-net
       - buggy-net
+    # Dual-homed services must never route between their networks: a sandbox
+    # that can craft raw frames could otherwise use this container as a hop
+    # around the egress guard.
+    sysctls:
+      - net.ipv4.ip_forward=0
     healthcheck:
       test: ["CMD-SHELL", "wget -q --spider http://localhost:7474 || exit 1"]
       interval: 5s
@@ -196,6 +201,59 @@ services:
   # daemon baked into the image). The previous ``docker exec`` transport
   # via ``/var/run/docker.sock`` was removed in the HTTP-only migration —
   # see buggy/backends/factory.py for the rationale.
+  # Egress guard — the sandbox's network boundary.
+  #
+  # The sandbox sits on ``sandbox-net`` (internal: Docker drops anything
+  # addressed outside it). Its default route is a VXLAN tunnel to this
+  # container and its DNS points here. The guard forwards a packet only when
+  # the engagement's RoE allows the destination and answers DNS only for
+  # in-scope names. The rules live in THIS container's network namespace, so
+  # nothing the agent runs can change them. Until langgraph pushes a policy
+  # the guard forwards nothing. Drops are written to the audit root.
+  # See docs/security/scope-enforcement.md.
+  egress-guard:
+    image: buggy-egress-guard:${BUGGY_VERSION:-stable}
+    build:
+      context: .
+      dockerfile: containers/egress-guard.Dockerfile
+    container_name: buggy${BUGGY_STACK_NAME:+-${BUGGY_STACK_NAME}}-egress-guard
+    cap_drop:
+      - ALL
+    cap_add:
+      - NET_ADMIN         # load nftables rules in its own namespace
+      - NET_BIND_SERVICE  # DNS proxy on port 53
+      - DAC_OVERRIDE      # append to the bind-mounted audit ledger
+    security_opt:
+      - no-new-privileges:true
+    read_only: true
+    tmpfs:
+      - /tmp
+    mem_limit: 256m
+    pids_limit: 256
+    sysctls:
+      - net.ipv4.ip_forward=1
+    environment:
+      - EGRESS_GUARD_TOKEN=${EGRESS_GUARD_TOKEN:?EGRESS_GUARD_TOKEN must be set - run scripts/ensure-stack-secrets.sh or `buggy onboard`}
+      - BUGGY_SANDBOX_SUBNET=${BUGGY_SANDBOX_SUBNET:-172.30.250.0/24}
+      - BUGGY_SANDBOX_IP=${BUGGY_SANDBOX_IP:-172.30.250.3}
+      # Attached networks that hold test targets (lab overlays). Every other
+      # attached network — i.e. the management plane — is unreachable from
+      # the sandbox regardless of policy.
+      - BUGGY_GUARD_LOCAL_TARGET_CIDRS=${BUGGY_GUARD_LOCAL_TARGET_CIDRS:-}
+      - BUGGY_AUDIT_HMAC_KEY=${BUGGY_AUDIT_HMAC_KEY:-}
+    volumes:
+      - ${BUGGY_ENGAGEMENT_AUDIT:-${BUGGY_HOME:-~/.buggy}/audit}:/audit
+    networks:
+      sandbox-net:
+        ipv4_address: ${BUGGY_EGRESS_GUARD_IP:-172.30.250.2}
+      buggy-net:
+        # Per-network alias: resolves to the management-side address only,
+        # which is the only side the control API listens on.
+        aliases:
+          - egress-guard-control
+    restart: unless-stopped
+    logging: *default-logging
+
   sandbox:
     image: buggy-sandbox:${BUGGY_VERSION:-stable}
     # Multi-arch image — linux/amd64 + linux/arm64. Apple Silicon and
@@ -207,7 +265,14 @@ services:
       dockerfile: containers/sandbox.Dockerfile
     container_name: buggy${BUGGY_STACK_NAME:+-${BUGGY_STACK_NAME}}-sandbox
     networks:
-      - sandbox-net
+      sandbox-net:
+        # Fixed: the guard accepts tunnel traffic from this address only.
+        ipv4_address: ${BUGGY_SANDBOX_IP:-172.30.250.3}
+    # sandbox-net is internal: the only way out is the egress guard. Docker's
+    # embedded resolver still answers stack-local names (neo4j, ghidra-mcp)
+    # and forwards everything else to the guard's scope-filtering DNS proxy.
+    dns:
+      - ${BUGGY_EGRESS_GUARD_IP:-172.30.250.2}
     # ──────────────────────────────────────────────────────────────────
     # Sandbox hardening - see docs/security/sandbox-isolation.md.
     #
@@ -217,10 +282,15 @@ services:
     # that boundary tight:
     #
     #   - cap_drop ALL, then re-add the minimum set the offensive
-    #     toolset actually needs (NET_RAW for SYN scans, NET_ADMIN for
-    #     raw routing, NET_BIND_SERVICE for low ports, SYS_PTRACE for
-    #     frida/gdb in the Reverser path, SETUID/SETGID for tools like
-    #     msfconsole that drop privileges internally).
+    #     toolset actually needs (NET_RAW for SYN scans, NET_BIND_SERVICE
+    #     for low ports, SYS_PTRACE for frida/gdb in the Reverser path,
+    #     SETUID/SETGID for tools like msfconsole that drop privileges
+    #     internally).
+    #   - NET_ADMIN and SETPCAP exist ONLY for the entrypoint: it installs
+    #     the tunnel + default route to the egress guard, then removes both from
+    #     the capability bounding set before the daemon (and therefore any
+    #     agent command) starts. Nothing the agent runs can change routes
+    #     or load firewall rules. See containers/sandbox-entrypoint.sh.
     #   - no-new-privileges blocks setuid escalation within the
     #     container even if a tool ships with a setuid binary.
     #   - TUN-based pivots (ligolo-ng's Layer-3 tunnel) need the host
@@ -239,7 +309,8 @@ services:
       - ALL
     cap_add:
       - NET_RAW
-      - NET_ADMIN
+      - NET_ADMIN   # entrypoint only; dropped from the bounding set before the daemon starts
+      - SETPCAP     # entrypoint only; needed to perform that drop, dropped with it
       - NET_BIND_SERVICE
       - SYS_PTRACE
       - SETUID
@@ -258,6 +329,11 @@ services:
       # since the HTTP-only migration; this stanza pins it explicitly so
       # ``docker compose config`` shows intent.
       - SANDBOX_DAEMON=1
+      # The daemon runs commands for whoever reaches it, so it refuses to
+      # start without a bearer token.
+      - SANDBOX_TOKEN=${SANDBOX_TOKEN:?SANDBOX_TOKEN must be set - run scripts/ensure-stack-secrets.sh or `buggy onboard`}
+      # Default route for all sandbox egress (see containers/sandbox-entrypoint.sh).
+      - BUGGY_EGRESS_GATEWAY=${BUGGY_EGRESS_GUARD_IP:-172.30.250.2}
       - NEO4J_URI=bolt://neo4j:7687
       - NEO4J_USER=neo4j
       - NEO4J_PASSWORD=${NEO4J_PASSWORD:-buggy-graph}
@@ -279,6 +355,10 @@ services:
       # play (raw `make dev`, benchmark harness, dev workflows), the fallback is
       # the whole tree under <home>/workspace.
       - ${BUGGY_ENGAGEMENT_WORKSPACE:-${BUGGY_HOME:-~/.buggy}/workspace}:/workspace
+      # Operator-controlled scope and approvals: readable so the agent can
+      # see what it is allowed to do, never writable. The audit root is not
+      # mounted here at all.
+      - ${BUGGY_ENGAGEMENT_CONTROL:-${BUGGY_HOME:-~/.buggy}/control}:/control:ro
       # Skills are no longer baked into this image — they live at
       # ``/app/skills/`` in the LANGGRAPH container (see
       # ``containers/langgraph.Dockerfile``) and are read in-process by
@@ -295,6 +375,8 @@ services:
     init: true
     depends_on:
       neo4j:
+        condition: service_healthy
+      egress-guard:
         condition: service_healthy
     restart: unless-stopped
     logging: *default-logging
@@ -398,6 +480,17 @@ services:
       # 9999 is the FastAPI daemon baked into the sandbox image (see
       # ``containers/sandbox-entrypoint.sh`` — daemon mode is the default).
       - SANDBOX_URL=http://sandbox:9999
+      - SANDBOX_TOKEN=${SANDBOX_TOKEN:?SANDBOX_TOKEN must be set - run scripts/ensure-stack-secrets.sh or `buggy onboard`}
+      # Scope enforcement (docs/security/scope-enforcement.md). A run aborts
+      # when the guard cannot confirm the engagement's policy is loaded.
+      - BUGGY_EGRESS_GUARD_URL=http://egress-guard-control:9440
+      - EGRESS_GUARD_TOKEN=${EGRESS_GUARD_TOKEN:?EGRESS_GUARD_TOKEN must be set - run scripts/ensure-stack-secrets.sh or `buggy onboard`}
+      # Gated tools are refused unless the operator-controlled roe.json
+      # exists. Set 0 only for local labs that have no policy.
+      - BUGGY_ROE_REQUIRE=${BUGGY_ROE_REQUIRE:-1}
+      - BUGGY_WORKSPACE_ROOT=/workspace
+      - BUGGY_CONTROL_ROOT=/control
+      - BUGGY_AUDIT_ROOT=/audit
       - BUGGY_NEO4J_URI=bolt://neo4j:7687
       - BUGGY_NEO4J_USER=neo4j
       - BUGGY_NEO4J_PASSWORD=${NEO4J_PASSWORD:-buggy-graph}
@@ -436,6 +529,16 @@ services:
       # (measured: 95% of "installs" survived a single day). Persisting it here
       # also makes the agent and the host CLI agree on one id.
       - ${BUGGY_HOME:-~/.buggy}/telemetry:/root/.buggy/telemetry
+      # Engagement trees, by trust level (middleware/_control.py):
+      #   /workspace  agent-writable scratch, read-only here
+      #   /control    operator-written scope + approvals, read-only here
+      #   /audit      ledgers written by this process; never in the sandbox
+      - ${BUGGY_ENGAGEMENT_WORKSPACE:-${BUGGY_HOME:-~/.buggy}/workspace}:/workspace:ro
+      - ${BUGGY_ENGAGEMENT_CONTROL:-${BUGGY_HOME:-~/.buggy}/control}:/control:ro
+      - ${BUGGY_ENGAGEMENT_AUDIT:-${BUGGY_HOME:-~/.buggy}/audit}:/audit
+    # Dual-homed: must not route between the management and sandbox networks.
+    sysctls:
+      - net.ipv4.ip_forward=0
     # Wait for litellm to be healthy: langgraph has retry logic but the launcher
     # uses `compose up --wait` and needs healthy as the single readiness signal.
     depends_on:
@@ -443,6 +546,8 @@ services:
         condition: service_healthy
       sandbox:
         condition: service_started
+      egress-guard:
+        condition: service_healthy
       neo4j:
         condition: service_healthy
     # python urllib — same pattern as the litellm healthcheck. Runs entirely
@@ -467,6 +572,38 @@ services:
     logging: *default-logging
 
 
+  # Operator shell — the only container that can WRITE the control root.
+  #
+  # Scope (roe.json) and approval decisions are operator-authored. The
+  # langgraph and sandbox services mount the control root read-only, so the
+  # operator commands that write it run here, as one-off containers:
+  #
+  #   docker compose --profile operator run --rm operator buggy-cli hunt example.com
+  #   docker compose --profile operator run --rm operator buggy-cli scope approve <engagement>
+  #   docker compose --profile operator run --rm operator buggy-cli approvals list <engagement>
+  #
+  # Nothing the agent controls can start this service: no agent-facing
+  # container has the Docker socket.
+  operator:
+    image: buggy-langgraph:${BUGGY_VERSION:-stable}
+    container_name: buggy${BUGGY_STACK_NAME:+-${BUGGY_STACK_NAME}}-operator
+    entrypoint: []
+    command: ["buggy-cli", "--help"]
+    env_file: .env
+    environment:
+      - BUGGY_API_URL=http://langgraph:2024
+      - BUGGY_ENGAGEMENT_WORKSPACE=/workspace
+      - BUGGY_ENGAGEMENT_CONTROL=/control
+      - BUGGY_ENGAGEMENT_AUDIT=/audit
+    volumes:
+      - ${BUGGY_HOME:-~/.buggy}/workspace:/workspace
+      - ${BUGGY_HOME:-~/.buggy}/control:/control
+      - ${BUGGY_HOME:-~/.buggy}/audit:/audit:ro
+    networks:
+      - buggy-net
+    profiles:
+      - operator
+
   # Web Dashboard — Next.js UI
   # Migrations run automatically at startup via web-entrypoint.sh (prisma migrate deploy).
   web:
@@ -488,8 +625,14 @@ services:
       - NEXT_PUBLIC_TERMINAL_WS_URL=ws://localhost:${TERMINAL_PORT:-3003}
       - DATABASE_URL=postgresql://buggy:${POSTGRES_PASSWORD:-buggy}@postgres:5432/buggy_web
       - WORKSPACE_PATH=/workspace
+      - CONTROL_PATH=/control
+      - AUDIT_PATH=/audit
     volumes:
       - ${BUGGY_HOME:-~/.buggy}/workspace:/workspace
+      # The dashboard is the operator's tool: it records approval decisions
+      # under the control root and reads pending requests from the audit root.
+      - ${BUGGY_HOME:-~/.buggy}/control:/control
+      - ${BUGGY_HOME:-~/.buggy}/audit:/audit:ro
     depends_on:
       langgraph:
         condition: service_healthy
@@ -835,5 +978,15 @@ volumes:
 networks:
   buggy-net:
     driver: bridge
+  # Internal: Docker drops every packet addressed outside this subnet, so
+  # nothing on it can reach the host or the internet directly. The sandbox
+  # reaches targets only through its tunnel to the egress-guard service. The
+  # subnet is fixed so the guard and sandbox addresses can be configured on
+  # both ends; override BUGGY_SANDBOX_SUBNET, BUGGY_EGRESS_GUARD_IP and
+  # BUGGY_SANDBOX_IP together when running several stacks on one host.
   sandbox-net:
     driver: bridge
+    internal: true
+    ipam:
+      config:
+        - subnet: ${BUGGY_SANDBOX_SUBNET:-172.30.250.0/24}

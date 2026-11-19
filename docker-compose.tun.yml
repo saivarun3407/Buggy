@@ -22,7 +22,16 @@
 # and the Docker Desktop / Podman-machine VMs). Mapping the node in
 # (rather than adding the MKNOD capability) keeps the privilege delta to a
 # single device, not a new capability.
+#
+# Scope enforcement: by default the sandbox entrypoint removes NET_ADMIN from
+# the capability bounding set once the egress-guard tunnel is up
+# (containers/sandbox-entrypoint.sh). A TUN pivot needs that capability, so
+# this overlay keeps it. The egress guard still filters everything that
+# leaves the sandbox network: its rules live in another container, and the
+# sandbox network is internal. See docs/security/scope-enforcement.md.
 services:
   sandbox:
+    environment:
+      - BUGGY_SANDBOX_KEEP_NET_ADMIN=1
     devices:
       - /dev/net/tun:/dev/net/tun

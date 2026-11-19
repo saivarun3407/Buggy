@@ -269,6 +269,29 @@ CAPABILITY_REGISTRY: tuple[Capability, ...] = (
         risk_tier=RiskTier.PASSIVE,
         lifecycle=Lifecycle.SUPPORTED,
     ),
+    # Used only by the sandbox entrypoint: ``ip`` installs the tunnel + default
+    # route to the egress guard, ``capsh`` then removes CAP_NET_ADMIN from the
+    # bounding set. Neither is usable for that purpose by the agent afterwards.
+    Capability(
+        id="iproute2",
+        category="recon",
+        description="Routing tools (entrypoint: route sandbox egress via the guard)",
+        binaries=(),
+        delivery="base",
+        apt_packages=("iproute2",),
+        risk_tier=RiskTier.PASSIVE,
+        lifecycle=Lifecycle.SUPPORTED,
+    ),
+    Capability(
+        id="libcap",
+        category="recon",
+        description="Capability tools (entrypoint: drop CAP_NET_ADMIN before the agent runs)",
+        binaries=(),
+        delivery="base",
+        apt_packages=("libcap2-bin",),
+        risk_tier=RiskTier.PASSIVE,
+        lifecycle=Lifecycle.SUPPORTED,
+    ),
     # ── Web fuzzing / scanning ──
     Capability(
         id="nikto",

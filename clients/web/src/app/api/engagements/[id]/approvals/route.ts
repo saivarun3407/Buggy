@@ -30,12 +30,18 @@ interface ApprovalRequest {
 
 const ACTIONS = new Set(["allow", "deny", "redirect"]);
 
+// Requests are written by the langgraph process under the audit root;
+// decisions are written here, under the operator-controlled root. Neither is
+// mounted writable into the sandbox, so the agent cannot approve itself
+// (mirrors buggy/middleware/hitl.py:approval_paths).
 function workspaceFor(name: string) {
-  const WORKSPACE = process.env.WORKSPACE_PATH ?? path.join(process.env.HOME ?? "", ".buggy", "workspace");
-  const dir = path.join(WORKSPACE, name, "approvals");
+  const home = path.join(process.env.HOME ?? "", ".buggy");
+  const AUDIT = process.env.AUDIT_PATH ?? path.join(home, "audit");
+  const CONTROL = process.env.CONTROL_PATH ?? path.join(home, "control");
+  const dir = path.join(CONTROL, name, "approvals");
   return {
     dir,
-    requests: path.join(dir, "requests.jsonl"),
+    requests: path.join(AUDIT, name, "approvals", "requests.jsonl"),
     decisions: path.join(dir, "decisions.jsonl"),
   };
 }

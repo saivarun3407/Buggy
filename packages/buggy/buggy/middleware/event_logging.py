@@ -272,14 +272,11 @@ def _roe_literal_targets(workspace: str) -> list[str]:
     detectors miss (bare hostnames, NetBIOS names). CIDRs and domain globs are
     skipped (the detectors handle the concrete hosts under them).
     """
-    import json
-    from pathlib import Path
-
+    from buggy.middleware._control import read_roe_document
     from buggy_core.types.roe import MachineEnforcement
 
-    try:
-        data = json.loads((Path(workspace) / "plan" / "roe.json").read_text(encoding="utf-8"))
-    except (OSError, ValueError):
+    data = read_roe_document(workspace)
+    if data is None:
         return []
     block = data.get("machine_enforcement") if isinstance(data, dict) else None
     rules = MachineEnforcement.from_dict(block)
@@ -308,15 +305,13 @@ def _engagement_identity_terms(workspace: str) -> list[str]:
     engagement slug on disk). Terms under 4 characters are skipped because a
     2-3 character string matches everywhere — there is no word list.
     """
-    import json
     from pathlib import Path
+
+    from buggy.middleware._control import read_roe_document
 
     ws = Path(workspace)
     terms: list[str] = [ws.name]
-    try:
-        data = json.loads((ws / "plan" / "roe.json").read_text(encoding="utf-8"))
-    except (OSError, ValueError):
-        data = {}
+    data = read_roe_document(workspace) or {}
     if isinstance(data, dict):
         terms.extend(
             value for key in _ROE_IDENTITY_FIELDS if isinstance(value := data.get(key), str)

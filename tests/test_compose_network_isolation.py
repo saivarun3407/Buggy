@@ -29,10 +29,20 @@ Invariants
    convention; the test fences it.
 
 5. **Dual-homed services are explicitly allowlisted.** Today
-   ``neo4j`` and ``langgraph`` are intentionally on both networks.
-   Adding a third forces an explicit update to ``DUAL_HOMED_SERVICES``
-   below, which is what we want — silent additions are how an
-   isolation boundary erodes.
+   ``neo4j``, ``langgraph`` and ``egress-guard`` are intentionally on
+   both networks. Adding another forces an explicit update to
+   ``DUAL_HOMED_SERVICES`` below, which is what we want — silent
+   additions are how an isolation boundary erodes.
+
+6. **The sandbox has no way out except the egress guard.** ``sandbox-net``
+   is ``internal``; the dual-homed services other than the guard do not
+   forward; the sandbox never holds the guard's control token; and the
+   sandbox daemon has no unauthenticated mode
+   (see ``docs/security/scope-enforcement.md``).
+
+7. **Scope, approvals and audit records sit outside the agent-writable
+   tree.** The sandbox gets the control root read-only and the audit root
+   not at all; langgraph gets workspace and control read-only.
 
 If you are extending the compose file and one of these assertions
 fires, the message points at the invariant being violated and what to
@@ -73,8 +83,15 @@ DUAL_HOMED_SERVICES: frozenset[str] = frozenset(
     {
         "neo4j",
         "langgraph",
+        # The sandbox's only exit: forwards by RoE, takes policy from
+        # langgraph over the management side.
+        "egress-guard",
     }
 )
+
+# Dual-homed services that must NOT route between their networks. The egress
+# guard is the single, policy-filtered router.
+NON_FORWARDING_DUAL_HOMED: frozenset[str] = DUAL_HOMED_SERVICES - {"egress-guard"}
 
 # The only services permitted to mount the host docker socket. `cli` needs
 # it for the /web slash command, which shells out to
@@ -120,7 +137,10 @@ def _rendered_compose() -> dict:
         # render sees every service. The list mirrors the profiles
         # defined in docker-compose.yml; extend here when a new
         # profile is added.
-        "COMPOSE_PROFILES": "c2-sliver,reversing,cli",
+        "COMPOSE_PROFILES": "c2-sliver,reversing,cli,operator",
+        # The compose file refuses to render without these (no defaults).
+        "SANDBOX_TOKEN": os.environ.get("SANDBOX_TOKEN") or "test-sandbox-token",
+        "EGRESS_GUARD_TOKEN": os.environ.get("EGRESS_GUARD_TOKEN") or "test-guard-token",
     }
     result = subprocess.run(
         ["docker", "compose", "-f", str(COMPOSE), "config"],
@@ -320,7 +340,12 @@ def _rendered_with_overlay(*overlays: Path) -> dict:
     args.append("config")
     result = subprocess.run(
         args,
-        env={**os.environ, "COMPOSE_PROFILES": "c2-sliver,reversing,cli"},
+        env={
+            **os.environ,
+            "COMPOSE_PROFILES": "c2-sliver,reversing,cli",
+            "SANDBOX_TOKEN": os.environ.get("SANDBOX_TOKEN") or "test-sandbox-token",
+            "EGRESS_GUARD_TOKEN": os.environ.get("EGRESS_GUARD_TOKEN") or "test-guard-token",
+        },
         cwd=REPO_ROOT,
         capture_output=True,
         text=True,
@@ -438,3 +463,118 @@ def test_dual_homed_services_are_allowlisted():
             "missing network membership."
         )
     assert not msgs, "\n\n".join(msgs)
+
+
+# ── Scope-enforcement invariants ─────────────────────────────────────
+
+
+def _mounts(service: dict) -> dict[str, dict]:
+    """Bind mounts by container target path."""
+    out: dict[str, dict] = {}
+    for volume in service.get("volumes") or []:
+        if isinstance(volume, dict) and volume.get("target"):
+            out[str(volume["target"])] = volume
+    return out
+
+
+def _environment(service: dict) -> dict[str, str]:
+    env = service.get("environment") or {}
+    if isinstance(env, list):
+        return dict(item.split("=", 1) if "=" in item else (item, "") for item in env)
+    return {str(k): "" if v is None else str(v) for k, v in env.items()}
+
+
+def test_compose_refuses_to_render_without_tokens():
+    """There is no default for the sandbox or guard tokens."""
+    if shutil.which("docker") is None:
+        pytest.skip("docker CLI not available")
+    env = {k: v for k, v in os.environ.items() if k not in ("SANDBOX_TOKEN", "EGRESS_GUARD_TOKEN")}
+    dotenv = (REPO_ROOT / ".env").read_text()
+    if "SANDBOX_TOKEN=" in dotenv.replace("SANDBOX_TOKEN=\n", ""):
+        pytest.skip("local .env already defines the tokens")
+    result = subprocess.run(
+        ["docker", "compose", "-f", str(COMPOSE), "config"],
+        env=env,
+        cwd=REPO_ROOT,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    assert result.returncode != 0
+    assert "SANDBOX_TOKEN" in result.stderr or "EGRESS_GUARD_TOKEN" in result.stderr
+
+
+def test_sandbox_network_is_internal():
+    rendered = _rendered_compose()
+    assert rendered["networks"][SANDBOX_NET].get("internal") is True, (
+        "sandbox-net must be internal: Docker then drops everything addressed outside it, "
+        "so the egress guard is the only way out"
+    )
+
+
+def test_only_the_guard_forwards_between_networks():
+    services = _rendered_compose()["services"]
+    for name in NON_FORWARDING_DUAL_HOMED:
+        sysctls = services[name].get("sysctls") or {}
+        assert str(sysctls.get("net.ipv4.ip_forward")) == "0", (
+            f"dual-homed service '{name}' must set net.ipv4.ip_forward=0 so it cannot be "
+            "used as a hop around the egress guard"
+        )
+    assert str(services["egress-guard"]["sysctls"]["net.ipv4.ip_forward"]) == "1"
+
+
+def test_sandbox_routes_through_the_guard_and_cannot_control_it():
+    services = _rendered_compose()["services"]
+    sandbox, guard, langgraph = services["sandbox"], services["egress-guard"], services["langgraph"]
+    sandbox_env, guard_env = _environment(sandbox), _environment(guard)
+
+    guard_ip = guard["networks"][SANDBOX_NET]["ipv4_address"]
+    assert sandbox_env["BUGGY_EGRESS_GATEWAY"] == guard_ip
+    assert sandbox.get("dns") == [guard_ip]
+    assert sandbox["networks"][SANDBOX_NET]["ipv4_address"] == guard_env["BUGGY_SANDBOX_IP"]
+
+    assert "EGRESS_GUARD_TOKEN" not in sandbox_env, "the sandbox must never hold the guard token"
+    assert "BUGGY_EGRESS_GUARD_URL" not in sandbox_env
+    assert guard_env["EGRESS_GUARD_TOKEN"] == _environment(langgraph)["EGRESS_GUARD_TOKEN"]
+    assert "egress-guard-control" in guard["networks"][MGMT_NET]["aliases"]
+    assert "egress-guard-control" in _environment(langgraph)["BUGGY_EGRESS_GUARD_URL"]
+
+    assert "egress-guard" in sandbox["depends_on"]
+    assert "egress-guard" in langgraph["depends_on"]
+    assert "NET_ADMIN" in guard["cap_add"] and guard["cap_drop"] == ["ALL"]
+
+
+def test_sandbox_daemon_and_langgraph_share_a_required_token():
+    services = _rendered_compose()["services"]
+    token = _environment(services["sandbox"]).get("SANDBOX_TOKEN")
+    assert token
+    assert _environment(services["langgraph"]).get("SANDBOX_TOKEN") == token
+    assert "SANDBOX_ALLOW_UNAUTHENTICATED" not in _environment(services["sandbox"])
+
+
+def test_roe_is_required_by_default():
+    env = _environment(_rendered_compose()["services"]["langgraph"])
+    assert env["BUGGY_ROE_REQUIRE"] == "1"
+    assert env["BUGGY_CONTROL_ROOT"] == "/control" and env["BUGGY_AUDIT_ROOT"] == "/audit"
+
+
+def test_control_and_audit_trees_are_outside_the_agent_writable_tree():
+    services = _rendered_compose()["services"]
+    sandbox, langgraph = _mounts(services["sandbox"]), _mounts(services["langgraph"])
+
+    assert sandbox["/workspace"].get("read_only") is not True  # the agent's scratch tree
+    assert sandbox["/control"].get("read_only") is True
+    assert "/audit" not in sandbox, "the audit root must not be mounted into the sandbox"
+
+    assert langgraph["/workspace"].get("read_only") is True
+    assert langgraph["/control"].get("read_only") is True
+    assert langgraph["/audit"].get("read_only") is not True
+
+    # Only operator-driven services may write the control root.
+    writers = {
+        name
+        for name, svc in services.items()
+        if "/control" in _mounts(svc) and _mounts(svc)["/control"].get("read_only") is not True
+    }
+    assert "operator" in writers
+    assert writers <= {"operator", "web"}, f"unexpected control-root writers: {sorted(writers)}"

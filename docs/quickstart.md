@@ -83,7 +83,7 @@ Findings and evidence land under:
 ```
 ~/.buggy/workspace/<engagement>/
   findings/FIND-*.md        # one file per verified finding
-  audit/roe-decisions.jsonl # every scope decision, for your records
+  (scope decisions: ~/.buggy/audit/<engagement>/roe-decisions.jsonl)
 ```
 
 Open the full terminal UI to watch or resume a run, and the attack-graph

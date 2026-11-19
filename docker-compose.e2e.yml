@@ -1,0 +1,51 @@
+# Overlay for the scope-enforcement end-to-end test
+# (packages/buggy/tests/e2e/test_scope_enforcement_e2e.py):
+#
+#   docker compose -f docker-compose.yml -f docker-compose.e2e.yml \
+#       up -d --no-deps egress-guard sandbox target-in target-out
+#
+# It keeps docker-compose.yml's egress-guard and sandbox definitions (the
+# networks, capabilities, entrypoint, route and DNS wiring under test) and
+# adds two local HTTP targets on a dedicated network: one the test RoE puts in
+# scope and one it does not. No request leaves the host.
+services:
+  egress-guard:
+    environment:
+      - BUGGY_GUARD_LOCAL_TARGET_CIDRS=172.30.251.0/24
+    networks:
+      targets: {}
+
+  sandbox:
+    # The slim image runs the shipped entrypoint + daemon without the Kali
+    # toolset. Point BUGGY_E2E_SANDBOX_IMAGE at the full image to test that.
+    image: ${BUGGY_E2E_SANDBOX_IMAGE:-buggy-sandbox:e2e}
+    build:
+      context: .
+      dockerfile: containers/sandbox-e2e.Dockerfile
+
+  target-in:
+    image: ${BUGGY_E2E_SANDBOX_IMAGE:-buggy-sandbox:e2e}
+    entrypoint: ["python3", "-m", "http.server", "80", "--directory", "/srv"]
+    volumes:
+      - ./packages/buggy/tests/e2e/fixtures/target-in:/srv:ro
+    networks:
+      targets:
+        ipv4_address: 172.30.251.10
+        aliases: [in-scope.test]
+
+  target-out:
+    image: ${BUGGY_E2E_SANDBOX_IMAGE:-buggy-sandbox:e2e}
+    entrypoint: ["python3", "-m", "http.server", "80", "--directory", "/srv"]
+    volumes:
+      - ./packages/buggy/tests/e2e/fixtures/target-out:/srv:ro
+    networks:
+      targets:
+        ipv4_address: 172.30.251.20
+        aliases: [out-of-scope.test]
+
+networks:
+  targets:
+    driver: bridge
+    ipam:
+      config:
+        - subnet: 172.30.251.0/24

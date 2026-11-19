@@ -399,6 +399,13 @@ class ParsingFirewallMiddleware(AgentMiddleware):
         workspace = get("workspace_path") or os.environ.get("BUGGY_WORKSPACE_PATH")
         if not workspace:
             return None
+        # Prefer the audit root (outside the sandbox) when it is mounted.
+        from buggy.middleware._control import audit_dir, audit_root
+
+        if os.path.isdir(audit_root()):
+            directory = audit_dir(workspace, get("engagement_name") or None)
+            if directory is not None:
+                return str(directory / "parsing-firewall-raw.jsonl")
         return os.path.join(workspace, "audit", "parsing-firewall-raw.jsonl")
 
     def _preserve_raw(

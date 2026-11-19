@@ -177,6 +177,34 @@ class InProcessApprovalTransport:
         return list(self._pending.values())
 
 
+def approval_paths(workspace: str, engagement_name: str | None = None) -> tuple[Path, Path]:
+    """``(requests, decisions)`` JSONL paths for an engagement.
+
+    A decision is what lets a held action run, so it must not be writable by
+    the agent. With the control plane mounted:
+
+    * requests go to ``<audit>/<engagement>/approvals/requests.jsonl``
+      (written by this process, not mounted into the sandbox);
+    * decisions are read from ``<control>/<engagement>/approvals/decisions.jsonl``
+      (written by the operator, read-only here and in the sandbox).
+
+    Without those roots (standalone library use, unit tests) both files fall
+    back to ``<workspace>/approvals/``.
+    """
+    from buggy.middleware._control import audit_dir, audit_root, control_dir, control_root
+
+    if Path(audit_root()).is_dir() and Path(control_root()).is_dir():
+        audit = audit_dir(workspace, engagement_name)
+        control = control_dir(workspace, engagement_name)
+        if audit is not None and control is not None:
+            return (
+                audit / "approvals" / "requests.jsonl",
+                control / "approvals" / "decisions.jsonl",
+            )
+    approvals = Path(workspace) / "approvals"
+    return approvals / "requests.jsonl", approvals / "decisions.jsonl"
+
+
 class FileBackedApprovalTransport:
     """JSONL-backed transport compatible with the planned events.jsonl wire format.
 
@@ -200,7 +228,13 @@ class FileBackedApprovalTransport:
         self._requests_path = Path(requests_path)
         self._decisions_path = Path(decisions_path)
         self._requests_path.parent.mkdir(parents=True, exist_ok=True)
-        self._decisions_path.parent.mkdir(parents=True, exist_ok=True)
+        try:
+            self._decisions_path.parent.mkdir(parents=True, exist_ok=True)
+        except OSError:
+            # The decisions file lives on the operator-controlled root, which
+            # is mounted read-only here. The operator creates it; until then
+            # there are simply no decisions and requests time out to deny.
+            pass
         self._poll_interval = poll_interval
         self._decisions_offset = 0
         self._pending_decisions: dict[str, ApprovalDecision] = {}
@@ -359,11 +393,8 @@ class HITLApprovalMiddleware(AgentMiddleware):
         cached = self._transport_cache.get(workspace)
         if cached is not None:
             return cached
-        approvals = Path(workspace) / "approvals"
-        transport = FileBackedApprovalTransport(
-            approvals / "requests.jsonl",
-            approvals / "decisions.jsonl",
-        )
+        requests_path, decisions_path = approval_paths(workspace, get("engagement_name") or None)
+        transport = FileBackedApprovalTransport(requests_path, decisions_path)
         self._transport_cache[workspace] = transport
         return transport
 

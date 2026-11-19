@@ -8,8 +8,9 @@ Env:
     SANDBOX_DAEMON_PORT   bind port (default 9999)
     SANDBOX_ROOT_DIR      LocalShellBackend root (default /workspace)
     SANDBOX_DEFAULT_TIMEOUT  per-command timeout in seconds (default 120)
-    SANDBOX_TOKEN         bearer token required on every request
-                          when set (recommended even on loopback)
+    SANDBOX_TOKEN         bearer token required on every request; the daemon
+                          will not start without it unless
+                          SANDBOX_ALLOW_UNAUTHENTICATED=1
 """
 
 from __future__ import annotations

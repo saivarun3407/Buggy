@@ -87,12 +87,12 @@ func runHunt(cmd *cobra.Command, args []string) error {
 
 	ui.Info("Starting hunt against: " + strings.Join(args, ", "))
 
-	// Run inside the langgraph container — it carries the python buggy
-	// package (and the buggy-cli console script) and already has the
-	// workspace tree mounted at /workspace. Point the engage root there.
+	// Run as a one-off `operator` container. It carries the python buggy
+	// package (same image as langgraph) and is the only container with the
+	// control root mounted read-write: `buggy-cli hunt` writes the enforced
+	// scope there, which the langgraph and sandbox services can only read.
 	c := compose.New()
-	execEnv := map[string]string{"BUGGY_ENGAGEMENT_WORKSPACE": "/workspace"}
-	if err := c.ExecWithEnv("langgraph", execEnv, cliArgs...); err != nil {
+	if err := c.RunInteractive([]string{compose.Profiles.Operator}, "operator", nil, cliArgs...); err != nil {
 		return err
 	}
 

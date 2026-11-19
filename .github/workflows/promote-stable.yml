@@ -102,6 +102,7 @@ jobs:
             buggy-sandbox
             buggy-cli
             buggy-skillogy
+            buggy-egress-guard
             buggy-c2-sliver
             buggy-web
           )

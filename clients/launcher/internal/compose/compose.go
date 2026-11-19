@@ -59,11 +59,13 @@ var Profiles = struct {
 	C2        string
 	AD        string
 	Reversing string
+	Operator  string
 }{
 	CLI:       "cli",
 	C2:        "c2-sliver",
 	AD:        "ad",
 	Reversing: "reversing",
+	Operator:  "operator",
 }
 
 // AllProfiles returns every profile flag the launcher should pass
@@ -77,6 +79,7 @@ func AllProfiles() []string {
 		"--profile", Profiles.C2,
 		"--profile", Profiles.AD,
 		"--profile", Profiles.Reversing,
+		"--profile", Profiles.Operator,
 	}
 }
 

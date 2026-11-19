@@ -37,9 +37,14 @@ locally-discovered management plane and loads the ruleset.
 
 from __future__ import annotations
 
+import hashlib
 import ipaddress
+import json
 import os
+import urllib.error
+import urllib.request
 from collections.abc import Iterable
+from typing import Any
 
 from buggy.sandbox_kernel.egress import (
     EgressPolicy,
@@ -135,9 +140,84 @@ def compile_egress_policy(rules: MachineEnforcement) -> EgressPolicy:
     )
 
 
+class EgressProvisioningError(RuntimeError):
+    """The network boundary for an engagement could not be put in place.
+
+    Raised from the guardrail's ``before_agent`` hook so the run stops before
+    any tool executes. A run that cannot prove its egress policy is loaded
+    must not reach a target.
+    """
+
+
+def policy_digest(policy: EgressPolicy) -> str:
+    """Stable SHA-256 of a compiled policy, used to detect scope changes."""
+    canonical = json.dumps(policy.to_dict(), sort_keys=True, separators=(",", ":"))
+    return hashlib.sha256(canonical.encode("utf-8")).hexdigest()
+
+
+def guard_endpoint() -> tuple[str, str] | None:
+    """``(url, token)`` of the egress-guard sidecar, or ``None`` when not deployed.
+
+    Raises :class:`EgressProvisioningError` when a guard URL is configured
+    without a token: an unauthenticated control channel is a misconfiguration,
+    not a mode.
+    """
+    url = (os.environ.get("BUGGY_EGRESS_GUARD_URL") or "").strip().rstrip("/")
+    if not url:
+        return None
+    token = (os.environ.get("EGRESS_GUARD_TOKEN") or "").strip()
+    if not token:
+        raise EgressProvisioningError(
+            "BUGGY_EGRESS_GUARD_URL is set but EGRESS_GUARD_TOKEN is empty"
+        )
+    return url, token
+
+
+def provision_guard(
+    policy: EgressPolicy,
+    *,
+    engagement: str,
+    url: str,
+    token: str,
+    timeout: float = 15.0,
+) -> dict[str, Any]:
+    """Push ``policy`` to the egress guard and return its reply.
+
+    The guard lives in its own container and network namespace; the sandbox
+    has no route to this API and does not hold the token. Any transport or
+    HTTP failure raises :class:`EgressProvisioningError`.
+    """
+    body = json.dumps(
+        {"engagement": engagement, "policy": policy.to_dict(), "digest": policy_digest(policy)}
+    ).encode("utf-8")
+    request = urllib.request.Request(  # noqa: S310 - operator-configured http(s) URL
+        f"{url}/policy",
+        data=body,
+        method="POST",
+        headers={"Authorization": f"Bearer {token}", "Content-Type": "application/json"},
+    )
+    try:
+        with urllib.request.urlopen(request, timeout=timeout) as response:  # noqa: S310
+            payload = json.loads(response.read().decode("utf-8"))
+    except urllib.error.HTTPError as exc:
+        detail = exc.read().decode("utf-8", "replace")[:300]
+        raise EgressProvisioningError(
+            f"egress guard rejected policy: HTTP {exc.code} {detail}"
+        ) from exc
+    except (OSError, ValueError) as exc:
+        raise EgressProvisioningError(f"egress guard unreachable: {exc}") from exc
+    if not isinstance(payload, dict):
+        raise EgressProvisioningError("egress guard returned a malformed reply")
+    return payload
+
+
 __all__ = [
     "EgressPolicy",
+    "EgressProvisioningError",
     "compile_egress_policy",
+    "guard_endpoint",
+    "policy_digest",
+    "provision_guard",
     "render_dns_allowlist",
     "render_nftables",
 ]

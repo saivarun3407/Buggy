@@ -21,6 +21,7 @@ def test_defensive_workflow_route_requires_the_daemon_token(
 
 
 def test_capability_inspection_requires_the_daemon_token(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("SANDBOX_TOKEN", "capability-fixture")
     monkeypatch.setattr(app_module, "_required_token", "capability-fixture")
     with TestClient(app_module.app, backend="asyncio") as client:
         monkeypatch.setattr(app_module, "_required_token", "capability-fixture")

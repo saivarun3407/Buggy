@@ -36,7 +36,13 @@ def _langgraph_command(env_overrides: dict[str, str]) -> str:
     """Render compose and return the langgraph service's command as a single string."""
     if shutil.which("docker") is None:
         pytest.skip("docker CLI not available")
-    env = {**os.environ, **env_overrides}
+    env = {
+        **os.environ,
+        # The compose file refuses to render without these (no defaults).
+        "SANDBOX_TOKEN": os.environ.get("SANDBOX_TOKEN") or "test-sandbox-token",
+        "EGRESS_GUARD_TOKEN": os.environ.get("EGRESS_GUARD_TOKEN") or "test-guard-token",
+        **env_overrides,
+    }
     result = subprocess.run(
         ["docker", "compose", "-f", str(COMPOSE), "config"],
         env=env,

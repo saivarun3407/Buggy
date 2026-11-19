@@ -53,7 +53,7 @@ export BUGGY_HOME ?= $(HOME)/.buggy
 export CLAUDE_CREDENTIALS_VOLUME ?= $(shell test -f $(HOME)/.claude/.credentials.json && echo $(HOME)/.claude/.credentials.json || echo /dev/null)
 export CODEX_AUTH_VOLUME ?= $(shell test -f $(HOME)/.codex/auth.json && echo $(HOME)/.codex/auth.json || echo /dev/null)
 
-.PHONY: help \
+.PHONY: help stack-secrets \
         dogfood launcher smoke \
         dev cli-dev web-dev infra \
         quality quality-strict quality-cli test test-local lint lint-fix \
@@ -143,7 +143,7 @@ launcher:
 ##   4. Health checks (identical to `buggy health`)
 ## Use dogfood for the full release flow; use smoke when the compose stack
 ## is the only thing you've changed.
-smoke:
+smoke: stack-secrets
 	@echo "=== Buggy pre-release smoke (compose-only, no launcher) ==="
 	@echo ""
 	@echo "[1/4] Clean state (purging containers + volumes)..."
@@ -169,7 +169,7 @@ smoke:
 # ── Development (build the thing being released) ─────────────────
 
 ## Build images and start with hot-reload (source changes auto-sync).
-dev:
+dev: stack-secrets
 	$(COMPOSE_WATCH) watch
 
 ## CLI locally (Node) — backend stays in Docker with hot-reload sync.
@@ -199,9 +199,14 @@ web-dev: infra web-db-ensure node-install
 # Chains the dev override so local-dev workflows (cli-dev, web-dev) pick up
 # the skills bind mount alongside the base stack. The OSS launcher path
 # (smoke + dogfood) keeps ``$(COMPOSE)`` to mirror what end users run.
-infra:
+infra: stack-secrets
 	@echo "[infra] Ensuring backend services are running..."
-	@$(COMPOSE_DEV) up -d --build postgres neo4j litellm langgraph sandbox
+	@$(COMPOSE_DEV) up -d --build postgres neo4j litellm egress-guard langgraph sandbox
+
+## Generate SANDBOX_TOKEN / EGRESS_GUARD_TOKEN / BUGGY_AUDIT_HMAC_KEY in .env
+## when missing. The compose file refuses to render without the tokens.
+stack-secrets:
+	@scripts/ensure-stack-secrets.sh .env
 
 # ── Quality gates ────────────────────────────────────────────────
 
@@ -402,3 +407,11 @@ build-images:
 	docker build -f containers/langgraph.Dockerfile -t buggy-langgraph:stable .
 	docker build -f containers/sandbox.Dockerfile -t buggy-sandbox:stable .
 	docker build -f containers/skillogy.Dockerfile -t buggy-skillogy:stable .
+	docker build -f containers/egress-guard.Dockerfile -t buggy-egress-guard:stable .
+
+## Scope-enforcement end-to-end test on the real compose topology: starts the
+## egress guard, the sandbox and two local targets, then proves an
+## out-of-scope request is dropped and logged (docs/security/scope-enforcement.md).
+.PHONY: e2e-scope
+e2e-scope:
+	BUGGY_E2E=1 uv run pytest packages/buggy/tests/e2e -m e2e -q $(ARGS)

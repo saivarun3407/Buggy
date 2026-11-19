@@ -23,6 +23,8 @@ def _print_help() -> int:
         "  assessment         Track web/API inventory and evidence-backed coverage\n"
         "  workflows          Inspect capabilities and run bounded defensive workflows\n"
         "  auth               Show provider/auth configuration (API keys + subscriptions)\n\n"
+        "  scope              Show / approve the enforced scope (operator only)\n"
+        "  approvals          List and answer the agent's approval requests\n"
         "  audit              Verify engagement audit ledgers\n"
         "  zip                Export/import engagement workspaces as ZIP archives\n\n"
         "  export-transcript  Render an engagement event log as Markdown\n\n"
@@ -51,6 +53,14 @@ def main(argv: list[str] | None = None) -> int:
         from buggy.cli.engage import main as engage_main
 
         return engage_main(rest)
+    if sub == "scope":
+        from buggy.cli.scope import main as scope_main
+
+        return scope_main(rest)
+    if sub == "approvals":
+        from buggy.cli.approvals import main as approvals_main
+
+        return approvals_main(rest)
     if sub == "assessment":
         from buggy.cli.assessment import main as assessment_main
 

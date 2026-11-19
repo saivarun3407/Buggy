@@ -944,7 +944,7 @@ class TestEgressProvisioningHook:
         mw.before_agent({"workspace_path": str(tmp_path)}, runtime=None)
         assert calls == []
 
-    def test_retries_after_provision_failure(self, tmp_path: Path, monkeypatch) -> None:
+    def test_provision_failure_aborts_then_retries(self, tmp_path: Path, monkeypatch) -> None:
         monkeypatch.delenv("BUGGY_EGRESS_DISABLE", raising=False)
         _write_roe(tmp_path, {"mode": "enforce", "in_scope": ["10.0.0.0/24"]})
         attempts: list = []
@@ -957,10 +957,15 @@ class TestEgressProvisioningHook:
                 return {"applied": True, "detail": "ok"}
 
         monkeypatch.setattr("buggy.backends.factory.build_sandbox_backend", lambda: _Flaky())
+        from buggy.middleware.egress import EgressProvisioningError
+
         mw = RoEGuardrailMiddleware()
         state = {"workspace_path": str(tmp_path)}
-        mw.before_agent(state, runtime=None)  # fails, un-marks workspace
-        mw.before_agent(state, runtime=None)  # retries, succeeds
+        # A boundary that cannot be put in place aborts the run...
+        with pytest.raises(EgressProvisioningError):
+            mw.before_agent(state, runtime=None)
+        # ...and is not remembered as provisioned, so the next run retries.
+        mw.before_agent(state, runtime=None)
         assert len(attempts) == 2
 
 

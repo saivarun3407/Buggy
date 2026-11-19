@@ -942,6 +942,9 @@ func runOnboard(cmd *cobra.Command, args []string) error {
 		"LITELLM_SALT_KEY":            installationSecrets.LiteLLMSaltKey,
 		"POSTGRES_PASSWORD":           installationSecrets.PostgresPassword,
 		"NEO4J_PASSWORD":              installationSecrets.Neo4jPassword,
+		"SANDBOX_TOKEN":               installationSecrets.SandboxToken,
+		"EGRESS_GUARD_TOKEN":          installationSecrets.EgressGuardToken,
+		"BUGGY_AUDIT_HMAC_KEY":        installationSecrets.AuditHMACKey,
 	}
 
 	if anthropicKey != "" {
@@ -1141,6 +1144,15 @@ func onboardingInstallationSecrets(existing map[string]string) (config.Installat
 	}
 	if value := strings.TrimSpace(existing["NEO4J_PASSWORD"]); value != "" {
 		secrets.Neo4jPassword = value
+	}
+	if value := strings.TrimSpace(existing["SANDBOX_TOKEN"]); value != "" {
+		secrets.SandboxToken = value
+	}
+	if value := strings.TrimSpace(existing["EGRESS_GUARD_TOKEN"]); value != "" {
+		secrets.EgressGuardToken = value
+	}
+	if value := strings.TrimSpace(existing["BUGGY_AUDIT_HMAC_KEY"]); value != "" {
+		secrets.AuditHMACKey = value
 	}
 	return secrets, nil
 }

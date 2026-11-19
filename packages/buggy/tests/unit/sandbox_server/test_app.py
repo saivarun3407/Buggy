@@ -85,18 +85,25 @@ def _client(backend: MagicMock, *, token: str | None = None) -> Iterator[TestCli
     intended token state. ``token=None`` actively removes any inherited
     ``SANDBOX_TOKEN`` so the no-auth path is deterministic.
     """
-    env: dict[str, str] = {} if token is None else {"SANDBOX_TOKEN": token}
-    saved = os.environ.get("SANDBOX_TOKEN")
+    # The daemon refuses to start without a token; the no-auth path needs the
+    # explicit SANDBOX_ALLOW_UNAUTHENTICATED opt-out.
+    env: dict[str, str] = (
+        {"SANDBOX_ALLOW_UNAUTHENTICATED": "1"} if token is None else {"SANDBOX_TOKEN": token}
+    )
+    names = ("SANDBOX_TOKEN", "SAAS_SANDBOX_TOKEN", "SANDBOX_ALLOW_UNAUTHENTICATED")
+    saved = {name: os.environ.get(name) for name in names}
     with patch.object(app_module, "_get_backend", return_value=backend):
-        os.environ.pop("SANDBOX_TOKEN", None)
+        for name in names:
+            os.environ.pop(name, None)
         os.environ.update(env)
         try:
             with TestClient(app) as client:
                 yield client
         finally:
-            os.environ.pop("SANDBOX_TOKEN", None)
-            if saved is not None:
-                os.environ["SANDBOX_TOKEN"] = saved
+            for name in names:
+                os.environ.pop(name, None)
+                if saved[name] is not None:
+                    os.environ[name] = saved[name]
 
 
 # ── /healthz ─────────────────────────────────────────────────────────────
@@ -363,8 +370,18 @@ def test_session_log_path_returns_path() -> None:
 # ── Auth model ───────────────────────────────────────────────────────────
 
 
+def test_daemon_refuses_to_start_without_token(monkeypatch: pytest.MonkeyPatch) -> None:
+    """No token and no explicit opt-out: startup fails instead of serving anyone."""
+    for name in ("SANDBOX_TOKEN", "SAAS_SANDBOX_TOKEN", "SANDBOX_ALLOW_UNAUTHENTICATED"):
+        monkeypatch.delenv(name, raising=False)
+    with patch.object(app_module, "_get_backend", return_value=_make_backend()):
+        with pytest.raises(RuntimeError, match="SANDBOX_TOKEN is not set"):
+            with TestClient(app):
+                pass
+
+
 def test_no_token_env_allows_unauthenticated_request() -> None:
-    """With SANDBOX_TOKEN unset, any caller (no header) is served."""
+    """With the explicit opt-out, any caller (no header) is served."""
     backend = _make_backend()
     with _client(backend, token=None) as client:
         resp = client.post("/execute", json={"command": "echo hi"})

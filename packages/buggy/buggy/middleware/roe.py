@@ -30,12 +30,24 @@ key artifact for paid / regulated engagement out-briefs.
 
 Reading the RoE:
 
-  * Default location: ``<workspace>/plan/roe.json``.
-  * Resolved per-iteration from ``state["workspace_path"]`` so the
-    middleware can hot-reload an operator-edited RoE without restart.
-  * ``machine_enforcement`` block is optional - when absent, the
-    middleware logs every tool call but never blocks (``mode=audit``).
+  * Enforced location: ``<control>/<engagement>/roe.json`` - operator
+    written and mounted read-only (see ``middleware/_control.py``). The
+    sandbox cannot write there, so the agent cannot edit its own scope.
+  * ``<workspace>/plan/roe.json`` is the agent-writable *draft*. It is read
+    only when ``BUGGY_ROE_REQUIRE=0`` and no control copy exists (labs,
+    benchmarks, standalone library use).
+  * ``BUGGY_ROE_REQUIRE`` defaults to ON: a missing policy refuses every
+    gated call instead of silently running in audit mode.
+  * Resolved per call so an operator-edited RoE takes effect without a
+    restart; the egress boundary is re-provisioned when its digest changes.
   * An unreadable or invalid explicit RoE refuses gated calls until repaired.
+
+Fail-closed behaviour:
+
+  * Egress provisioning failure raises ``EgressProvisioningError`` from
+    ``before_agent`` - the run aborts before any tool executes.
+  * When RoE is required and the audit ledger cannot be written, gated
+    calls are refused (``AUDIT_UNAVAILABLE``).
 """
 
 from __future__ import annotations
@@ -63,6 +75,13 @@ from typing_extensions import override
 
 from buggy.middleware._audit_sink import RoEAuditSink
 from buggy.middleware._command_targets import extract_targets
+from buggy.middleware._control import (
+    audit_dir,
+    audit_root,
+    control_roe_path,
+    workspace_roe_path,
+)
+from buggy.middleware.egress import EgressProvisioningError
 from buggy_core.types.roe import (
     MAX_INTER_REQUEST_DELAY_MS,
     Decision,
@@ -74,7 +93,7 @@ from buggy_core.types.roe import (
     evaluate_target,
     evaluate_time_window,
 )
-from buggy_core.utils.env import env_flag
+from buggy_core.utils.env import env_flag, env_truthy
 
 log = logging.getLogger(__name__)
 
@@ -175,38 +194,76 @@ def _validate_target_entry(field: str, entry: Any) -> None:
 
 
 def _roe_required() -> bool:
-    """Fail-closed opt-in: ``BUGGY_ROE_REQUIRE=1`` turns a missing
-    RoE policy into an error instead of an audit-only default.
+    """Whether a missing RoE policy refuses gated calls. Default ON.
 
-    Default-off: engagements without a policy file (benchmarks, ad-hoc
-    runs) still work under the permissive ``MachineEnforcement()``
-    default. Deployments that must guarantee a signed RoE set the flag —
-    a missing or block-less policy then fails fast at the guardrail
-    rather than silently running unaudited.
+    ``BUGGY_ROE_REQUIRE=0`` is the explicit opt-out for labs and standalone
+    library use. With the variable unset, the policy is required unless
+    ``BENCHMARK_MODE`` is on (benchmark providers launch their own local
+    targets and do not write a policy).
     """
-    return env_flag("BUGGY_ROE_REQUIRE")
+    raw = os.environ.get("BUGGY_ROE_REQUIRE")
+    if raw is None or not raw.strip():
+        return not env_flag("BENCHMARK_MODE")
+    return env_truthy(raw, default=True)
 
 
-def _load_rules_for_workspace(workspace_path: str | None) -> MachineEnforcement:
-    if not workspace_path:
+def resolve_roe_path(
+    workspace_path: str | None, engagement_name: str | None = None
+) -> tuple[Path | None, str]:
+    """Locate the RoE document that governs this engagement.
+
+    Returns ``(path, origin)`` where origin is ``"control"`` (operator
+    written, outside the agent-writable tree) or ``"workspace"`` (the
+    agent-writable draft). The workspace draft is only ever returned when
+    the policy is not required.
+    """
+    control = control_roe_path(workspace_path, engagement_name)
+    if _roe_required():
+        return control, "control"
+    if control is not None and (control.is_file() or control.is_symlink()):
+        return control, "control"
+    return workspace_roe_path(workspace_path), "workspace"
+
+
+def _load_rules_for_workspace(
+    workspace_path: str | None, engagement_name: str | None = None
+) -> MachineEnforcement:
+    roe_path, origin = resolve_roe_path(workspace_path, engagement_name)
+    if roe_path is None:
+        if _roe_required():
+            raise InvalidRoEError(
+                "RoE file is required (BUGGY_ROE_REQUIRE) but this run has no engagement "
+                "workspace, so no operator-controlled roe.json can be located"
+            )
         return MachineEnforcement()
-    roe_path = Path(workspace_path) / "plan" / "roe.json"
     try:
         document = json.loads(roe_path.read_text(encoding="utf-8"))
     except FileNotFoundError as exc:
         if not roe_path.is_symlink():
             if _roe_required():
                 raise InvalidRoEError(
-                    "RoE file is required (BUGGY_ROE_REQUIRE) but plan/roe.json does not exist"
+                    f"RoE file is required (BUGGY_ROE_REQUIRE) but {roe_path} does not exist. "
+                    "The operator must approve a scope first "
+                    "(buggy-cli scope approve <engagement>)"
                 ) from exc
             return MachineEnforcement()
         raise InvalidRoEError("RoE file links to a missing policy") from exc
     except (OSError, UnicodeError, json.JSONDecodeError) as exc:
         raise InvalidRoEError("RoE file is unreadable or contains invalid JSON") from exc
+    return parse_roe_document(document, required=_roe_required())
+
+
+def parse_roe_document(document: Any, *, required: bool) -> MachineEnforcement:
+    """Validate a decoded RoE document and return its enforcement rules.
+
+    Raises :class:`InvalidRoEError` for anything the matcher could not apply
+    safely. Shared by the runtime loader and ``buggy-cli scope`` so an
+    operator cannot approve a policy the middleware would later reject.
+    """
     if not isinstance(document, dict):
         raise InvalidRoEError("RoE document must be a JSON object")
     if "machine_enforcement" not in document:
-        if _roe_required():
+        if required:
             raise InvalidRoEError(
                 "RoE machine_enforcement block is required (BUGGY_ROE_REQUIRE) but absent"
             )
@@ -288,7 +345,7 @@ def _refused_message(decision: Decision, tool_name: str, tool_call_id: str | Non
         f"[ROE_REFUSED] code={decision.reason_code} tool={tool_name}\n"
         f"reason: {decision.reason_detail}\n\n"
         "The engagement's RoE blocked this call. If you believe this is a\n"
-        "false positive, ask the operator to update plan/roe.json "
+        "false positive, ask the operator to update the engagement's roe.json "
         "(machine_enforcement block) and re-run the objective. Continuing\n"
         "with a different target / different technique is the expected\n"
         "response - do NOT re-issue the same command this turn."
@@ -405,6 +462,30 @@ def _egress_disabled() -> bool:
     return env_flag("BUGGY_EGRESS_DISABLE")
 
 
+def _state_getter(state) -> Callable[..., Any]:
+    return state.get if hasattr(state, "get") else (lambda _k, _d=None: None)
+
+
+def _audit_refused_message(tool_name: str, tool_call_id: str | None) -> ToolMessage:
+    body = (
+        f"[ROE_REFUSED] code=AUDIT_UNAVAILABLE tool={tool_name}\n"
+        "The engagement audit ledger could not be written, so this gated call "
+        "was NOT executed. Every action against a target must be recorded.\n"
+        "Stop and report this to the operator - do NOT retry this turn."
+    )
+    return ToolMessage(content=body, tool_call_id=tool_call_id or "", status="error")
+
+
+def _egress_refused_message(detail: str, tool_name: str, tool_call_id: str | None) -> ToolMessage:
+    body = (
+        f"[ROE_REFUSED] code=EGRESS_NOT_PROVISIONED tool={tool_name}\n"
+        f"reason: {detail}\n\n"
+        "The network boundary for this engagement is not in place, so this "
+        "gated call was NOT executed. Stop and report this to the operator."
+    )
+    return ToolMessage(content=body, tool_call_id=tool_call_id or "", status="error")
+
+
 class RoEGuardrailMiddleware(AgentMiddleware):
     """Evaluate every bash tool call against the engagement's RoE.
 
@@ -440,7 +521,44 @@ class RoEGuardrailMiddleware(AgentMiddleware):
         self._pace_lock = threading.Lock()
         self._last_gated_monotonic: float | None = None
         self._egress_lock = threading.Lock()
-        self._egress_provisioned: set[str] = set()
+        # workspace -> digest of the policy currently loaded at the boundary.
+        self._egress_provisioned: dict[str, str] = {}
+        self._sink_lock = threading.Lock()
+        self._sink_cache: dict[str, RoEAuditSink] = {}
+
+    def _sink_for(self, state) -> RoEAuditSink | None:
+        """The audit sink for this call's engagement.
+
+        A sink passed to the constructor wins (tests, embedders). Otherwise
+        the path is resolved from the request state on every call, because
+        the engagement is not known when the middleware is built: that
+        build-time lookup is why the default ledger used to stay empty.
+        """
+        if self._sink is not None:
+            return self._sink
+        get = _state_getter(state)
+        path = default_audit_path(get("workspace_path") or None, get("engagement_name") or None)
+        if path is None:
+            return None
+        key = str(path)
+        with self._sink_lock:
+            sink = self._sink_cache.get(key)
+            if sink is None:
+                sink = RoEAuditSink(path=path)
+                self._sink_cache[key] = sink
+            return sink
+
+    def _append_audit(self, state, record: dict[str, Any]) -> bool:
+        """Append one record; return whether it reached the ledger."""
+        sink = self._sink_for(state)
+        if sink is None:
+            return False
+        try:
+            sink.append(record)
+        except Exception as exc:  # noqa: BLE001 - reported to the caller as False
+            log.error("roe: audit sink write failed: %s", exc)
+            return False
+        return True
 
     @override
     def before_agent(self, state, runtime) -> None:
@@ -467,7 +585,7 @@ class RoEGuardrailMiddleware(AgentMiddleware):
         if halt is not None:
             return halt
         decision, rules, tool_name = self._evaluate(request)
-        self._record(request, tool_name, decision, rules.mode)
+        recorded = self._record(request, tool_name, decision, rules.mode)
         if not decision.allow and rules.mode == EnforcementMode.ENFORCE:
             tc_id = _tcid(request)
             if tc_id is None:
@@ -477,11 +595,15 @@ class RoEGuardrailMiddleware(AgentMiddleware):
                     tool_name,
                 )
             return _refused_message(decision, tool_name, tc_id)
+        gated = tool_name in self._gated
+        if gated:
+            blocked = self._pre_execution_block(request, tool_name, rules, recorded)
+            if blocked is not None:
+                return blocked
         wait = self._pace_wait_seconds(rules)
         if wait > 0:
             self._record_throttle(request, tool_name, wait)
             time.sleep(wait)
-        gated = tool_name in self._gated
         with self._sync_gate(rules, gated):
             result = handler(request)
         if (
@@ -497,7 +619,7 @@ class RoEGuardrailMiddleware(AgentMiddleware):
         if halt is not None:
             return halt
         decision, rules, tool_name = self._evaluate(request)
-        self._record(request, tool_name, decision, rules.mode)
+        recorded = self._record(request, tool_name, decision, rules.mode)
         if not decision.allow and rules.mode == EnforcementMode.ENFORCE:
             tc_id = _tcid(request)
             if tc_id is None:
@@ -507,11 +629,17 @@ class RoEGuardrailMiddleware(AgentMiddleware):
                     tool_name,
                 )
             return _refused_message(decision, tool_name, tc_id)
+        gated = tool_name in self._gated
+        if gated:
+            blocked = await asyncio.to_thread(
+                self._pre_execution_block, request, tool_name, rules, recorded
+            )
+            if blocked is not None:
+                return blocked
         wait = self._pace_wait_seconds(rules)
         if wait > 0:
             self._record_throttle(request, tool_name, wait)
             await asyncio.sleep(wait)
-        gated = tool_name in self._gated
         async with self._async_gate(rules, gated):
             result = await handler(request)
         if (
@@ -581,10 +709,8 @@ class RoEGuardrailMiddleware(AgentMiddleware):
         return _halted_message(tool_name, tc_id)
 
     def _record_abort(self, request, tool_name: str) -> None:
-        if self._sink is None:
-            return
         state = getattr(request, "state", {}) or {}
-        get = state.get if hasattr(state, "get") else (lambda _k, _d=None: None)
+        get = _state_getter(state)
         engagement = get("engagement_name") or "unknown-engagement"
         objective = get("active_objective_id") or get("current_objective") or ""
         record = {
@@ -597,54 +723,117 @@ class RoEGuardrailMiddleware(AgentMiddleware):
             "reason_code": "EMERGENCY_ABORT",
             "command_excerpt": _redact_secrets(_command_from_tool_call(request))[:512],
         }
+        self._append_audit(state, record)
+
+    def _pre_execution_block(
+        self, request, tool_name: str, rules: MachineEnforcement, recorded: bool
+    ) -> ToolMessage | None:
+        """Last checks before a gated tool runs: audit written, boundary current."""
+        state = getattr(request, "state", {}) or {}
+        if not recorded and _roe_required():
+            return _audit_refused_message(tool_name, _tcid(request))
         try:
-            self._sink.append(record)
-        except Exception as exc:  # noqa: BLE001 - audit must never break tool execution
-            log.error("roe: audit sink write failed: %s", exc)
+            self._ensure_egress(state, rules)
+        except EgressProvisioningError as exc:
+            self._append_audit(
+                state,
+                {
+                    "ts": time.time(),
+                    "event": "egress_provisioning_failed",
+                    "engagement": _state_getter(state)("engagement_name") or "unknown-engagement",
+                    "tool": tool_name,
+                    "decision": "refuse",
+                    "reason_code": "EGRESS_NOT_PROVISIONED",
+                    "reason_detail": str(exc),
+                },
+            )
+            return _egress_refused_message(str(exc), tool_name, _tcid(request))
+        return None
 
     def _maybe_provision_egress(self, state) -> None:
-        """Compile + push the Layer-2 egress guardrail, once per workspace.
+        """Put the Layer-2 network boundary in place before the agent runs.
 
-        Default ON for ``enforce`` mode: skipped only when the operator
-        opts out via ``BUGGY_EGRESS_DISABLE``. audit / warn modes
-        never reach here (guarded below). Best-effort: any failure is
-        logged and never propagates into agent execution.
+        Skipped only when the operator opts out with ``BUGGY_EGRESS_DISABLE``.
+        An unreadable RoE is left to the per-call gate (which refuses gated
+        tools while keeping repair tools available). Any other failure raises
+        :class:`EgressProvisioningError`, which aborts the run: an engagement
+        whose boundary is not loaded must not reach a target.
         """
         if _egress_disabled():
             return
-        get = state.get if hasattr(state, "get") else (lambda _k, _d=None: None)
+        get = _state_getter(state)
         workspace = get("workspace_path") or None
         if not workspace:
             return
         try:
-            rules = _load_rules_for_workspace(workspace)
+            rules = _load_rules_for_workspace(workspace, get("engagement_name") or None)
         except InvalidRoEError as exc:
             log.error("roe: %s; gated calls will be refused until the policy is repaired", exc)
             return
-        if rules.mode != EnforcementMode.ENFORCE:
-            return
-        with self._egress_lock:
-            if workspace in self._egress_provisioned:
-                return
-            self._egress_provisioned.add(workspace)
-        try:
-            from buggy.backends.factory import build_sandbox_backend
-            from buggy.middleware.egress import compile_egress_policy
+        self._ensure_egress(state, rules)
 
-            policy = compile_egress_policy(rules)
-            result = build_sandbox_backend().provision_egress(policy)
-            log.info(
-                "roe: egress provisioned for %s: applied=%s detail=%s",
-                workspace,
-                result.get("applied"),
-                result.get("detail"),
-            )
-        except Exception as exc:  # noqa: BLE001 - provisioning must never break the run
-            log.error("roe: egress provisioning failed for %s: %s", workspace, exc)
-            # Un-mark so a later agent turn can retry rather than silently
-            # leaving the engagement with no network boundary.
-            with self._egress_lock:
-                self._egress_provisioned.discard(workspace)
+    def _ensure_egress(self, state, rules: MachineEnforcement) -> None:
+        """Push ``rules`` to the network boundary unless that exact policy is loaded.
+
+        With an egress guard deployed (``BUGGY_EGRESS_GUARD_URL``) every mode
+        is pushed, because the guard denies all sandbox egress until it holds
+        a policy. Without one, only ``enforce`` mode touches the network (the
+        legacy in-sandbox applier). Raises :class:`EgressProvisioningError`
+        when the boundary cannot be confirmed.
+        """
+        if _egress_disabled():
+            return
+        get = _state_getter(state)
+        workspace = get("workspace_path") or None
+        if not workspace:
+            return
+        from buggy.middleware.egress import (
+            compile_egress_policy,
+            guard_endpoint,
+            policy_digest,
+            provision_guard,
+        )
+
+        guard = guard_endpoint()
+        if guard is None and rules.mode != EnforcementMode.ENFORCE:
+            return
+        policy = compile_egress_policy(rules)
+        digest = policy_digest(policy)
+        with self._egress_lock:
+            if self._egress_provisioned.get(workspace) == digest:
+                return
+        engagement = get("engagement_name") or "unknown-engagement"
+        try:
+            if guard is not None:
+                result = provision_guard(
+                    policy, engagement=engagement, url=guard[0], token=guard[1]
+                )
+            else:
+                from buggy.backends.factory import build_sandbox_backend
+
+                result = build_sandbox_backend().provision_egress(policy)
+        except EgressProvisioningError:
+            raise
+        except Exception as exc:  # noqa: BLE001 - converted to the fail-closed error
+            raise EgressProvisioningError(f"egress provisioning failed: {exc}") from exc
+        if not isinstance(result, dict) or not result.get("applied"):
+            detail = result.get("detail") if isinstance(result, dict) else "malformed reply"
+            raise EgressProvisioningError(f"egress policy was not applied: {detail}")
+        with self._egress_lock:
+            self._egress_provisioned[workspace] = digest
+        log.info("roe: egress provisioned for %s: digest=%s", workspace, digest[:12])
+        self._append_audit(
+            state,
+            {
+                "ts": time.time(),
+                "event": "egress_provisioned",
+                "engagement": engagement,
+                "mode": rules.mode.value,
+                "policy_sha256": digest,
+                "boundary": "egress-guard" if guard is not None else "sandbox",
+                "detail": str(result.get("detail", "")),
+            },
+        )
 
     def _evaluate(self, request) -> tuple[Decision, MachineEnforcement, str]:
         tool = getattr(request, "tool", None)
@@ -655,12 +844,15 @@ class RoEGuardrailMiddleware(AgentMiddleware):
         get = state.get if hasattr(state, "get") else (lambda _k, _d=None: None)
         workspace = get("workspace_path") or None
         try:
-            rules = _load_rules_for_workspace(workspace)
+            rules = _load_rules_for_workspace(workspace, get("engagement_name") or None)
         except InvalidRoEError as exc:
             decision = Decision(
                 allow=False,
                 reason_code="INVALID_ROE",
-                reason_detail=f"{exc}. Repair plan/roe.json before retrying gated tools.",
+                reason_detail=(
+                    f"{exc}. The operator must repair the engagement's roe.json "
+                    "before gated tools can run."
+                ),
                 risk="high",
             )
             return decision, MachineEnforcement(mode=EnforcementMode.ENFORCE), tool_name
@@ -692,9 +884,7 @@ class RoEGuardrailMiddleware(AgentMiddleware):
         tool_name: str,
         decision: Decision,
         mode: EnforcementMode,
-    ) -> None:
-        if self._sink is None:
-            return
+    ) -> bool:
         state = getattr(request, "state", {}) or {}
         get = state.get if hasattr(state, "get") else (lambda _k, _d=None: None)
         engagement = get("engagement_name") or "unknown-engagement"
@@ -712,10 +902,7 @@ class RoEGuardrailMiddleware(AgentMiddleware):
             "mode": mode.value,
             "command_excerpt": _redact_secrets(_command_from_tool_call(request))[:512],
         }
-        try:
-            self._sink.append(record)
-        except Exception as exc:  # noqa: BLE001 - audit must never break tool execution
-            log.error("roe: audit sink write failed: %s", exc)
+        return self._append_audit(state, record)
 
     def _pace_wait_seconds(self, rules: MachineEnforcement) -> float:
         """Seconds to sleep before a gated call to honour ``min_inter_request_delay_ms``.
@@ -739,8 +926,6 @@ class RoEGuardrailMiddleware(AgentMiddleware):
         return wait
 
     def _record_throttle(self, request, tool_name: str, wait_seconds: float) -> None:
-        if self._sink is None:
-            return
         state = getattr(request, "state", {}) or {}
         get = state.get if hasattr(state, "get") else (lambda _k, _d=None: None)
         record = {
@@ -752,10 +937,7 @@ class RoEGuardrailMiddleware(AgentMiddleware):
             "reason_code": "MIN_INTER_REQUEST_DELAY",
             "delay_seconds": round(wait_seconds, 3),
         }
-        try:
-            self._sink.append(record)
-        except Exception as exc:  # noqa: BLE001 - audit must never break tool execution
-            log.error("roe: throttle audit write failed: %s", exc)
+        self._append_audit(state, record)
 
 
 def _tcid(request) -> str | None:
@@ -766,20 +948,38 @@ def _tcid(request) -> str | None:
     return tc_attr if isinstance(tc_attr, str) else None
 
 
-def build_default_sink(workspace_path: str | None) -> RoEAuditSink | None:
-    """Best-effort default sink path: ``<workspace>/audit/roe-decisions.jsonl``.
+def default_audit_path(
+    workspace_path: str | None, engagement_name: str | None = None
+) -> Path | None:
+    """Where this engagement's RoE decision ledger lives.
 
-    Returns ``None`` when no workspace is set yet (during initial
-    bootstrapping) so the middleware degrades to "no-sink" cleanly.
-    Operators that want a deterministic path can also set
-    ``BUGGY_ROE_AUDIT_PATH`` in the env.
+    Order: ``BUGGY_ROE_AUDIT_PATH`` (operator pin), then the audit root
+    (``/audit/<engagement>/roe-decisions.jsonl`` - outside the sandbox), then
+    the legacy ``<workspace>/audit/`` location when RoE is not required and
+    no audit root is mounted. Returns ``None`` when nothing can be resolved.
     """
     env_path = os.environ.get("BUGGY_ROE_AUDIT_PATH")
     if env_path:
-        return RoEAuditSink(path=Path(env_path))
-    if not workspace_path:
-        return None
-    return RoEAuditSink(path=Path(workspace_path) / "audit" / "roe-decisions.jsonl")
+        return Path(env_path)
+    if Path(audit_root()).is_dir():
+        directory = audit_dir(workspace_path, engagement_name)
+        if directory is not None:
+            return directory / "roe-decisions.jsonl"
+    if workspace_path and not _roe_required():
+        return Path(workspace_path) / "audit" / "roe-decisions.jsonl"
+    return None
+
+
+def build_default_sink(
+    workspace_path: str | None, engagement_name: str | None = None
+) -> RoEAuditSink | None:
+    """Sink at :func:`default_audit_path`, or ``None`` when it cannot be resolved.
+
+    The middleware no longer relies on this at construction time (the
+    engagement is unknown then); it resolves the sink per call instead.
+    """
+    path = default_audit_path(workspace_path, engagement_name)
+    return RoEAuditSink(path=path) if path is not None else None
 
 
 # Compat alias (removed at 2.0.0). The class was renamed

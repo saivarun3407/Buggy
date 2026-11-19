@@ -8,6 +8,8 @@ func TestOnboardingInstallationSecretsPreservesExistingValues(t *testing.T) {
 		"LITELLM_SALT_KEY":   "existing-salt",
 		"POSTGRES_PASSWORD":  "existing-postgres",
 		"NEO4J_PASSWORD":     "existing-neo4j",
+		"SANDBOX_TOKEN":      "existing-sandbox",
+		"EGRESS_GUARD_TOKEN": "existing-guard",
 	}
 
 	// Given credentials already bound to persistent database volumes, when the
@@ -19,7 +21,9 @@ func TestOnboardingInstallationSecretsPreservesExistingValues(t *testing.T) {
 	if secrets.LiteLLMMasterKey != existing["LITELLM_MASTER_KEY"] ||
 		secrets.LiteLLMSaltKey != existing["LITELLM_SALT_KEY"] ||
 		secrets.PostgresPassword != existing["POSTGRES_PASSWORD"] ||
-		secrets.Neo4jPassword != existing["NEO4J_PASSWORD"] {
+		secrets.Neo4jPassword != existing["NEO4J_PASSWORD"] ||
+		secrets.SandboxToken != existing["SANDBOX_TOKEN"] ||
+		secrets.EgressGuardToken != existing["EGRESS_GUARD_TOKEN"] {
 		t.Fatalf("reset rotated credentials: %#v", secrets)
 	}
 }
@@ -36,7 +40,8 @@ func TestOnboardingInstallationSecretsFillsMissingValues(t *testing.T) {
 	if secrets.PostgresPassword != "existing-postgres" {
 		t.Fatalf("PostgresPassword = %q, want preserved value", secrets.PostgresPassword)
 	}
-	if secrets.LiteLLMMasterKey == "" || secrets.LiteLLMSaltKey == "" || secrets.Neo4jPassword == "" {
+	if secrets.LiteLLMMasterKey == "" || secrets.LiteLLMSaltKey == "" || secrets.Neo4jPassword == "" ||
+		secrets.SandboxToken == "" || secrets.EgressGuardToken == "" || secrets.AuditHMACKey == "" {
 		t.Fatal("missing installation credentials were not generated")
 	}
 }

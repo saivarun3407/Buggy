@@ -122,10 +122,10 @@ func runStart(cmd *cobra.Command, args []string) error {
 	if err != nil {
 		return err
 	}
-	// Export the bind path. composeEnv() forwards os.Environ(), so docker
-	// compose interpolates ${BUGGY_ENGAGEMENT_WORKSPACE} from this var.
-	if err := os.Setenv("BUGGY_ENGAGEMENT_WORKSPACE", choice.WorkspacePath); err != nil {
-		return fmt.Errorf("set engagement workspace env: %w", err)
+	// Export the bind paths. composeEnv() forwards os.Environ(), so docker
+	// compose interpolates ${BUGGY_ENGAGEMENT_*} from these vars.
+	if err := bindEngagementDirs(home, choice); err != nil {
+		return err
 	}
 
 	if err := startServices(env); err != nil {
@@ -242,6 +242,33 @@ func prepareStack(cmd *cobra.Command) (string, map[string]string, error) {
 	return home, env, nil
 }
 
+// bindEngagementDirs binds the chosen engagement's three trees for compose.
+//
+// The workspace is the agent's scratch tree. The control tree holds the
+// enforced scope (roe.json) and approval decisions: it is operator-written
+// and mounted read-only into the agent-facing containers. The audit tree is
+// written by the langgraph service and the egress guard and is never mounted
+// into the sandbox. All three sit at <home>/<tree>/<slug>.
+func bindEngagementDirs(home string, choice engagement.Choice) error {
+	slug := filepath.Base(choice.WorkspacePath)
+	binds := map[string]string{
+		"BUGGY_ENGAGEMENT_WORKSPACE": choice.WorkspacePath,
+		"BUGGY_ENGAGEMENT_CONTROL":   filepath.Join(home, "control", slug),
+		"BUGGY_ENGAGEMENT_AUDIT":     filepath.Join(home, "audit", slug),
+	}
+	for name, dir := range binds {
+		if name != "BUGGY_ENGAGEMENT_WORKSPACE" {
+			if err := os.MkdirAll(dir, 0o700); err != nil {
+				return fmt.Errorf("create %s: %w", dir, err)
+			}
+		}
+		if err := os.Setenv(name, dir); err != nil {
+			return fmt.Errorf("set %s: %w", name, err)
+		}
+	}
+	return nil
+}
+
 // startServices spawns the opscontrol daemon, refuses default credentials,
 // brings the compose stack up, and blocks until healthchecks pass. The
 // caller sets BUGGY_ENGAGEMENT_WORKSPACE beforehand when an
@@ -261,6 +288,17 @@ func startServices(env map[string]string) error {
 	// Refuse to start with default credentials.
 	if err := checkDefaultCredentials(env); err != nil {
 		return err
+	}
+
+	// The sandbox daemon and the egress guard have no unauthenticated mode,
+	// so compose will not render without their tokens. Installs onboarded
+	// before these existed get them generated here.
+	generated, err := config.EnsureScopeSecrets(config.EnvPath(), env)
+	if err != nil {
+		return fmt.Errorf("generate scope-enforcement secrets: %w", err)
+	}
+	if len(generated) > 0 {
+		ui.Info("Generated " + strings.Join(generated, ", ") + " in " + config.EnvPath())
 	}
 
 	// Start services and block on healthchecks.

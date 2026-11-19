@@ -58,6 +58,8 @@ RUN --mount=type=cache,target=/var/cache/apt,sharing=locked,id=sandbox-apt-cache
         whois \
         netcat-openbsd \
         iputils-ping \
+        iproute2 \
+        libcap2-bin \
         subfinder \
         # ── Web discovery / assessment (headless, non-interactive) ──
         nikto \

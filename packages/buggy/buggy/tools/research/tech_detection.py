@@ -29,7 +29,6 @@ import json
 import os
 import re
 from dataclasses import dataclass
-from pathlib import Path
 from typing import Any
 from urllib.parse import urlsplit
 
@@ -237,18 +236,13 @@ def _load_roe_rules() -> MachineEnforcement:
     empty (audit-only) ruleset — matching the middleware's fail-open posture
     so a missing file never silently blocks a legitimate probe.
     """
+    from buggy.middleware._control import read_roe_document
+
     workspace = os.environ.get("BUGGY_WORKSPACE_PATH")
     if not workspace:
         return MachineEnforcement()
-    roe_path = Path(workspace) / "plan" / "roe.json"
-    if not roe_path.exists():
-        return MachineEnforcement()
-    try:
-        data = json.loads(roe_path.read_text(encoding="utf-8"))
-    except (OSError, json.JSONDecodeError) as exc:
-        log.warning(
-            "tech_detection: failed to read %s: %s; defaulting to audit-only", roe_path, exc
-        )
+    data = read_roe_document(workspace)
+    if data is None:
         return MachineEnforcement()
     block = data.get("machine_enforcement") if isinstance(data, dict) else None
     return MachineEnforcement.from_dict(block)
