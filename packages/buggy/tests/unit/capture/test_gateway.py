@@ -2,19 +2,22 @@
 
 from __future__ import annotations
 
+import inspect
 import io
 import json
+import sqlite3
 import urllib.error
 from pathlib import Path
 
 import pytest
 
 from buggy.capture.canary import Canary
-from buggy.capture.gateway import CaptureGateway, GatewayRefusal, Roots
+from buggy.capture.gateway import INTERNAL_LOGIN, CaptureGateway, GatewayRefusal, Roots
+from buggy.capture.mcp_server import CaptureTools, register_tools
 from buggy.capture.probes import REGISTRY, describe, run_probe
-from buggy.capture.probes.base import b64url_decode
+from buggy.capture.probes.base import Context, b64url_decode
 from buggy.capture.probes.checks import forge_unsigned_jwt
-from buggy.capture.store import request_fingerprint
+from buggy.capture.store import CaptureStore, request_fingerprint
 from buggy.cli import approvals as approvals_cli
 from buggy.middleware._audit_sink import iter_records, verify_ledger
 
@@ -610,3 +613,456 @@ class TestProbes:
             is False
         )
         assert len(canary.hits("acme", token)) == 1 and canary.hits("other", token) == []
+
+
+LOGIN_URL = "https://app.acme.test/rest/user/login"
+ORDER_URL = "https://app.acme.test/api/orders/7"
+ALICE_PASSWORD = "correct-horse-battery-staple"
+ALICE_TOKEN = "tok-5a5a5a5a6b6b6b6b7c7c"
+BOB_TOKEN = "bob-static-0011223344556677"
+
+
+def _identities() -> dict:
+    return {
+        "identities": [
+            {
+                "name": "alice",
+                "role": "user",
+                "owner_of": [ORDER_URL],
+                "login": {
+                    "request": {
+                        "method": "POST",
+                        "url": LOGIN_URL,
+                        "headers": {"Content-Type": "application/json"},
+                        "body": '{"email": "alice@acme.test", "password": "{password}"}',
+                    },
+                    "credentials": {"password": ALICE_PASSWORD},
+                    "extract": [{"name": "token", "from": "json", "path": "authentication.token"}],
+                    "apply": {
+                        "headers": {
+                            "Authorization": "Bearer {token}",
+                            "X-Session-Token": "{token}",
+                        },
+                        "cookies": {"sid": "{token}"},
+                    },
+                    "success": {"status": 200},
+                },
+            },
+            {"name": "bob", "role": "admin", "static": {"headers": {"X-Api-Token": BOB_TOKEN}}},
+        ]
+    }
+
+
+@pytest.fixture
+def ident_env(tmp_path: Path):
+    """Like ``env`` but with declared identities, and approvals REQUIRED (the default)."""
+    roots = Roots(
+        control=tmp_path / "control",
+        audit=tmp_path / "audit",
+        data=tmp_path / "data",
+        secrets=tmp_path / "secrets",
+    )
+    (roots.control / "acme").mkdir(parents=True)
+    (roots.control / "acme" / "roe.json").write_text(json.dumps(_roe()))
+    (roots.secrets / "acme").mkdir(parents=True)
+    (roots.secrets / "acme" / "identities.json").write_text(json.dumps(_identities()))
+    site = Site()
+
+    def login(_headers, body):
+        if json.loads(body) != {"email": "alice@acme.test", "password": ALICE_PASSWORD}:
+            return 401, {"error": "Invalid email or password."}
+        return 200, {"authentication": {"token": ALICE_TOKEN}}
+
+    site.routes[("POST", LOGIN_URL)] = login
+    site.routes[("GET", ORDER_URL)] = (200, {"id": 7, "owner": "alice"})
+    gateway = CaptureGateway(roots, opener=site, sleep=lambda _s: None)
+    yield gateway, site, roots
+    gateway.store.close()
+
+
+def _logins(site: Site) -> int:
+    return sum(1 for method, url, _h, _b in site.seen if (method, url) == ("POST", LOGIN_URL))
+
+
+class TestIdentitySessions:
+    def test_identity_session_is_attached_and_wins_over_the_callers_headers(
+        self, ident_env
+    ) -> None:
+        gateway, site, roots = ident_env
+        capture = gateway.send(
+            "acme",
+            "GET",
+            ORDER_URL,
+            headers={
+                "authorization": "Bearer attacker-supplied",
+                "Cookie": "theme=dark; sid=attacker-supplied",
+                "X-Trace": "1",
+            },
+            identity="alice",
+        )
+        assert capture.status == 200 and _logins(site) == 1
+        sent = site.seen[-1][2]
+        assert sent["authorization"] == f"Bearer {ALICE_TOKEN}"
+        assert sent["x-session-token"] == ALICE_TOKEN
+        assert sent["cookie"] == f"theme=dark; sid={ALICE_TOKEN}"  # the caller's own cookie stays
+        assert sent["x-trace"] == "1" and "attacker-supplied" not in json.dumps(sent)
+
+        stored = gateway.store.get("acme", capture.id)
+        assert stored.identity == "alice" and stored.summary()["identity"] == "alice"
+        lines = list(iter_records(roots.audit / "acme" / "captures.jsonl"))
+        assert [(line["probe"], line["identity"]) for line in lines] == [
+            ("login", ""),
+            ("", "alice"),
+        ]
+        assert verify_ledger(roots.audit / "acme" / "captures.jsonl").ok
+
+        # The control: without an identity the caller's headers go out as written.
+        plain = gateway.send("acme", "GET", ORDER_URL, headers={"Authorization": "Bearer mine"})
+        assert site.seen[-1][2]["authorization"] == "Bearer mine"
+        assert "cookie" not in site.seen[-1][2] and "x-session-token" not in site.seen[-1][2]
+        assert plain.identity == "" and _logins(site) == 1
+
+        # A static identity is attached the same way, with no login.
+        gateway.send("acme", "GET", ORDER_URL, identity="bob")
+        assert site.seen[-1][2]["x-api-token"] == BOB_TOKEN and _logins(site) == 1
+
+    def test_session_headers_and_cookies_are_redacted_in_detail(self, ident_env) -> None:
+        gateway, _site, _roots = ident_env
+        capture = gateway.send("acme", "GET", ORDER_URL, identity="alice")
+        stored = gateway.store.get("acme", capture.id)
+        # The store keeps what was sent (a replay needs it) ...
+        assert stored.request_headers["Authorization"] == f"Bearer {ALICE_TOKEN}"
+        assert stored.request_headers["Cookie"] == f"sid={ALICE_TOKEN}"
+        # ... and shows none of it.
+        detail = stored.detail()
+        for header in ("Authorization", "Cookie", "X-Session-Token"):
+            assert detail["request_headers"][header] == "<redacted>", header
+        assert detail["identity"] == "alice" and ALICE_TOKEN not in json.dumps(detail)
+        assert ALICE_TOKEN in json.dumps(stored.detail(reveal_credentials=True))
+
+        static = gateway.send("acme", "GET", ORDER_URL, identity="bob").detail()
+        assert static["request_headers"]["X-Api-Token"] == "<redacted>"
+        assert BOB_TOKEN not in json.dumps(static)
+
+        # The control: the same header name sent by a caller with no identity is the
+        # caller's own value and is shown, as before.
+        plain = gateway.send(
+            "acme", "GET", ORDER_URL, headers={"X-Session-Token": "callers-own-value-1234"}
+        )
+        assert plain.detail()["request_headers"]["X-Session-Token"] == "callers-own-value-1234"
+
+    def test_a_token_the_target_echoes_back_is_not_shown(self, ident_env) -> None:
+        gateway, site, _roots = ident_env
+        echo = "https://app.acme.test/debug/echo"
+
+        def reflect(headers, _body):
+            return 200, {"authorization": headers.get("authorization"), "kept": "order 7"}
+
+        site.routes[("GET", echo)] = reflect
+        detail = gateway.send("acme", "GET", echo, identity="alice").detail()
+        assert ALICE_TOKEN not in json.dumps(detail)
+        assert json.loads(detail["response_body"]) == {
+            "authorization": "<redacted>",
+            "kept": "order 7",
+        }
+        # The control: a caller who supplied the token itself sees the response unchanged.
+        own = gateway.send(
+            "acme", "GET", echo, headers={"Authorization": f"Bearer {ALICE_TOKEN}"}
+        ).detail()
+        assert json.loads(own["response_body"])["authorization"] == f"Bearer {ALICE_TOKEN}"
+
+    def test_no_tool_output_carries_the_password_or_the_token(self, ident_env) -> None:
+        gateway, _site, _roots = ident_env
+        tools = CaptureTools(gateway, None, "acme")
+        capture = gateway.send("acme", "GET", ORDER_URL, identity="alice")
+        (login,) = gateway.store.list("acme", probe="login")
+        assert login.approval_id == INTERNAL_LOGIN and login.redact_bodies is True
+
+        outputs = [
+            tools.http_captures("acme"),
+            tools.http_captures("acme", probe="login"),
+            tools.http_capture("acme", login.id, 40000),
+            tools.http_capture("acme", capture.id, 40000),
+            tools.capture_verify("acme", login.id),
+            tools.http_replay("acme", capture.id),
+            tools.http_replay("acme", login.id),
+            gateway.identities.public("acme"),
+        ]
+        rendered = json.dumps(outputs)
+        for secret in (ALICE_PASSWORD, ALICE_TOKEN, BOB_TOKEN):
+            assert secret not in rendered
+        shown = tools.http_capture("acme", login.id)
+        assert shown["request_body"] == "<redacted>" and shown["response_body"] == "<redacted>"
+        assert shown["status"] == 200 and shown["probe"] == "login"  # the outcome is visible
+        # The control: the search finds both in what the gateway itself holds.
+        operator_view = json.dumps(login.detail(reveal_credentials=True))
+        assert ALICE_PASSWORD in operator_view and ALICE_TOKEN in operator_view
+
+    def test_login_exchange_cannot_be_replayed(self, ident_env) -> None:
+        gateway, site, roots = ident_env
+        gateway.send("acme", "GET", ORDER_URL, identity="alice")
+        (login,) = gateway.store.list("acme", probe="login")
+        with pytest.raises(GatewayRefusal) as refused:
+            gateway.replay("acme", login.id)
+        assert refused.value.code == "LOGIN_NOT_REPLAYABLE" and _logins(site) == 1
+        assert CaptureTools(gateway).http_replay("acme", login.id)["status"] == "refused"
+        # The password never reached an approval request's body preview either.
+        assert not (roots.audit / "acme" / "approvals" / "requests.jsonl").exists()
+
+    def test_replay_is_sent_as_the_same_identity(self, ident_env) -> None:
+        gateway, site, _roots = ident_env
+        original = gateway.send("acme", "GET", ORDER_URL, identity="alice")
+        outcome = gateway.replay("acme", original.id)
+        assert outcome["reproduced"] and outcome["replay"]["identity"] == "alice"
+        assert site.seen[-1][2]["authorization"] == f"Bearer {ALICE_TOKEN}" and _logins(site) == 1
+        replayed = gateway.store.get("acme", outcome["replay"]["capture_id"])
+        assert replayed.replay_of == original.id
+        assert replayed.detail()["request_headers"]["X-Session-Token"] == "<redacted>"
+
+    @pytest.mark.parametrize("method", ["GET", "DELETE"])
+    def test_unknown_identity_is_refused_before_anything_happens(
+        self, ident_env, method: str
+    ) -> None:
+        gateway, site, roots = ident_env
+        with pytest.raises(GatewayRefusal) as refused:
+            gateway.send("acme", method, ORDER_URL, identity="mallory")
+        assert refused.value.code == "UNKNOWN_IDENTITY" and "'mallory'" in refused.value.detail
+        assert site.seen == [] and gateway.store.list("acme") == []
+        assert not (roots.audit / "acme" / "approvals" / "requests.jsonl").exists()
+        # An engagement with no identities file knows no identity at all.
+        (roots.control / "bare").mkdir()
+        (roots.control / "bare" / "roe.json").write_text(json.dumps(_roe()))
+        with pytest.raises(GatewayRefusal) as bare:
+            gateway.send("bare", "GET", ORDER_URL, identity="alice")
+        assert bare.value.code == "UNKNOWN_IDENTITY" and site.seen == []
+        # The control: the declared name on the same request is not refused this way.
+        if method == "GET":
+            assert gateway.send("acme", method, ORDER_URL, identity="alice").status == 200
+
+    def test_malformed_identities_file_refuses_and_names_the_field(self, ident_env) -> None:
+        gateway, site, roots = ident_env
+        document = _identities()
+        document["identities"][0]["login"]["request"]["url"] = "not-a-url"
+        (roots.secrets / "acme" / "identities.json").write_text(json.dumps(document))
+        with pytest.raises(GatewayRefusal) as refused:
+            gateway.send("acme", "GET", ORDER_URL, identity="bob")
+        assert refused.value.code == "BAD_IDENTITIES"
+        assert "identities[0].login.request.url" in refused.value.detail
+        assert ALICE_PASSWORD not in refused.value.detail and site.seen == []
+        # Requests that name no identity do not depend on the file.
+        assert gateway.send("acme", "GET", ORDER_URL).status == 200
+
+
+class TestInternalLoginIsNotACallerOption:
+    def test_no_agent_facing_surface_takes_an_internal_argument(self, ident_env) -> None:
+        gateway, _site, _roots = ident_env
+        # The control: the parameter exists on the gateway, so the search below can find it.
+        assert "internal" in inspect.signature(CaptureGateway.send).parameters
+
+        assert "internal" not in inspect.signature(CaptureTools.http_send).parameters
+        surfaces = [Context.send]
+        surfaces += [
+            member
+            for name, member in inspect.getmembers(CaptureTools, inspect.isfunction)
+            if not name.startswith("_")
+        ]
+
+        class Collector:
+            def __init__(self) -> None:
+                self.registered: list = []
+
+            def tool(self):
+                return lambda fn: self.registered.append(fn) or fn
+
+        mcp = Collector()
+        register_tools(mcp, CaptureTools(gateway, None, "acme"))
+        assert {fn.__name__ for fn in mcp.registered} >= {"http_send", "http_replay", "probe_run"}
+        surfaces += mcp.registered
+        assert len(surfaces) >= 15
+        for surface in surfaces:
+            parameters = inspect.signature(surface).parameters
+            assert "internal" not in parameters, surface
+            assert not any(  # nothing that could forward an arbitrary keyword either
+                p.kind is inspect.Parameter.VAR_KEYWORD for p in parameters.values()
+            ), surface
+
+    def test_state_changing_request_is_still_held_whoever_sends_it(self, ident_env) -> None:
+        gateway, site, roots = ident_env
+        site.routes[("DELETE", ORDER_URL)] = (204, b"")
+        tools = CaptureTools(gateway, None, "acme")
+
+        with pytest.raises(GatewayRefusal) as held:
+            gateway.send("acme", "DELETE", ORDER_URL, identity="alice")
+        assert held.value.code == "APPROVAL_REQUIRED"
+        # Smuggling the word in through the arguments a tool does take changes nothing.
+        via_tool = tools.http_send(
+            "acme", "DELETE", ORDER_URL, headers_json='{"internal": "true", "X-Internal": "1"}'
+        )
+        assert via_tool["code"] == "APPROVAL_REQUIRED"
+        assert via_tool["request_id"] == held.value.extra["request_id"]
+        probe = tools.probe_run(
+            "acme",
+            "mass_assignment",
+            json.dumps(
+                {
+                    "url": "https://app.acme.test/users",
+                    "body": {"e": 1},
+                    "extra_fields": {"role": "admin"},
+                    "internal": True,
+                }
+            ),
+        )
+        assert probe["code"] == "APPROVAL_REQUIRED"
+        assert site.seen == []  # nothing left, not even alice's login
+
+        approvals_cli.record_decision(
+            roots.control / "acme" / "approvals" / "decisions.jsonl",
+            held.value.extra["request_id"],
+            "allow",
+        )
+        capture = gateway.send("acme", "DELETE", ORDER_URL, identity="alice")
+        assert capture.status == 204 and capture.approval_id == held.value.extra["request_id"]
+        assert [m for m, *_ in site.seen] == ["POST", "DELETE"]  # login, then the approved request
+
+    def test_internal_waives_approval_for_a_declared_login_and_nothing_else(
+        self, ident_env, monkeypatch
+    ) -> None:
+        gateway, site, roots = ident_env
+        site.routes[("DELETE", ORDER_URL)] = (204, b"")
+        site.routes[("PUT", LOGIN_URL)] = (200, b"{}")
+        (roots.control / "bare").mkdir()
+        (roots.control / "bare" / "roe.json").write_text(json.dumps(_roe()))
+        body = json.dumps({"email": "alice@acme.test", "password": ALICE_PASSWORD})
+
+        not_logins = [
+            ("acme", "DELETE", ORDER_URL, True),  # not a login at all
+            ("acme", "POST", ORDER_URL, True),
+            ("acme", "PUT", LOGIN_URL, True),  # the login URL, another method
+            ("acme", "POST", LOGIN_URL + "?next=/admin", True),  # another URL
+            ("bare", "POST", LOGIN_URL, True),  # declared, but for a different engagement
+            ("acme", "POST", LOGIN_URL, "true"),  # not the flag, just something truthy
+            ("acme", "POST", LOGIN_URL, 1),
+        ]
+        for engagement, method, url, flag in not_logins:
+            with pytest.raises(GatewayRefusal) as refused:
+                gateway.send(engagement, method, url, body=body, internal=flag)
+            assert refused.value.code == "NOT_A_DECLARED_LOGIN", (engagement, method, url, flag)
+        with pytest.raises(GatewayRefusal) as both:
+            gateway.send("acme", "POST", LOGIN_URL, body=body, internal=True, identity="alice")
+        assert both.value.code == "BAD_ARGUMENT"
+        assert site.seen == [] and gateway.store.list("acme") == []
+        refusals = [
+            line["reason"]
+            for line in iter_records(roots.audit / "acme" / "captures.jsonl")
+            if line["event"] == "capture_refused"
+        ]
+        assert refusals == ["NOT_A_DECLARED_LOGIN"] * 6
+
+        # Scope and the internal-address block are not waived for the declared login.
+        monkeypatch.setattr(
+            "buggy.capture.gateway.socket.getaddrinfo",
+            lambda *_a, **_k: [(2, 1, 6, "", ("10.0.0.8", 0))],
+        )
+        with pytest.raises(GatewayRefusal) as internal_address:
+            gateway.send("acme", "POST", LOGIN_URL, body=body, internal=True)
+        assert internal_address.value.code == "INTERNAL_ADDRESS" and site.seen == []
+        monkeypatch.undo()
+
+        # The controls: the declared login is held without the flag and sent with it.
+        with pytest.raises(GatewayRefusal) as held:
+            gateway.send("acme", "POST", LOGIN_URL, body=body)
+        assert held.value.code == "APPROVAL_REQUIRED" and site.seen == []
+        capture = gateway.send("acme", "POST", LOGIN_URL, body=body, internal=True)
+        assert capture.status == 200 and capture.approval_id == INTERNAL_LOGIN
+        assert [m for m, *_ in site.seen] == ["POST"]
+
+    def test_internal_login_obeys_the_rate_limit(self, ident_env) -> None:
+        gateway, _site, roots = ident_env
+        document = _roe()
+        document["machine_enforcement"]["min_inter_request_delay_ms"] = 500
+        _set_roe(roots, document)
+        slept: list[float] = []
+        gateway._sleep = slept.append  # noqa: SLF001
+        gateway.send("acme", "GET", ORDER_URL, identity="alice")  # login, then the request
+        assert len(slept) == 1 and 0.4 < slept[0] <= 0.5
+
+
+_FIRST_RELEASE_SCHEMA = """
+CREATE TABLE captures (
+    id TEXT PRIMARY KEY, engagement TEXT NOT NULL, created_at REAL NOT NULL,
+    method TEXT NOT NULL, url TEXT NOT NULL, host TEXT NOT NULL,
+    request_headers TEXT NOT NULL, request_body BLOB, request_sha256 TEXT NOT NULL,
+    status INTEGER, response_headers TEXT NOT NULL DEFAULT '{}', response_body BLOB,
+    response_sha256 TEXT NOT NULL DEFAULT '', response_bytes INTEGER NOT NULL DEFAULT 0,
+    elapsed_ms REAL NOT NULL DEFAULT 0, error TEXT NOT NULL DEFAULT '',
+    note TEXT NOT NULL DEFAULT '', probe TEXT NOT NULL DEFAULT '',
+    replay_of TEXT NOT NULL DEFAULT '', approval_id TEXT NOT NULL DEFAULT '',
+    scope_digest TEXT NOT NULL DEFAULT ''
+);
+"""
+
+
+class TestIdentityColumnMigration:
+    @staticmethod
+    def _old_store(path: Path) -> None:
+        db = sqlite3.connect(path)
+        db.executescript(_FIRST_RELEASE_SCHEMA)
+        db.execute(
+            "INSERT INTO captures (id, engagement, created_at, method, url, host, "
+            "request_headers, request_body, request_sha256, status) "
+            "VALUES ('cap-old', 'acme', 1.0, 'GET', 'https://app.acme.test/', 'app.acme.test', "
+            "?, x'', 'abc', 200)",
+            (json.dumps({"Authorization": "Bearer old"}),),
+        )
+        db.commit()
+        db.close()
+
+    @staticmethod
+    def _columns(path: Path) -> set[str]:
+        db = sqlite3.connect(path)
+        try:
+            return {row[1] for row in db.execute("PRAGMA table_info(captures)")}
+        finally:
+            db.close()
+
+    def test_old_store_gains_the_column_and_keeps_its_rows(self, tmp_path: Path) -> None:
+        path = tmp_path / "captures.sqlite3"
+        self._old_store(path)
+        assert "identity" not in self._columns(path)
+
+        store = CaptureStore(path)
+        assert {"identity", "redaction"} <= self._columns(path)
+        old = store.get("acme", "cap-old")
+        assert (old.identity, old.redact_headers, old.redact_bodies) == ("", (), False)
+        assert old.detail()["request_headers"]["Authorization"] == "<redacted>"
+        new = store.add(
+            engagement="acme",
+            method="GET",
+            url="https://app.acme.test/",
+            host="app.acme.test",
+            request_headers={"X-Session-Token": "abcdefgh12345678"},
+            request_body=b"",
+            status=200,
+            response_headers={},
+            response_body=b"hello abcdefgh12345678",
+            elapsed_ms=1.0,
+            identity="alice",
+            redact_headers=["X-Session-Token"],
+        )
+        store.close()
+
+        reopened = CaptureStore(path)  # the migration runs once; a second open is a no-op
+        again = reopened.get("acme", new.id)
+        assert (again.identity, again.redact_headers) == ("alice", ("x-session-token",))
+        assert again.detail()["request_headers"]["X-Session-Token"] == "<redacted>"
+        assert again.detail()["response_body"] == "hello <redacted>"
+        assert {c.id for c in reopened.list("acme")} == {"cap-old", new.id}
+        reopened.close()
+
+    def test_read_only_handle_reads_an_old_store_without_migrating(self, tmp_path: Path) -> None:
+        path = tmp_path / "captures.sqlite3"
+        self._old_store(path)
+        store = CaptureStore(path, read_only=True)
+        assert store.get("acme", "cap-old").identity == ""
+        store.close()
+        assert "identity" not in self._columns(path)
