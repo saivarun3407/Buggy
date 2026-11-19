@@ -82,11 +82,16 @@ class ScopeTools:
             "state_changing_requests": str(
                 as_dict(document.get("approvals")).get("state_changing", "required")
             ),
+            "sandbox_network": (
+                "blocked: send every request to the target with http_send, probe_run or browser_*"
+                if scope.rules.sandbox_blocked
+                else "scoped"
+            ),
             "report_release": str(
                 as_dict(document.get("approvals")).get("report_submission", "not_required")
             ),
             "banned_techniques": self._banned(engagement),
-            "wildcard_note": "a * in a scope rule covers exactly one DNS label",
+            "wildcard_note": "* covers exactly one DNS label; ** covers any depth; neither covers the apex",
         }
 
     def _banned(self, engagement: str) -> list[str]:
@@ -157,7 +162,9 @@ def build_server(
 def main() -> None:
     host = os.environ.get("BUGGY_SCOPE_MCP_HOST", "0.0.0.0")  # noqa: S104 - container-internal
     port = int(os.environ.get("BUGGY_SCOPE_MCP_PORT") or DEFAULT_PORT)
-    build_server(host=host, port=port).run(transport="streamable-http")
+    from buggy.pipeline.mcp_http import serve  # noqa: PLC0415
+
+    serve(build_server(host=host, port=port), host=host, port=port)
 
 
 if __name__ == "__main__":

@@ -1,3 +1,4 @@
+import os
 import subprocess
 import sys
 
@@ -12,4 +13,8 @@ def test_research_tools_do_not_import_neo4j_at_module_load():
         "import buggy.tools.research.tools; "
         "assert 'neo4j' not in sys.modules, sorted(m for m in sys.modules if 'neo4j' in m)"
     )
-    subprocess.run([sys.executable, "-c", code], check=True)
+    # The KG integration fixtures put default BUGGY_NEO4J_* values into this
+    # process's environment; with those set the agents build a KG store at
+    # import. This test is about an unconfigured install, so start clean.
+    env = {k: v for k, v in os.environ.items() if not k.startswith("BUGGY_NEO4J_")}
+    subprocess.run([sys.executable, "-c", code], check=True, env=env)

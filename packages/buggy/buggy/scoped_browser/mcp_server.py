@@ -118,7 +118,9 @@ def main() -> None:
     host = os.environ.get("BUGGY_BROWSER_MCP_HOST", "0.0.0.0")  # noqa: S104 - container-internal
     port = int(os.environ.get("BUGGY_BROWSER_MCP_PORT") or DEFAULT_PORT)
     mcp, _browser = build_server(host=host, port=port)
-    mcp.run(transport="streamable-http")
+    from buggy.pipeline.mcp_http import serve  # noqa: PLC0415
+
+    serve(mcp, host=host, port=port)
 
 
 if __name__ == "__main__":

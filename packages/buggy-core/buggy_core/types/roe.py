@@ -115,6 +115,11 @@ class MachineEnforcement:
     min_inter_request_delay_ms: int = 0
     authorized_windows: tuple[tuple[datetime, datetime], ...] = field(default_factory=tuple)
     blackout_windows: tuple[tuple[datetime, datetime], ...] = field(default_factory=tuple)
+    # "scoped": the agent's sandbox can reach in-scope targets directly.
+    # "blocked": it cannot reach any target; every request to the target goes
+    # through the evidence gateway, the scoped browser or the pipeline, which
+    # are the only places a state-changing request can be held for approval.
+    sandbox_egress: str = "scoped"
 
     @classmethod
     def from_dict(cls, data: dict[str, Any] | None) -> MachineEnforcement:
@@ -137,7 +142,15 @@ class MachineEnforcement:
             min_inter_request_delay_ms=int(data.get("min_inter_request_delay_ms") or 0),
             authorized_windows=tuple(_parse_windows(data.get("authorized_windows") or ())),
             blackout_windows=tuple(_parse_windows(data.get("blackout_windows") or ())),
+            sandbox_egress=(
+                "blocked" if str(data.get("sandbox_egress", "")).lower() == "blocked" else "scoped"
+            ),
         )
+
+    @property
+    def sandbox_blocked(self) -> bool:
+        """Whether the sandbox is denied all direct access to targets."""
+        return self.mode == EnforcementMode.ENFORCE and self.sandbox_egress == "blocked"
 
     def effective_forbidden_destinations(self) -> tuple[str, ...]:
         if self.allow_cloud_metadata:
@@ -213,15 +226,25 @@ class Decision:
         )
 
 
-def _glob_match(pattern: str, candidate: str) -> bool:
-    """Match a DNS glob without crossing label boundaries.
+def glob_to_regex(pattern: str) -> str:
+    """Regex source for a DNS glob.
 
     ``*`` matches one or more characters within one label; ``?`` matches
-    exactly one non-dot character. A wildcard grants neither its apex nor
-    deeper descendants. Additional hosts require their own scope rules.
+    exactly one non-dot character. Neither crosses a label boundary, so
+    ``*.acme.com`` grants ``a.acme.com`` but not ``a.b.acme.com``.
+
+    ``**`` is the explicit any-depth form: one or more whole labels.
+    ``**.acme.com`` grants ``a.acme.com`` and ``a.b.acme.com``. It is what a
+    bounty program means by "all subdomains". No wildcard grants the apex.
     """
-    regex = re.escape(pattern).replace(r"\*", "[^.]+").replace(r"\?", "[^.]")
-    return re.fullmatch(regex, candidate, re.IGNORECASE) is not None
+    escaped = re.escape(pattern)
+    escaped = escaped.replace(r"\*\*", r"(?:[^.]+\.)*[^.]+")
+    return escaped.replace(r"\*", "[^.]+").replace(r"\?", "[^.]")
+
+
+def _glob_match(pattern: str, candidate: str) -> bool:
+    """Match a DNS glob (see :func:`glob_to_regex`)."""
+    return re.fullmatch(glob_to_regex(pattern), candidate, re.IGNORECASE) is not None
 
 
 def _matches_rule(rule: ScopeRule, target: str, *, deny: bool = False) -> bool:

@@ -77,8 +77,8 @@ func TestEnsureScopeSecrets_generates_missing_and_keeps_existing(t *testing.T) {
 	if err != nil {
 		t.Fatalf("EnsureScopeSecrets() error = %v", err)
 	}
-	if len(generated) != 2 {
-		t.Fatalf("generated = %v, want the two missing keys", generated)
+	if len(generated) != len(ScopeSecretKeys)-1 {
+		t.Fatalf("generated = %v, want every missing key", generated)
 	}
 	onDisk, err := LoadEnv(path)
 	if err != nil {
@@ -87,7 +87,7 @@ func TestEnsureScopeSecrets_generates_missing_and_keeps_existing(t *testing.T) {
 	if onDisk["SANDBOX_TOKEN"] != "keep-me" || env["SANDBOX_TOKEN"] != "keep-me" {
 		t.Fatal("existing SANDBOX_TOKEN was rotated")
 	}
-	for _, key := range []string{"EGRESS_GUARD_TOKEN", "BUGGY_AUDIT_HMAC_KEY"} {
+	for _, key := range []string{"EGRESS_GUARD_TOKEN", "BUGGY_STACK_MCP_TOKEN", "BUGGY_AUDIT_HMAC_KEY"} {
 		if len(onDisk[key]) != 64 || onDisk[key] != env[key] {
 			t.Fatalf("%s = %q on disk, %q in memory; want one 64-hex value", key, onDisk[key], env[key])
 		}

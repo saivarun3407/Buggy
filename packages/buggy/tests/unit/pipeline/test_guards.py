@@ -6,6 +6,7 @@ import io
 import json
 import subprocess
 import sys
+import time
 import urllib.error
 from pathlib import Path
 
@@ -422,6 +423,91 @@ class TestRerunWorker:
             assert service.engagements_due(store, control, refresh_seconds=1e-9) == [
                 ("acme", "refresh")
             ]
+        finally:
+            store.close()
+
+    def test_a_slow_engagement_does_not_hold_up_the_next_one(
+        self, tmp_path: Path, monkeypatch
+    ) -> None:
+        import threading
+
+        control, root = tmp_path / "control", tmp_path / "data"
+        for name in ("slow", "fast"):
+            (control / name).mkdir(parents=True)
+            (control / name / "roe.json").write_text(json.dumps(ROE))
+        release = threading.Event()
+        finished: list[str] = []
+
+        def fake_run(engagement: str, *, trigger: str, root: Path, control: Path, **_kw):
+            # Stands in for a scan: "slow" blocks until released.
+            store = ReconStore(root / service.STORE_FILE)
+            try:
+                run = store.begin_run(
+                    engagement, trigger=trigger, scope_digest=ScopeFilter.from_document(ROE).digest
+                )
+                if engagement == "slow":
+                    assert release.wait(timeout=20)
+                store.finish_run(run, status="completed", stats={})
+            finally:
+                store.close()
+            finished.append(engagement)
+            return {"run_id": run, "status": "completed"}
+
+        monkeypatch.setattr(service, "run_engagement", fake_run)
+        runner = service.EngagementRunner(parallel=2)
+        try:
+            assert sorted(runner.submit_due(root=root, control=control)) == ["fast", "slow"]
+            deadline = time.monotonic() + 10
+            while "fast" not in finished and time.monotonic() < deadline:
+                time.sleep(0.02)
+            assert finished == ["fast"]  # done while "slow" is still scanning
+            assert runner.in_flight() == ["slow"]
+            # A tick while a run is in flight never starts a second one for it.
+            assert runner.submit_due(root=root, control=control) == []
+            release.set()
+            runner.wait(timeout=10)
+            assert sorted(finished) == ["fast", "slow"]
+            assert runner.submit_due(root=root, control=control) == []  # nothing left to do
+        finally:
+            release.set()
+            runner.shutdown()
+
+    def test_a_run_whose_process_died_is_closed_and_resumed(self, tmp_path: Path) -> None:
+        from buggy.pipeline.query import ReconQueries
+
+        control, root = tmp_path / "control", tmp_path / "data"
+        (control / "acme").mkdir(parents=True)
+        (control / "acme" / "roe.json").write_text(json.dumps(ROE))
+        store = ReconStore(root / service.STORE_FILE)
+        try:
+            digest = ScopeFilter.from_document(ROE).digest
+            run = store.begin_run("acme", trigger="scope:new", scope_digest=digest)
+            store.set_run_progress(run, stage="issues", done=["enumerate", "dns", "live"])
+            # A reader watching the run sees which stage it is in.
+            queries = ReconQueries(store, None, data_root=root)
+            current = queries.summary("acme")["current_run"]
+            assert current["run_id"] == run and current["stage"] == "issues"
+            assert current["stages_done"] == ["enumerate", "dns", "live"]
+            assert queries.summary("acme")["last_run"] is None
+            assert service.engagements_due(store, control) == []  # looks in progress
+        finally:
+            store.close()
+
+        # While a live process holds the engagement, the run is left alone.
+        with service.engagement_lock(root, "acme"):
+            assert service.close_orphaned_runs(root) == []
+        # The process is gone (container restart): the run is closed...
+        assert service.close_orphaned_runs(root) == [run]
+        assert service.close_orphaned_runs(root) == []
+        store = ReconStore(root / service.STORE_FILE)
+        try:
+            closed = store.get_run(run)
+            assert closed["status"] == "interrupted" and closed["finished_at"]
+            assert "stopped mid-run" in closed["stats"]["error"]
+            assert closed["stats"]["stage"] == "issues"  # where it stopped is kept
+            # ...and the engagement is due again instead of stuck forever.
+            assert service.engagements_due(store, control) == [("acme", "resume")]
+            assert ReconQueries(store, None, data_root=root).summary("acme")["current_run"] is None
         finally:
             store.close()
 

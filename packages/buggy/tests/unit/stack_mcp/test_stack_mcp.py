@@ -27,9 +27,12 @@ from buggy.capture.gateway import Roots  # noqa: E402
 from buggy.middleware.roe import GATED_TOOL_NAMES, NETWORK_TARGET_EXTRACTORS  # noqa: E402
 from buggy.pipeline import mcp_server as recon_server  # noqa: E402
 from buggy.pipeline import service  # noqa: E402
+from buggy.pipeline.mcp_http import McpStartupError, build_app, configured_token  # noqa: E402
 from buggy.pipeline.schema import Record, RecordType  # noqa: E402
 from buggy.pipeline.store import ReconStore  # noqa: E402
 from buggy.tools import stack_mcp  # noqa: E402
+
+STACK_TOKEN = "unit-test-stack-mcp-token-0123456789"  # noqa: S105 - test fixture
 
 
 def _free_port() -> int:
@@ -40,9 +43,8 @@ def _free_port() -> int:
 
 class _Server:
     def __init__(self, mcp, port: int) -> None:
-        config = uvicorn.Config(
-            mcp.streamable_http_app(), host="127.0.0.1", port=port, log_level="error"
-        )
+        # The same app the containers serve: bearer auth included.
+        config = uvicorn.Config(build_app(mcp), host="127.0.0.1", port=port, log_level="error")
         self.server = uvicorn.Server(config)
         self.thread = threading.Thread(target=self.server.run, daemon=True)
         self.thread.start()
@@ -76,6 +78,7 @@ class _Target(BaseHTTPRequestHandler):
 @pytest.fixture
 def stack(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Iterator[dict]:
     control, audit, data = tmp_path / "control", tmp_path / "audit", tmp_path / "data"
+    monkeypatch.setenv("BUGGY_STACK_MCP_TOKEN", STACK_TOKEN)
     (control / "acme").mkdir(parents=True)
     (control / "acme" / "roe.json").write_text(
         json.dumps({"machine_enforcement": {"mode": "enforce", "in_scope": ["127.0.0.1"]}})
@@ -129,6 +132,7 @@ def stack(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Iterator[dict]:
         "target": f"http://127.0.0.1:{target.server_address[1]}",
         "audit": audit,
         "control": control,
+        "ports": ports,
     }
     for server in servers:
         server.stop()
@@ -232,3 +236,38 @@ def test_target_reaching_tools_are_roe_gated() -> None:
     params = json.dumps({"url": "https://a.test/o/1", "readback_url": "https://b.test/o/1"})
     assert NETWORK_TARGET_EXTRACTORS["probe_run"]({"params_json": params}) == ["a.test", "b.test"]
     assert NETWORK_TARGET_EXTRACTORS["probe_run"]({"params_json": "not json"}) == []
+
+
+def test_servers_reject_callers_without_the_stack_token(stack, monkeypatch) -> None:
+    import urllib.error
+    import urllib.request
+
+    for name, port in stack["ports"].items():
+        for headers in ({}, {"Authorization": "Bearer wrong-token-wrong-token"}):
+            request = urllib.request.Request(  # noqa: S310 - loopback test server
+                f"http://127.0.0.1:{port}/mcp",
+                data=b"{}",
+                method="POST",
+                headers={"Content-Type": "application/json", **headers},
+            )
+            with pytest.raises(urllib.error.HTTPError) as refused:
+                urllib.request.urlopen(request, timeout=5)  # noqa: S310
+            assert refused.value.code == 401, name
+
+    # An agent runtime that lost the token gets an error, not data.
+    monkeypatch.setenv("BUGGY_STACK_MCP_TOKEN", "")
+    assert "error" in _call(stack_mcp.recon_summary)
+    assert "error" in _call(stack_mcp.http_send, method="GET", url=f"{stack['target']}/hello")
+
+
+def test_a_server_will_not_start_without_a_token(monkeypatch) -> None:
+    monkeypatch.delenv("BUGGY_STACK_MCP_TOKEN", raising=False)
+    monkeypatch.delenv("BUGGY_STACK_MCP_ALLOW_UNAUTHENTICATED", raising=False)
+    with pytest.raises(McpStartupError, match="BUGGY_STACK_MCP_TOKEN must be set"):
+        configured_token()
+    monkeypatch.setenv("BUGGY_STACK_MCP_TOKEN", "short")
+    with pytest.raises(McpStartupError, match="at least 16"):
+        configured_token()
+    monkeypatch.setenv("BUGGY_STACK_MCP_TOKEN", "")
+    monkeypatch.setenv("BUGGY_STACK_MCP_ALLOW_UNAUTHENTICATED", "1")
+    assert configured_token() is None

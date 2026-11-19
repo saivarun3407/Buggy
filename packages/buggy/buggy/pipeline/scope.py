@@ -60,6 +60,11 @@ class PipelineLimits:
     # (log out, switch a mode, delete); the defaults cover session teardown
     # and the program can add its own.
     crawl_exclude: tuple[str, ...] = DEFAULT_CRAWL_EXCLUDE
+    # URLs the operator named as targets. They tell the live stage which
+    # non-default port to probe when the port scan is off, and give the
+    # crawler a starting path. They never widen the scope: each is filtered
+    # like any other input.
+    seed_urls: tuple[str, ...] = ()
 
     @classmethod
     def from_roe(cls, rules: MachineEnforcement, document: dict[str, Any]) -> PipelineLimits:
@@ -98,6 +103,11 @@ class PipelineLimits:
                 str(s) for s in block.get("disabled_stages") or [] if isinstance(s, str)
             ),
             crawl_exclude=(*DEFAULT_CRAWL_EXCLUDE, *_valid_regexes(block.get("crawl_exclude"))),
+            seed_urls=tuple(
+                str(u).strip()
+                for u in (block.get("seed_urls") or [])[:50]
+                if isinstance(u, str) and u.strip().lower().startswith(("http://", "https://"))
+            ),
         )
 
 
@@ -209,8 +219,8 @@ class ScopeFilter:
         """What the pipeline starts from, derived only from ``in_scope``.
 
         * ``*.acme.com``   → enumeration root ``acme.com`` (results are still
-          filtered: a wildcard covers one label, and the apex is in scope
-          only if listed).
+          filtered: ``*`` covers one label, ``**`` any depth, and the apex is
+          in scope only if listed).
         * ``app.acme.com`` → a host to resolve and probe, not enumerated.
         * address / CIDR   → hosts to probe (CIDRs larger than
           ``MAX_CIDR_HOSTS`` are skipped and reported).
@@ -238,8 +248,8 @@ class ScopeFilter:
                 addresses.extend(str(ip) for ip in members)
             elif kind == "domain-glob":
                 root = normalize_host(pattern.lstrip("*?.").lstrip("."))
-                # Only a leading "*." wildcard names an enumerable root.
-                if pattern.startswith("*.") and is_hostname(root) and "*" not in root:
+                # Only a leading "*." or "**." wildcard names an enumerable root.
+                if pattern.startswith(("*.", "**.")) and is_hostname(root) and "*" not in root:
                     roots.append(root)
                 else:
                     skipped.append(rule.pattern)

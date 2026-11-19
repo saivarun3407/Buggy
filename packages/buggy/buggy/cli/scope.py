@@ -161,6 +161,10 @@ def _summary(document: dict[str, Any]) -> str:
         f"  out of scope:  {', '.join(_items('out_of_scope')) or '(none)'}",
         f"  forbidden:     {', '.join(_items('forbidden_destinations')) or '(defaults)'}",
     ]
+    if block.get("sandbox_egress") == "blocked":
+        lines.append(
+            "  agent shell:   no network path to targets (gateway, browser, pipeline only)"
+        )
     if block.get("min_inter_request_delay_ms"):
         lines.append(
             f"  min delay:     {block['min_inter_request_delay_ms']} ms between gated calls"

@@ -135,6 +135,24 @@ By default the test swaps the Kali sandbox image for
 code. Set `BUGGY_E2E_SANDBOX_IMAGE=buggy-sandbox:stable` to run it against the
 full image.
 
+## Blocking the sandbox's network entirely
+
+`machine_enforcement.sandbox_egress: "blocked"` gives the sandbox no route to
+any target: the guard is loaded with an empty allowlist (the search-provider
+hosts stay reachable), and the guardrail refuses a shell command aimed at a
+target with `SANDBOX_NETWORK_BLOCKED`, naming the tools to use instead.
+Targets are then reached only by the evidence gateway, the scoped browser and
+the pipeline, which is the only place a state-changing request can be held
+for approval. `buggy hunt` and `scope import` set it by default;
+`--allow-sandbox-network` / `--lab` turn it off.
+
+## Addresses on the sandbox network
+
+The guard and the sandbox have fixed addresses. Docker assigns every other
+service on `sandbox-net` from `BUGGY_SANDBOX_IP_RANGE` (default the upper
+half of the subnet), so no service can be handed one of the fixed addresses
+first.
+
 ## Known limits
 
 - Containers on `sandbox-net` (neo4j, langgraph, ghidra-mcp, c2-sliver) are
@@ -146,8 +164,10 @@ full image.
   pivots. The guard and Docker's internal-network filter still apply.
 - The deterministic pipeline (Phase 2) runs in its own container and filters
   scope in code; it does not go through this guard.
-- A wildcard in a scope rule covers one DNS label (`*.acme.com` does not match
-  `a.b.acme.com`), the same as the parser.
+- `*` in a scope rule covers one DNS label (`*.acme.com` does not match
+  `a.b.acme.com`); `**.acme.com` covers any depth. Neither covers the apex.
+  The guardrail and the guard implement this separately (the guard image has
+  no `buggy_core`); a test pins them to the same answers.
 - Deployments without the guard (`BUGGY_EGRESS_GUARD_URL` unset) fall back to
   the in-sandbox nftables applier. That applier is advisory against a hostile
   agent; a failure to apply it still aborts the run.

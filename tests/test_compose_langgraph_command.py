@@ -41,6 +41,7 @@ def _langgraph_command(env_overrides: dict[str, str]) -> str:
         # The compose file refuses to render without these (no defaults).
         "SANDBOX_TOKEN": os.environ.get("SANDBOX_TOKEN") or "test-sandbox-token",
         "EGRESS_GUARD_TOKEN": os.environ.get("EGRESS_GUARD_TOKEN") or "test-guard-token",
+        "BUGGY_STACK_MCP_TOKEN": os.environ.get("BUGGY_STACK_MCP_TOKEN") or "test-stack-mcp-token",
         **env_overrides,
     }
     result = subprocess.run(

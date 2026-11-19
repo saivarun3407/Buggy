@@ -39,6 +39,7 @@ from langchain.agents.middleware import AgentMiddleware
 from langchain_core.messages import AIMessage, SystemMessage, ToolMessage
 from typing_extensions import override
 
+from buggy.middleware.kg_internal.migration_runner import ensure_schema
 from buggy.middleware.kg_internal.state import KGState
 from buggy.middleware.kg_internal.store import KGStore
 from buggy.middleware.kg_internal.summary import build_summary
@@ -114,6 +115,10 @@ class KGMiddleware(AgentMiddleware):
         ``None``, constructs one via ``KGStore.from_env()`` so unit /
         integration tests can inject a test store while production
         works out-of-the-box.
+    role
+        The agent role this middleware is attached to. Recorded as
+        ``created_by`` on every node and edge the agent writes, so the
+        graph says which agent asserted what.
     enabled_tools
         Override the tool surface. Defaults to ``{"kg_record",
         "kg_ingest"}`` (see ``DEFAULT_KG_TOOLS`` in
@@ -127,10 +132,12 @@ class KGMiddleware(AgentMiddleware):
         *,
         store: KGStore | None = None,
         enabled_tools: Iterable[str] | None = None,
+        role: str = "",
     ) -> None:
         super().__init__()
         self._store = store if store is not None else KGStore.from_env()
-        self.tools = build_kg_tools(self._store, enabled=enabled_tools)
+        self._role = role
+        self.tools = build_kg_tools(self._store, enabled=enabled_tools, created_by=role)
         self._kg_tool_names = {getattr(t, "name", "") for t in self.tools}
 
     @property
@@ -155,6 +162,7 @@ class KGMiddleware(AgentMiddleware):
         if not engagement:
             return None
 
+        ensure_schema(self._store)
         try:
             revision = self._store.revision(engagement=engagement)
         except Exception as exc:

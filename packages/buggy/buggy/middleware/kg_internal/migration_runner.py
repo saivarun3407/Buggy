@@ -15,6 +15,7 @@ The label is documented as reserved in
 from __future__ import annotations
 
 import hashlib
+import threading
 import time
 from pathlib import Path
 
@@ -128,3 +129,41 @@ def apply_migrations(
         new_applied.append(name)
 
     return new_applied
+
+
+_schema_lock = threading.Lock()
+_SCHEMA_RETRY_SECONDS = 60.0
+_READY_ATTR = "_buggy_schema_ready"
+_RETRY_ATTR = "_buggy_schema_retry_at"
+
+
+def ensure_schema(store: KGStore) -> bool:
+    """Apply pending migrations once per store, at first use.
+
+    The constraints in ``V001`` are what make ``(key, engagement)`` unique;
+    without them concurrent agents can write duplicate nodes. This runs the
+    first time an agent touches the graph rather than at import, because the
+    database may not be reachable while the graphs are being built.
+
+    Never raises: a failure is logged and retried after a pause, so an
+    unreachable database degrades the KG instead of stopping the run.
+    Returns whether the schema is known to be in place.
+    """
+    if getattr(store, _READY_ATTR, False) is True:
+        return True
+    with _schema_lock:
+        if getattr(store, _READY_ATTR, False) is True:
+            return True
+        retry_at = getattr(store, _RETRY_ATTR, 0.0)
+        if isinstance(retry_at, float) and time.monotonic() < retry_at:
+            return False
+        try:
+            applied = apply_migrations(store)
+        except Exception as exc:  # noqa: BLE001 - the KG is optional at run time
+            setattr(store, _RETRY_ATTR, time.monotonic() + _SCHEMA_RETRY_SECONDS)
+            log.warning("KG schema migration failed; will retry: %s", exc)
+            return False
+        setattr(store, _READY_ATTR, True)
+        if applied:
+            log.info("KG schema migrations applied: %s", ", ".join(applied))
+        return True

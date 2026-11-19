@@ -88,6 +88,11 @@ def main(argv: list[str] | None = None) -> int:
             finally:
                 queue.close()
             return EXIT_OK
+        import logging  # noqa: PLC0415
+
+        logging.basicConfig(
+            level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s"
+        )
         service.worker_loop(interval=args.interval)
         return EXIT_OK
 

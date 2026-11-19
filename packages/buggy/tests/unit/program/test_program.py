@@ -35,7 +35,7 @@ class TestOfficialScopeImport:
         assert block["mode"] == "enforce"
         assert block["in_scope"] == [
             "app.acme-bounty.example",
-            "*.api.acme-bounty.example",
+            "**.api.acme-bounty.example",
             "pay.acme-bounty.example",
             "198.51.100.0/28",
         ]
@@ -51,6 +51,7 @@ class TestOfficialScopeImport:
         assert program["rejected_assets"] == rejected
         assert roe["approvals"] == {"state_changing": "required", "report_submission": "required"}
         assert roe["network"] == {"allow_private_targets": False}
+        assert block["sandbox_egress"] == "blocked"
         assert program["source_sha256"] and program["platform"] == "hackerone"
 
     def test_the_result_is_what_the_guardrail_and_pipeline_enforce(self) -> None:
@@ -60,11 +61,12 @@ class TestOfficialScopeImport:
         scope = ScopeFilter.from_document(roe)
         assert scope.allows("https://app.acme-bounty.example/login")
         assert scope.allows("v2.api.acme-bounty.example")
+        assert scope.allows("a.b.api.acme-bounty.example")  # a program wildcard is any depth
+        assert not scope.allows("api.acme-bounty.example")  # the apex was never listed
         assert scope.allows("198.51.100.7")
         for outside in (
             "blog.acme-bounty.example",  # excluded by the program
             "acme-bounty.example",  # apex was never listed
-            "a.b.api.acme-bounty.example",  # '*' is one label
             "evil.example",
             "10.20.0.5",
             "198.51.100.200",
@@ -183,8 +185,10 @@ class TestOfficialScopeImport:
             ("*", False),
             ("*.com", False),
             ("*.co.uk", False),
+            ("**.acme-bounty.example", True),
             ("api.*.acme-bounty.example", False),
             ("*.*.acme-bounty.example", False),
+            ("**.com", False),
             ("0.0.0.0/0", False),
             ("8.0.0.0/8", False),
             ("192.168.1.0/24", False),

@@ -244,7 +244,7 @@ def _make_coordinator(*, role: str, **_: Any):
     return CoordinatorMiddleware(role=role)
 
 
-def _make_kg(**_: Any):
+def _make_kg(*, role: str = "", **_: Any):
     """Conditional slot — returns None when the KGStore can't be built.
 
     Mirrors :func:`_make_model_fallback`: the agent factory keeps
@@ -263,7 +263,7 @@ def _make_kg(**_: Any):
     )
 
     try:
-        return KGMiddleware()
+        return KGMiddleware(role=role)
     except (KGStoreConfigError, KGStoreUnavailableError, ImportError) as exc:
         # ImportError covers the case where the optional ``neo4j``
         # driver isn't installed in the env that imports analyst.py

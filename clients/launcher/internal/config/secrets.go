@@ -78,7 +78,7 @@ func randomHex(byteLength int) (string, error) {
 // ScopeSecretKeys are the .env keys the scope-enforcement services require.
 // Unlike database passwords they are not bound to a persistent volume, so a
 // missing one can be generated at any start.
-var ScopeSecretKeys = []string{"SANDBOX_TOKEN", "EGRESS_GUARD_TOKEN", "BUGGY_AUDIT_HMAC_KEY"}
+var ScopeSecretKeys = []string{"SANDBOX_TOKEN", "EGRESS_GUARD_TOKEN", "BUGGY_STACK_MCP_TOKEN", "BUGGY_AUDIT_HMAC_KEY"}
 
 // EnsureScopeSecrets generates any missing scope-enforcement secret, writes it
 // to the .env at envPath, and mirrors it into env. It returns the keys it

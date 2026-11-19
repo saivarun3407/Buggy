@@ -152,6 +152,8 @@ def lab(tmp_path_factory: pytest.TempPathFactory) -> Iterator[Lab]:
         "BUGGY_HOME": str(home),
         "SANDBOX_TOKEN": os.environ.get("SANDBOX_TOKEN") or "lab-sandbox-token",
         "EGRESS_GUARD_TOKEN": os.environ.get("EGRESS_GUARD_TOKEN") or "lab-guard-token-0123456789",
+        "BUGGY_STACK_MCP_TOKEN": os.environ.get("BUGGY_STACK_MCP_TOKEN")
+        or "lab-stack-mcp-token-0123",
     }
     dotenv = REPO_ROOT / ".env"
     created = not dotenv.exists()

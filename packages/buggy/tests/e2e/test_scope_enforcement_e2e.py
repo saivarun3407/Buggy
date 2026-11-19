@@ -144,6 +144,7 @@ def stack(tmp_path_factory: pytest.TempPathFactory) -> Iterator[Stack]:
         "BUGGY_STACK_NAME": "e2e",
         "SANDBOX_TOKEN": sandbox_token,
         "EGRESS_GUARD_TOKEN": guard_token,
+        "BUGGY_STACK_MCP_TOKEN": secrets.token_hex(32),
         "BUGGY_AUDIT_HMAC_KEY": hmac_key,
     }
     # compose validates every service's env_file, including ones we never start.
@@ -436,3 +437,41 @@ def test_11_ledgers_are_written_outside_the_sandbox_and_verify(stack: Stack, eng
     assert "machine_enforcement" in output or "engagement_name" in output
     assert "write_rc=0" not in output
     assert "ls_rc=0" not in output
+
+
+def test_12_blocked_sandbox_has_no_path_even_to_an_in_scope_target(
+    stack: Stack, engagement
+) -> None:
+    """``sandbox_egress: blocked``: targets are reachable only through the gateway."""
+    from buggy.middleware.roe import RoEGuardrailMiddleware
+
+    _write_roe(stack, {"mode": "enforce", "in_scope": [IN_SCOPE_HOST], "sandbox_egress": "blocked"})
+    mw = RoEGuardrailMiddleware()
+    mw.before_agent(engagement, runtime=None)
+    before = len(stack.guard_ledger())
+
+    # A command that names the target is refused before it runs, with the alternative.
+    visible = _run(mw, f"curl -sS -m 6 http://{IN_SCOPE_HOST}/", engagement)
+    assert "SANDBOX_NETWORK_BLOCKED" in visible and "http_send" in visible
+    assert IN_MARKER not in visible
+
+    # A command that hides the target runs, and the network drops it.
+    hidden = _run(
+        mw, 'h=$(printf "in-%s.test" scope); curl -sS -m 6 "http://$h/"; echo rc=$?', engagement
+    )
+    assert "[ROE_REFUSED]" not in hidden and "rc=" in hidden
+    assert IN_MARKER not in hidden and "rc=0" not in hidden
+    stack.flush_drops()
+    refused = [
+        r
+        for r in stack.guard_ledger()[before:]
+        if r["event"] == "dns_refused" and r["qname"] == IN_SCOPE_HOST
+    ]
+    assert refused, "the guard did not log the blocked in-scope lookup"
+
+    # Work that needs no network is unaffected.
+    assert "OFFLINE" in _run(mw, "echo offline | tr a-z A-Z", engagement)
+
+    # The operator lifts the block: the same sandbox can reach the target again.
+    _enforcing_roe(stack)
+    assert IN_MARKER in _run(mw, f"curl -sS -m 10 http://{IN_SCOPE_HOST}/", engagement)

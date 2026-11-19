@@ -235,6 +235,31 @@ def proxy_send_request(method: str, url: str, headers_json: str = "", body: str 
         headers_json: Optional JSON object of header name -> value.
         body: Optional request body string.
     """
+    from buggy.tools.stack_mcp import (
+        call_mcp_sync,
+        current_engagement,
+        gateway_failure,
+        server_configured,
+    )
+
+    if server_configured("capture"):
+        # The evidence gateway is the stack's recording proxy: same scope
+        # check, approval hold and capture store as http_send.
+        result = call_mcp_sync(
+            "capture",
+            "http_send",
+            {
+                "engagement": current_engagement(),
+                "method": method.upper(),
+                "url": url,
+                "headers_json": headers_json,
+                "body": body,
+                "note": "proxy_send_request",
+            },
+        )
+        failure = gateway_failure(result)
+        return _json({"error": failure, **result} if failure is not None else result)
+
     client = CaidoClient()
     return _safe_call(
         client.send_request,

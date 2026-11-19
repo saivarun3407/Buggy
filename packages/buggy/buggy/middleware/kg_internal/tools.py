@@ -75,16 +75,18 @@ def _resolve_engagement(state: dict[str, Any] | None) -> str:
     return str(state.get("kg_engagement") or state.get("engagement_name") or "").strip()
 
 
-def _resolve_created_by(state: dict[str, Any] | None) -> str:
-    """Best-effort agent identity for provenance. Falls back to a
-    constant string so the trusted ``record_observations`` invariant
-    holds even when the agent role is missing from state."""
-    if not isinstance(state, dict):
-        return "agent"
-    role = state.get("role") or state.get("agent_name") or state.get("kg_created_by")
-    if isinstance(role, str) and role:
-        return role
-    return "agent"
+def _resolve_created_by(state: dict[str, Any] | None, default: str = "") -> str:
+    """Agent identity for provenance.
+
+    ``default`` is the role of the agent the tool was built for (the
+    middleware knows it at construction). State can override it; without
+    either, a constant keeps the trusted ``record_observations`` invariant.
+    """
+    if isinstance(state, dict):
+        role = state.get("role") or state.get("agent_name") or state.get("kg_created_by")
+        if isinstance(role, str) and role:
+            return role
+    return default or "agent"
 
 
 def _err(message: str) -> str:
@@ -94,6 +96,8 @@ def _err(message: str) -> str:
 def build_kg_tools(
     store: KGStore,
     enabled: Iterable[str] | None = None,
+    *,
+    created_by: str = "",
 ) -> list[Any]:
     """Construct the agent-facing KG tools bound to a single store.
 
@@ -175,7 +179,7 @@ def build_kg_tools(
                 result = store.record_observations(
                     obs_list,
                     engagement=engagement,
-                    created_by=_resolve_created_by(state),
+                    created_by=_resolve_created_by(state, created_by),
                     source_episode_id=tool_call_id or "no-tool-call-id",
                 )
             except ValueError as exc:
@@ -220,7 +224,7 @@ def build_kg_tools(
                     path,
                     store=store,
                     engagement=engagement,
-                    created_by=_resolve_created_by(state),
+                    created_by=_resolve_created_by(state, created_by),
                     source_episode_id=tool_call_id or "no-tool-call-id",
                 )
             except Exception as exc:  # noqa: BLE001 — surface to LLM
@@ -443,7 +447,7 @@ def build_kg_tools(
                 result = submit_corroboration_observation(
                     store,
                     engagement=engagement,
-                    created_by=_resolve_created_by(state),
+                    created_by=_resolve_created_by(state, created_by),
                     source_episode_id=tool_call_id or "no-tool-call-id",
                     finding_key=finding_key,
                     tool_family=tool_family,
@@ -492,7 +496,7 @@ def build_kg_tools(
                 result = submit_contradiction_observation(
                     store,
                     engagement=engagement,
-                    created_by=_resolve_created_by(state),
+                    created_by=_resolve_created_by(state, created_by),
                     source_episode_id=tool_call_id or "no-tool-call-id",
                     finding_key=finding_key,
                     reason=reason,

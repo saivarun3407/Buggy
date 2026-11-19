@@ -86,7 +86,13 @@ async def call_mcp(server: str, tool_name: str, arguments: dict[str, Any]) -> st
         return json.dumps({"error": "the MCP client is not installed (pip install 'buggy[mcp]')"})
 
     async def _call() -> str:
-        async with streamablehttp_client(url) as (read, write, _session_id):
+        from buggy.pipeline.mcp_http import client_headers  # noqa: PLC0415
+
+        async with streamablehttp_client(url, headers=client_headers()) as (
+            read,
+            write,
+            _session_id,
+        ):
             async with ClientSession(read, write) as session:
                 await session.initialize()
                 return _result_text(await session.call_tool(tool_name, arguments))
@@ -123,6 +129,55 @@ def call_mcp_sync(server: str, tool_name: str, arguments: dict[str, Any]) -> dic
         parsed = json.loads(box.get("text") or "{}")
     except ValueError:
         return {"error": f"{server} server returned a non-JSON result"}
+    return parsed if isinstance(parsed, dict) else {"result": parsed}
+
+
+def server_configured(server: str) -> bool:
+    """Whether this deployment runs the named stack MCP server."""
+    return bool(server_url(server))
+
+
+async def gateway_http(
+    method: str, url: str, headers_json: str = "", body: str = "", note: str = ""
+) -> dict[str, Any]:
+    """One request through the evidence gateway, as a dict.
+
+    Older in-process tools call this instead of opening their own connection,
+    so every request to a target passes the same scope check, approval hold,
+    rate limit and recording, from a container that is not the agent runtime.
+    """
+    text = await _engagement_call(
+        "capture",
+        "http_send",
+        method=method,
+        url=url,
+        headers_json=headers_json,
+        body=body,
+        note=note,
+    )
+    try:
+        parsed = json.loads(text)
+    except ValueError:
+        return {"error": "the evidence gateway returned a non-JSON result"}
+    return parsed if isinstance(parsed, dict) else {"error": "unexpected gateway result"}
+
+
+def gateway_failure(result: dict[str, Any]) -> str | None:
+    """Why a gateway result is not a response, or ``None`` when it is one."""
+    if result.get("error"):
+        return str(result["error"])
+    if result.get("status") == "refused":
+        return f"{result.get('code')}: {result.get('detail')}"
+    return None
+
+
+async def browser_call(tool_name: str, **arguments: Any) -> dict[str, Any]:
+    """One scoped-browser call for the current engagement, as a dict."""
+    text = await _engagement_call("browser", tool_name, **arguments)
+    try:
+        parsed = json.loads(text)
+    except ValueError:
+        return {"error": "the scoped browser returned a non-JSON result"}
     return parsed if isinstance(parsed, dict) else {"result": parsed}
 
 

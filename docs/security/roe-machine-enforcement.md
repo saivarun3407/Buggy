@@ -76,8 +76,9 @@ A `ScopeRule` has a `pattern` and a `kind` (default `"auto"`). When the
 kind is `"auto"`, `resolved_kind()` infers it from the pattern shape:
 
 - parses as an IP network → `cidr`
-- contains `*` or `?` → `domain-glob` (`*` matches one label, `?` matches
-  one character)
+- contains `*` or `?` → `domain-glob` (`*` matches one label, `**` matches
+  one or more whole labels, `?` matches one character; no wildcard matches
+  the apex)
 - a bare IP literal → `ip`
 - otherwise → `host` (literal, case-insensitive match)
 

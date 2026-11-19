@@ -153,9 +153,10 @@ func TestEnvBackfillStepReflectsIntoEnv(t *testing.T) {
 	if _, err := applyEnvBackfill(c); err != nil {
 		t.Fatalf("applyEnvBackfill: %v", err)
 	}
-	// The endpoint (a template default missing from the seed) should now be
-	// both on disk and reflected into the in-memory env map.
-	if c.Env["BUGGY_TELEMETRY_ENDPOINT"] == "" {
+	// A template key missing from the seed should now be both on disk and
+	// reflected into the in-memory env map. The endpoint ships empty in this
+	// build (telemetry is off by default), so check for presence.
+	if _, ok := c.Env["BUGGY_TELEMETRY_ENDPOINT"]; !ok {
 		t.Error("backfilled key not reflected into in-memory env")
 	}
 }
@@ -188,7 +189,7 @@ func TestRunAll_ExistingUserUpgrade(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got["BUGGY_TELEMETRY_ENDPOINT"] == "" {
+	if _, ok := got["BUGGY_TELEMETRY_ENDPOINT"]; !ok {
 		t.Error("endpoint not backfilled for existing user")
 	}
 	if got["BUGGY_TELEMETRY"] != "research" {

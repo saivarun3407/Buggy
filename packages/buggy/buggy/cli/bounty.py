@@ -11,8 +11,14 @@ agent, whose human-in-the-loop intake flow is:
 
     authenticate (HackerOne / Bugcrowd) → list programs you can access →
     you pick one → fetch its structured scope + exclusions + reporting
-    policy → you confirm in/out-of-scope → ingest_bounty_scope writes the
-    hard-enforced RoE → hand off to recon / the specialist slate.
+    policy → you confirm in/out-of-scope → the Scout writes a draft →
+    you run ``buggy-cli scope import`` (the only thing that creates the
+    enforced scope, from the program's official data) → the pipeline maps
+    the scope → hand off to the specialist slate.
+
+If you already know the program, skip the interview:
+
+    buggy-cli scope import --platform hackerone --handle <program>
 
 Because program selection is interactive, the smoothest experience is the
 launcher's ``buggy bounty`` (it brings the stack up and drops you into
@@ -62,8 +68,11 @@ def scout_kickoff(platform: str = "both") -> str:
         "environment), list the programs I can access, and let me pick one. "
         "Then fetch that program's structured scope, exclusions, and reporting "
         "policy, confirm in-scope / out-of-scope with me, and call "
-        "ingest_bounty_scope to write the enforced RoE before any recon. Do "
-        "not test anything until the scope is ingested."
+        "ingest_bounty_scope to write a draft I can read. You cannot enforce a "
+        "scope yourself: tell me to run `buggy-cli scope import --platform "
+        "<platform> --handle <program>`, which builds the enforced scope from "
+        "the program's official data. Do not test anything until scope_show "
+        "reports an enforced scope for this engagement."
     )
 
 

@@ -124,6 +124,11 @@ def compile_egress_policy(rules: MachineEnforcement) -> EgressPolicy:
     )
 
     default_drop = enforce and bool(rules.in_scope)
+    if rules.sandbox_blocked:
+        # The sandbox gets no route to any target: targets are reached only by
+        # the evidence gateway, the scoped browser and the pipeline.
+        allowed_cidrs, allowed_hosts = (), ()
+        default_drop = True
 
     # Always allow the OSINT search providers so target-exempt web_search reaches
     # them under an enforcing in-scope allowlist. (No effect when default_drop is

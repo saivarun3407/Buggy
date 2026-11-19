@@ -187,6 +187,24 @@ NETWORK_TARGET_EXTRACTORS: dict[str, Callable[[dict[str, Any]], list[str]]] = {
 }
 
 
+#: Gated tools with a target argument that execute inside the sandbox. The
+#: others (``http_send``, ``probe_run``, ``browser_open`` and the tools routed
+#: to them) reach the target through the evidence gateway or scoped browser.
+SANDBOX_NETWORK_TOOLS: frozenset[str] = frozenset({"web_fetch"})
+
+
+def _sandbox_blocked_decision(targets: list[str]) -> Decision:
+    """Early, explanatory refusal; the egress guard drops the packets regardless."""
+    return Decision.refuse(
+        code="SANDBOX_NETWORK_BLOCKED",
+        detail=(
+            f"this engagement gives the sandbox no network path to targets ({', '.join(targets[:3])}). "
+            "Send requests with http_send, run checks with probe_run, drive pages with browser_*, "
+            "and read recon with recon_query. State-changing requests are held for the operator there."
+        ),
+    )
+
+
 def _roe_required() -> bool:
     """Whether a missing RoE policy refuses gated calls. Default ON.
 
@@ -830,6 +848,8 @@ class RoEGuardrailMiddleware(AgentMiddleware):
                 target_decision = evaluate_target(host, rules)
                 if not target_decision.allow:
                     return target_decision, rules, tool_name
+            if hosts and rules.sandbox_blocked and tool_name in SANDBOX_NETWORK_TOOLS:
+                return _sandbox_blocked_decision(sorted(set(hosts))), rules, tool_name
             return Decision.allow_default(), rules, tool_name
         command = _command_from_tool_call(request)
         cmd_decision = evaluate_command(command, rules)
@@ -840,6 +860,8 @@ class RoEGuardrailMiddleware(AgentMiddleware):
             target_decision = evaluate_target(target, rules)
             if not target_decision.allow:
                 return target_decision, rules, tool_name
+        if targets and rules.sandbox_blocked:
+            return _sandbox_blocked_decision(sorted(targets)), rules, tool_name
         return Decision.allow_default(), rules, tool_name
 
     def _record(

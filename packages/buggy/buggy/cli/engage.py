@@ -287,8 +287,15 @@ def _write_plan_bundle(
     forbidden_commands: list[str],
     instruction: str,
     control_root: Path | None = None,
+    enforcement_extra: dict[str, Any] | None = None,
+    document_extra: dict[str, Any] | None = None,
+    generated_by: str = "buggy-cli engage",
 ) -> Path:
     """Write ``plan/roe.json`` + ``plan/conops.md`` under <root>/<slug>/.
+
+    ``enforcement_extra`` adds keys to ``machine_enforcement`` (rate limit,
+    sandbox network policy); ``document_extra`` adds top-level blocks
+    (``pipeline``, ``approvals``, ``network``).
 
     When ``control_root`` is given the same RoE document is also written to
     ``<control_root>/<slug>/roe.json``. That copy is the one the guardrail
@@ -310,14 +317,16 @@ def _write_plan_bundle(
     roe_doc = {
         "version": 1,
         "engagement_name": slug,
-        "generated_by": "buggy-cli engage",
+        "generated_by": generated_by,
         "created": created,
         "machine_enforcement": {
             "mode": mode,
             "in_scope": in_scope,
             "out_of_scope": out_of_scope,
             "forbidden_command_patterns": forbidden_commands,
+            **(enforcement_extra or {}),
         },
+        **(document_extra or {}),
     }
     roe_path = plan_dir / "roe.json"
     roe_path.write_text(json.dumps(roe_doc, indent=2) + "\n", encoding="utf-8")

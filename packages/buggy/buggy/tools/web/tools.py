@@ -191,6 +191,28 @@ async def http_request(
     except json.JSONDecodeError:
         return _json({"error": "Invalid headers JSON"})
 
+    # With the stack's evidence gateway deployed, this process never opens a
+    # connection to a target itself: the gateway checks scope, holds
+    # state-changing requests for approval, rate limits and records.
+    from buggy.tools.stack_mcp import gateway_failure, gateway_http, server_configured
+
+    if server_configured("capture"):
+        result = await gateway_http(method.upper(), url, headers_json or "", body, note=tag)
+        failure = gateway_failure(result)
+        if failure is not None:
+            return _json({"error": failure, **result})
+        return _json(
+            {
+                "status": result.get("status"),
+                "headers": result.get("response_headers") or {},
+                "body": result.get("response_body") or "",
+                "elapsed_ms": result.get("elapsed_ms"),
+                "request_id": result.get("capture_id"),
+                "capture_id": result.get("capture_id"),
+                "redirects_followed": False,
+            }
+        )
+
     # Async tool: await the session directly. The previous implementation
     # drove the coroutine via ``asyncio.get_event_loop().run_until_complete``,
     # which raises ``RuntimeError: ... cannot be called from a running event

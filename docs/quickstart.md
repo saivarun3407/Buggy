@@ -55,8 +55,38 @@ buggy hunt example.com --plan-only
 
 Scope defaults to **exactly the targets you name** — subdomains and extra
 hosts are only added when you ask with `--include-subdomains` / `--scope`.
-The scope is written to an enforced Rules-of-Engagement file
-(`plan/roe.json`) before any packet leaves the wire.
+You are asked once to confirm you are authorized (`--yes` skips the prompt).
+
+### What happens after you press enter
+
+| Stage | What | LLM |
+|---|---|---|
+| 1. Scope | An enforced scope is written for exactly those hosts: enforce mode, 10 requests/second, approval before any state-changing request, and no network path from the agent's shell to the target | no |
+| 2. Recon | The pipeline maps hosts, services, URLs, API specifications and known issues with pinned tools. Progress is shown per stage | no |
+| 3. Report | `~/.buggy/control/<engagement>/recon-report.md`: known issues by severity with fixes, live services, APIs, and what to test next | no |
+| 4. Agents | The agents read the recon data, choose what to test, run the deterministic probes and chain what they find. Skipped when no model is configured or with `--no-agent` | yes |
+
+Stages 1–3 need no model at all:
+
+```bash
+buggy hunt https://example.com --no-agent
+```
+
+State-changing requests wait for you:
+
+```bash
+docker compose --profile operator run --rm operator buggy-cli approvals list <engagement>
+```
+
+```bash
+docker compose --profile operator run --rm operator buggy-cli approvals allow <engagement> <request-id>
+```
+
+Useful switches: `--rps N` (max 50), `--port-scan`, `--crawl-exclude REGEX`,
+`--internal` (target on a private network), `--allow-sandbox-network` (lets the
+agent's shell reach the target; requests sent that way are not held for
+approval), `--lab` (a training target you own: no approval holds). A scope
+pattern `*.example.com` covers one label; `**.example.com` covers any depth.
 
 ## 3b. Bug bounty (HackerOne / Bugcrowd)
 

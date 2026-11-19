@@ -454,8 +454,9 @@ func TestBackfillEnvFromEmbed(t *testing.T) {
 	if err != nil {
 		t.Fatalf("LoadEnv() error: %v", err)
 	}
-	// New key backfilled from the template default.
-	if env["BUGGY_TELEMETRY_ENDPOINT"] == "" {
+	// New key backfilled from the template. This build ships telemetry off
+	// with no endpoint, so the key must be present, not non-empty.
+	if _, ok := env["BUGGY_TELEMETRY_ENDPOINT"]; !ok {
 		t.Error("BUGGY_TELEMETRY_ENDPOINT not backfilled")
 	}
 	// Existing values preserved exactly (never overwritten).

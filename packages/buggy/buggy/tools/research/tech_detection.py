@@ -333,6 +333,35 @@ async def detect_tech_stack(url: str) -> str:
             }
         )
 
+    from buggy.tools.stack_mcp import gateway_failure, gateway_http, server_configured
+
+    if server_configured("capture"):
+        # One GET through the evidence gateway (scope-checked, recorded,
+        # redirects not followed) instead of a connection from this process.
+        result = await gateway_http("GET", url, note="detect_tech_stack")
+        failure = gateway_failure(result)
+        if failure is not None:
+            return _json({"url": url, "error": failure})
+        headers = {
+            str(k).lower(): str(v) for k, v in (result.get("response_headers") or {}).items()
+        }
+        header_blob = "\n".join(f"{k}: {v}" for k, v in headers.items())
+        body = str(result.get("response_body") or "")[:MAX_BODY_SCAN_CHARS]
+        detections = _detect(header_blob, _HEADER_SIGNATURES, DETECTED_BY_HEADER) + _detect(
+            body, _BODY_SIGNATURES, DETECTED_BY_BODY
+        )
+        return _json(
+            {
+                "url": url,
+                "scope": "allowed",
+                "status_code": result.get("status"),
+                "server": headers.get("server"),
+                "headers": headers,
+                "technologies": _merge(detections),
+                "capture_id": result.get("capture_id"),
+            }
+        )
+
     try:
         async with httpx.AsyncClient(
             follow_redirects=True,

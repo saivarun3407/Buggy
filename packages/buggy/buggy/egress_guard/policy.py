@@ -53,8 +53,15 @@ def _clean_hosts(raw: Any) -> tuple[str, ...]:
 
 
 def glob_match(pattern: str, name: str) -> bool:
-    """Label-bounded DNS glob (same semantics as ``buggy_core.types.roe``)."""
-    regex = re.escape(pattern).replace(r"\*", "[^.]+").replace(r"\?", "[^.]")
+    """DNS glob with the same semantics as ``buggy_core.types.roe.glob_to_regex``.
+
+    ``*`` and ``?`` stay inside one label; ``**`` is one or more whole labels.
+    Kept as a copy because the guard image ships no ``buggy_core``; a test
+    pins the two implementations to the same answers.
+    """
+    escaped = re.escape(pattern)
+    escaped = escaped.replace(r"\*\*", r"(?:[^.]+\.)*[^.]+")
+    regex = escaped.replace(r"\*", "[^.]+").replace(r"\?", "[^.]")
     return re.fullmatch(regex, name, re.IGNORECASE) is not None
 
 

@@ -90,7 +90,16 @@ later change to Buggy's summarisation middleware, not part of this work.
 
 ## Gaps found in Buggy's own memory layer while comparing
 
-Read from source, not yet fixed unless a later phase says so:
+All three were fixed afterwards and checked on a running stack:
+
+- Migrations: applied at first use (`ensure_schema`). On a fresh Neo4j the
+  constraint count went from 0 to 53.
+- `created_by`: the KG middleware passes its agent role to the tools.
+- Thread state: the runtime already flushed to `/app/.langgraph_api`; it was
+  lost only when the container was recreated. A named volume is mounted
+  there now, and a thread survived a forced recreation.
+
+As originally found:
 
 - KG migrations are never applied at runtime; `apply_migrations()` is only
   called from tests (`kg_internal/migration_runner.py:74`), so the uniqueness

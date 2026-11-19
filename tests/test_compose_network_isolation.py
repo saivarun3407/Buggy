@@ -141,6 +141,7 @@ def _rendered_compose() -> dict:
         # The compose file refuses to render without these (no defaults).
         "SANDBOX_TOKEN": os.environ.get("SANDBOX_TOKEN") or "test-sandbox-token",
         "EGRESS_GUARD_TOKEN": os.environ.get("EGRESS_GUARD_TOKEN") or "test-guard-token",
+        "BUGGY_STACK_MCP_TOKEN": os.environ.get("BUGGY_STACK_MCP_TOKEN") or "test-stack-mcp-token",
     }
     result = subprocess.run(
         ["docker", "compose", "-f", str(COMPOSE), "config"],
@@ -345,6 +346,8 @@ def _rendered_with_overlay(*overlays: Path) -> dict:
             "COMPOSE_PROFILES": "c2-sliver,reversing,cli",
             "SANDBOX_TOKEN": os.environ.get("SANDBOX_TOKEN") or "test-sandbox-token",
             "EGRESS_GUARD_TOKEN": os.environ.get("EGRESS_GUARD_TOKEN") or "test-guard-token",
+            "BUGGY_STACK_MCP_TOKEN": os.environ.get("BUGGY_STACK_MCP_TOKEN")
+            or "test-stack-mcp-token",
         },
         cwd=REPO_ROOT,
         capture_output=True,
@@ -488,7 +491,11 @@ def test_compose_refuses_to_render_without_tokens():
     """There is no default for the sandbox or guard tokens."""
     if shutil.which("docker") is None:
         pytest.skip("docker CLI not available")
-    env = {k: v for k, v in os.environ.items() if k not in ("SANDBOX_TOKEN", "EGRESS_GUARD_TOKEN")}
+    env = {
+        k: v
+        for k, v in os.environ.items()
+        if k not in ("SANDBOX_TOKEN", "EGRESS_GUARD_TOKEN", "BUGGY_STACK_MCP_TOKEN")
+    }
     dotenv = (REPO_ROOT / ".env").read_text()
     if "SANDBOX_TOKEN=" in dotenv.replace("SANDBOX_TOKEN=\n", ""):
         pytest.skip("local .env already defines the tokens")
@@ -510,6 +517,24 @@ def test_sandbox_network_is_internal():
         "sandbox-net must be internal: Docker then drops everything addressed outside it, "
         "so the egress guard is the only way out"
     )
+
+
+def test_fixed_sandbox_addresses_cannot_be_handed_to_another_service():
+    """The guard and sandbox have fixed addresses; dynamic ones come from elsewhere."""
+    import ipaddress
+
+    rendered = _rendered_compose()
+    (config,) = rendered["networks"]["sandbox-net"]["ipam"]["config"]
+    subnet = ipaddress.ip_network(config["subnet"])
+    dynamic = ipaddress.ip_network(config["ip_range"])
+    assert dynamic.subnet_of(subnet) and dynamic != subnet
+    fixed = {}
+    for name in ("egress-guard", "sandbox"):
+        address = rendered["services"][name]["networks"]["sandbox-net"]["ipv4_address"]
+        fixed[name] = ipaddress.ip_address(address)
+        assert fixed[name] in subnet, f"{name} address is outside the sandbox subnet"
+        assert fixed[name] not in dynamic, f"{name} address can be allocated to another service"
+    assert fixed["egress-guard"] != fixed["sandbox"]
 
 
 def test_only_the_guard_forwards_between_networks():
@@ -650,6 +675,19 @@ def test_captured_evidence_is_written_by_the_gateway_only():
     assert _mounts(services["capture-mcp"])["/data/capture"].get("read_only") is not True
     # The ledger the gateway and browser append to is never in the sandbox.
     assert "/audit" not in _mounts(services["sandbox"])
+
+
+def test_stack_mcp_servers_require_a_token_the_sandbox_never_holds():
+    services = _rendered_compose()["services"]
+    token = _environment(services["langgraph"])["BUGGY_STACK_MCP_TOKEN"]
+    assert token
+    for name in ("pipeline-mcp", *EVIDENCE_SERVICES):
+        env = _environment(services[name])
+        assert env["BUGGY_STACK_MCP_TOKEN"] == token, f"{name} does not share the MCP token"
+        assert "BUGGY_STACK_MCP_ALLOW_UNAUTHENTICATED" not in env
+    assert "BUGGY_STACK_MCP_TOKEN" not in _environment(services["sandbox"])
+    # The scanners do not serve MCP and have no use for the token.
+    assert "BUGGY_STACK_MCP_TOKEN" not in _environment(services["pipeline"])
 
 
 def test_langgraph_is_pointed_at_every_stack_mcp_server():

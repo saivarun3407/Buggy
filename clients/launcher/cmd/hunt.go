@@ -1,6 +1,7 @@
 package cmd
 
 import (
+	"strconv"
 	"strings"
 
 	"github.com/saivarun3407/buggy/clients/launcher/internal/compose"
@@ -17,15 +18,24 @@ var (
 	huntMode           string
 	huntPlanOnly       bool
 	huntNonInteractive bool
+	huntYes            bool
+	huntNoAgent        bool
+	huntLab            bool
+	huntInternal       bool
+	huntAllowSandbox   bool
+	huntPortScan       bool
+	huntRPS            int
 )
 
 var huntCmd = &cobra.Command{
 	Use:   "hunt TARGET [TARGET...]",
 	Short: "Start a hunt against a target in one command",
-	Long: "Bring the Buggy stack up (running the setup wizard first if " +
-		"needed) and run an authorized hunt against one or more targets — no " +
-		"interactive interview. Scope defaults to exactly the targets you name; " +
-		"widen it explicitly with --scope or --include-subdomains.\n\n" +
+	Long: "Give it a URL you are authorized to test. Buggy brings the stack up " +
+		"(running the setup wizard first if needed), enforces a scope of exactly " +
+		"that host, maps it with the deterministic recon pipeline, writes a recon " +
+		"report, then lets the agents pick what to test. State-changing requests " +
+		"wait for your approval. Widen the scope explicitly with --scope or " +
+		"--include-subdomains.\n\n" +
 		"  buggy hunt example.com\n" +
 		"  buggy hunt api.example.com app.example.com --include-subdomains\n" +
 		"  buggy hunt https://example.com --scope '*.example.com' --instruction 'focus auth'",
@@ -36,12 +46,19 @@ var huntCmd = &cobra.Command{
 func init() {
 	huntCmd.Flags().StringArrayVar(&huntScope, "scope", nil, "Extra in-scope pattern: host, *.domain, IP, CIDR (repeatable)")
 	huntCmd.Flags().StringArrayVar(&huntExclude, "exclude", nil, "Out-of-scope pattern (repeatable)")
-	huntCmd.Flags().BoolVar(&huntIncludeSubs, "include-subdomains", false, "Explicitly add <host> and *.<host> to scope per target")
+	huntCmd.Flags().BoolVar(&huntIncludeSubs, "include-subdomains", false, "Also put every subdomain of each target host in scope")
 	huntCmd.Flags().StringVar(&huntScopeFile, "scope-file", "", "Scope file (JSON or text) to merge into scope")
 	huntCmd.Flags().StringVar(&huntInstruction, "instruction", "", "Free-form focus/auth notes for the orchestrator")
 	huntCmd.Flags().StringVar(&huntMode, "mode", "enforce", "RoE enforcement mode: audit|warn|enforce")
 	huntCmd.Flags().BoolVar(&huntPlanOnly, "plan-only", false, "Write the plan bundle and exit without dispatching")
 	huntCmd.Flags().BoolVarP(&huntNonInteractive, "non-interactive", "n", false, "Emit JSONL events instead of progress lines")
+	huntCmd.Flags().BoolVarP(&huntYes, "yes", "y", false, "I am authorized to test these targets; do not prompt")
+	huntCmd.Flags().BoolVar(&huntNoAgent, "no-agent", false, "Recon and report only; no LLM")
+	huntCmd.Flags().BoolVar(&huntLab, "lab", false, "Training target you own: no approval holds, private addresses allowed")
+	huntCmd.Flags().BoolVar(&huntInternal, "internal", false, "Target is on a private network")
+	huntCmd.Flags().BoolVar(&huntAllowSandbox, "allow-sandbox-network", false, "Let the agent shell reach in-scope targets directly (not held for approval)")
+	huntCmd.Flags().BoolVar(&huntPortScan, "port-scan", false, "Scan the top 100 ports")
+	huntCmd.Flags().IntVar(&huntRPS, "rps", 0, "Requests per second (default 5)")
 	rootCmd.AddCommand(huntCmd)
 }
 
@@ -84,6 +101,21 @@ func runHunt(cmd *cobra.Command, args []string) error {
 	if huntNonInteractive {
 		cliArgs = append(cliArgs, "--non-interactive")
 	}
+	for flag, on := range map[string]bool{
+		"--yes":                   huntYes,
+		"--no-agent":              huntNoAgent,
+		"--lab":                   huntLab,
+		"--internal":              huntInternal,
+		"--allow-sandbox-network": huntAllowSandbox,
+		"--port-scan":             huntPortScan,
+	} {
+		if on {
+			cliArgs = append(cliArgs, flag)
+		}
+	}
+	if huntRPS > 0 {
+		cliArgs = append(cliArgs, "--rps", strconv.Itoa(huntRPS))
+	}
 
 	ui.Info("Starting hunt against: " + strings.Join(args, ", "))
 
@@ -96,7 +128,8 @@ func runHunt(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
-	ui.DimText("Hunt finished. Review findings under ~/.buggy/workspace/<engagement>/ — " +
-		"run 'buggy' to open the UI, or 'buggy stop' to shut the stack down.")
+	ui.DimText("Hunt finished. Recon report: ~/.buggy/control/<engagement>/recon-report.md. " +
+		"Findings: ~/.buggy/workspace/<engagement>/findings/. " +
+		"Run 'buggy' to open the UI, or 'buggy stop' to shut the stack down.")
 	return nil
 }

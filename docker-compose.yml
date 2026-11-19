@@ -491,6 +491,7 @@ services:
       - BUGGY_MCP_CAPTURE_URL=http://capture-mcp:9461/mcp
       - BUGGY_MCP_SCOPE_URL=http://scope-mcp:9462/mcp
       - BUGGY_MCP_BROWSER_URL=http://browser-mcp:9463/mcp
+      - BUGGY_STACK_MCP_TOKEN=${BUGGY_STACK_MCP_TOKEN:?BUGGY_STACK_MCP_TOKEN must be set - run scripts/ensure-stack-secrets.sh or `buggy onboard`}
       - EGRESS_GUARD_TOKEN=${EGRESS_GUARD_TOKEN:?EGRESS_GUARD_TOKEN must be set - run scripts/ensure-stack-secrets.sh or `buggy onboard`}
       # Gated tools are refused unless the operator-controlled roe.json
       # exists. Set 0 only for local labs that have no policy.
@@ -543,6 +544,10 @@ services:
       - ${BUGGY_ENGAGEMENT_WORKSPACE:-${BUGGY_HOME:-~/.buggy}/workspace}:/workspace:ro
       - ${BUGGY_ENGAGEMENT_CONTROL:-${BUGGY_HOME:-~/.buggy}/control}:/control:ro
       - ${BUGGY_ENGAGEMENT_AUDIT:-${BUGGY_HOME:-~/.buggy}/audit}:/audit
+      # Agent thread state (checkpoints, runs, store). The runtime flushes it
+      # here every few seconds and reloads it at start, so conversations and
+      # in-flight engagements survive an image update or `compose up`.
+      - langgraph_state:/app/.langgraph_api
     # Dual-homed: must not route between the management and sandbox networks.
     sysctls:
       - net.ipv4.ip_forward=0
@@ -651,6 +656,7 @@ services:
       - BUGGY_PIPELINE_QUEUE=/data/queue
       - BUGGY_CONTROL_ROOT=/control
       - BUGGY_PIPELINE_MCP_PORT=9460
+      - BUGGY_STACK_MCP_TOKEN=${BUGGY_STACK_MCP_TOKEN:?BUGGY_STACK_MCP_TOKEN must be set - run scripts/ensure-stack-secrets.sh or `buggy onboard`}
     volumes:
       - pipeline_data:/data/pipeline:ro
       - pipeline_queue:/data/queue
@@ -698,6 +704,7 @@ services:
       - BUGGY_AUDIT_ROOT=/audit
       - BUGGY_CAPTURE_DATA=/data/capture
       - BUGGY_CAPTURE_MCP_PORT=9461
+      - BUGGY_STACK_MCP_TOKEN=${BUGGY_STACK_MCP_TOKEN:?BUGGY_STACK_MCP_TOKEN must be set - run scripts/ensure-stack-secrets.sh or `buggy onboard`}
       # Out-of-band callback listener for the SSRF probe. Empty = the probe
       # reports "cannot tell" instead of guessing. The base URL must be an
       # address the *target* can reach (a public hostname you control that
@@ -740,6 +747,7 @@ services:
     environment:
       - BUGGY_CONTROL_ROOT=/control
       - BUGGY_SCOPE_MCP_PORT=9462
+      - BUGGY_STACK_MCP_TOKEN=${BUGGY_STACK_MCP_TOKEN:?BUGGY_STACK_MCP_TOKEN must be set - run scripts/ensure-stack-secrets.sh or `buggy onboard`}
     volumes:
       - ${BUGGY_HOME:-~/.buggy}/control:/control:ro
     healthcheck:
@@ -780,6 +788,7 @@ services:
       - BUGGY_CONTROL_ROOT=/control
       - BUGGY_AUDIT_ROOT=/audit
       - BUGGY_BROWSER_MCP_PORT=9463
+      - BUGGY_STACK_MCP_TOKEN=${BUGGY_STACK_MCP_TOKEN:?BUGGY_STACK_MCP_TOKEN must be set - run scripts/ensure-stack-secrets.sh or `buggy onboard`}
       - BUGGY_AUDIT_HMAC_KEY=${BUGGY_AUDIT_HMAC_KEY:-}
     volumes:
       - ${BUGGY_HOME:-~/.buggy}/control:/control:ro
@@ -813,12 +822,19 @@ services:
     container_name: buggy${BUGGY_STACK_NAME:+-${BUGGY_STACK_NAME}}-operator
     entrypoint: []
     command: ["buggy-cli", "--help"]
+    # The image's healthcheck probes the langgraph server, which does not run
+    # in this one-off container.
+    healthcheck:
+      disable: true
     env_file: .env
     environment:
       - BUGGY_API_URL=http://langgraph:2024
       - BUGGY_ENGAGEMENT_WORKSPACE=/workspace
       - BUGGY_ENGAGEMENT_CONTROL=/control
       - BUGGY_ENGAGEMENT_AUDIT=/audit
+      # `buggy-cli hunt` watches the recon pipeline and builds its report
+      # through the read-only recon server (token comes from .env).
+      - BUGGY_MCP_RECON_URL=http://pipeline-mcp:9460/mcp
     volumes:
       - ${BUGGY_HOME:-~/.buggy}/workspace:/workspace
       - ${BUGGY_HOME:-~/.buggy}/control:/control
@@ -1198,6 +1214,8 @@ volumes:
   pipeline_queue:
   # Captured request/response pairs (evidence), written by capture-mcp only.
   capture_data:
+  # Agent thread state, written by langgraph only.
+  langgraph_state:
   postgres_data:
   sliver_data:
   neo4j_data:
@@ -1216,11 +1234,15 @@ networks:
   # nothing on it can reach the host or the internet directly. The sandbox
   # reaches targets only through its tunnel to the egress-guard service. The
   # subnet is fixed so the guard and sandbox addresses can be configured on
-  # both ends; override BUGGY_SANDBOX_SUBNET, BUGGY_EGRESS_GUARD_IP and
-  # BUGGY_SANDBOX_IP together when running several stacks on one host.
+  # both ends; override BUGGY_SANDBOX_SUBNET, BUGGY_SANDBOX_IP_RANGE,
+  # BUGGY_EGRESS_GUARD_IP and BUGGY_SANDBOX_IP together when running several
+  # stacks on one host. ip_range is where Docker picks addresses for the
+  # services that have none configured; the guard's and sandbox's fixed
+  # addresses sit outside it, so no other service can be handed them first.
   sandbox-net:
     driver: bridge
     internal: true
     ipam:
       config:
         - subnet: ${BUGGY_SANDBOX_SUBNET:-172.30.250.0/24}
+          ip_range: ${BUGGY_SANDBOX_IP_RANGE:-172.30.250.128/25}

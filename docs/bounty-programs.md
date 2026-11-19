@@ -40,8 +40,8 @@ container can write:
 | `control/<engagement>/program.json` | source, source hash, rate limit, banned techniques, excluded classes |
 
 Confirming the import authorises the recon pipeline: the worker starts a run
-for a new or changed scope. Wildcards cover exactly one DNS label
-(`*.example.com` matches `a.example.com`, not `a.b.example.com`).
+for a new or changed scope. A program's `*.example.com` is imported as
+`**.example.com`: every subdomain at any depth, not the apex.
 
 ## 2. What is enforced, and where
 
@@ -55,6 +55,7 @@ for a new or changed scope. Wildcards cover exactly one DNS label
 | No exfiltration beyond PoC | Stated to the agent as a program rule; every evidence request is recorded in full for review; reports need operator approval |
 | Automated scanning forbidden by the program | Pipeline runs passive sources only; scanner commands are refused |
 | Port scan | Off unless `--port-scan` is passed, and never when scanning is forbidden |
+| Approval cannot be bypassed | The agent's shell has no network path to the target (`sandbox_egress: blocked`); the langgraph process routes its HTTP and browser tools through the gateway |
 
 ## 3. Human approval
 
@@ -106,7 +107,5 @@ whichever tool wrote it.
 - Policy text is parsed by keywords for "no automated scanning" and
   requests-per-second. Read the program page yourself and lower `--rps` or
   edit the imported scope if the policy says something the parser missed.
-- The older in-process tools (`http_request`, `browser_action`, `proxy_*`)
-  are scope-checked by the RoE parser but do not pass through the evidence
-  gateway or its approval hold. Evidence must come from `http_send`,
-  `probe_run` or the scoped browser.
+- An approval covers one exact request (method, URL, body) for at most three
+  sends. There is no bulk approval.

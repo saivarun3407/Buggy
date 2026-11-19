@@ -39,7 +39,7 @@ DEFAULT_RPS = 5
 MAX_RPS = 20
 
 _LABEL = r"[a-z0-9_](?:[a-z0-9_-]{0,61}[a-z0-9_])?"
-_HOST_RE = re.compile(rf"^(?:\*\.)?(?:{_LABEL}\.)+[a-z]{{2,63}}$")
+_HOST_RE = re.compile(rf"^(?:\*{{1,2}}\.)?(?:{_LABEL}\.)+[a-z]{{2,63}}$")
 #: Registrable suffixes that must never be wildcarded as a whole.
 _PUBLIC_SUFFIX_LIKE = re.compile(r"^(?:[a-z]{2,63}|(?:co|com|net|org|gov|edu|ac)\.[a-z]{2})$")
 #: Smallest network a real program scope may contain (2^(32-16) addresses).
@@ -202,7 +202,12 @@ def from_hackerone_csv(text: str, handle: str) -> OfficialScope:
 
 
 def classify_asset(asset: str) -> tuple[str | None, str]:
-    """Return ``(scope_entry, "")`` for an enforceable asset, else ``(None, reason)``."""
+    """Return ``(scope_entry, "")`` for an enforceable asset, else ``(None, reason)``.
+
+    A program's ``*.example.com`` means every subdomain at any depth, so it is
+    written as the any-depth form ``**.example.com``. The apex is in scope
+    only when the program lists it separately.
+    """
     value = (asset or "").strip().lower().rstrip(".")
     if not value:
         return None, "empty"
@@ -216,15 +221,15 @@ def classify_asset(asset: str) -> tuple[str | None, str]:
         if any(network.version == net.version and network.overlaps(net) for net in _INTERNAL_NETS):
             return None, "private, loopback or link-local address"
         return str(network) if "/" in value else str(network.network_address), ""
-    if "*" in value and not value.startswith("*."):
-        return None, "wildcard is not a leading '*.' label"
-    if value.count("*") > 1:
-        return None, "more than one wildcard"
-    if value.startswith("*.") and _PUBLIC_SUFFIX_LIKE.match(value[2:]):
+    prefix = "**." if value.startswith("**.") else "*." if value.startswith("*.") else ""
+    base = value[len(prefix) :]
+    if "*" in base:
+        return None, "wildcard is not a single leading label"
+    if prefix and _PUBLIC_SUFFIX_LIKE.match(base):
         return None, "wildcard over a public suffix"
     if not _HOST_RE.match(value):
         return None, "not a hostname, wildcard or network"
-    return value, ""
+    return (f"**.{base}" if prefix else value), ""
 
 
 def build_documents(
@@ -298,6 +303,10 @@ def build_documents(
             "forbidden_command_patterns": forbidden,
             "min_inter_request_delay_ms": delay_ms,
             "max_concurrent_connections": min(5, effective_rps),
+            # State-changing requests need approval, and only the evidence
+            # gateway can hold one. The agent's shell gets no route to the
+            # target at all, so nothing can be sent around that hold.
+            "sandbox_egress": "blocked",
         },
         "pipeline": {
             "rate_limit_rps": effective_rps,
@@ -334,6 +343,8 @@ def build_documents(
         "policy_notes": scope.policy_notes,
         "requirements": {
             "mode": "enforce",
+            "sandbox_network": "blocked: targets are reached only through the evidence "
+            "gateway, the scoped browser and the pipeline",
             "state_changing_requests": "operator approval per request",
             "report_submission": "operator approval per report",
             "finding": "captured in-scope request that verifies, plus a remediation",

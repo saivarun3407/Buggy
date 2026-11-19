@@ -205,12 +205,15 @@ class Pipeline:
             "issues": self._stage_issues,
         }
         try:
+            done: list[str] = []
             for stage in STAGES:
                 stats = self.stats.setdefault(stage, StageStats())
                 if stage in self.scope.limits.disabled_stages:
                     stats.skipped = "disabled by program rules"
                     continue
+                self.store.set_run_progress(self.run_id, stage=stage, done=list(done))
                 handlers[stage](stats)
+                done.append(stage)
         except Exception as exc:  # noqa: BLE001 - the run is closed as failed, then re-raised
             status, error = "failed", f"{type(exc).__name__}: {exc}"
             log.exception("pipeline run %s failed", self.run_id)
@@ -539,6 +542,12 @@ class Pipeline:
 
     # ── stage 3: live hosts and ports ───────────────────────────────
 
+    def _seed_urls(self) -> list[str]:
+        """Operator-named URLs that pass the scope filter."""
+        return self.scope.admit(
+            list(self.scope.limits.seed_urls), stage="live", tool="seed", direction="input"
+        )
+
     def _resolving_hosts(self) -> dict[str, str]:
         """Hosts with address records, mapped to a hash of those records."""
         grouped: dict[str, list[str]] = {}
@@ -582,6 +591,13 @@ class Pipeline:
             stats.tools.setdefault(naabu.name, {})["skipped"] = (
                 "port scan disabled by program rules"
             )
+
+        # A target the operator gave as a URL names its own port; probe it even
+        # when the port scan is off or did not cover that port.
+        for seed in self._seed_urls():
+            parts = urlsplit(seed)
+            if parts.hostname in pending and parts.port:
+                ports.setdefault(parts.hostname, []).append(parts.port)
 
         targets: list[str] = []
         for host in hosts:
@@ -638,7 +654,14 @@ class Pipeline:
         if not pending:
             return
         katana = Katana(resolvers=self._resolvers)
-        raw, ref, version = self._run_binary("urls", stats, katana, list(pending))
+        live_hosts = {host_of(url) for url in pending}
+        crawl_from = list(pending) + [
+            seed
+            for seed in self._seed_urls()
+            if host_of(seed) in live_hosts
+            and seed.rstrip("/") not in {u.rstrip("/") for u in pending}
+        ]
+        raw, ref, version = self._run_binary("urls", stats, katana, crawl_from)
         if raw:
             self._store(
                 "urls",

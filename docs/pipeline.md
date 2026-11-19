@@ -178,3 +178,21 @@ queued and again when the worker serves it.
 | `tests/unit/pipeline/test_pipeline_flow.py` | stage order; out-of-scope assets never reach a tool or the store; re-runs process only new or changed assets; program rules |
 | `tests/unit/pipeline/test_guards.py` | no LLM imports; version pins; scoped HTTP; MCP surface; worker re-checks scope |
 | `tests/test_compose_network_isolation.py` | the pipeline's network and the store's read-only mount |
+
+## Running, progress and recovery
+
+- The worker runs up to `BUGGY_PIPELINE_PARALLEL` (default 3) engagements
+  side by side; each engagement has at most one run in flight.
+- A running run records its current stage; `recon_summary` returns it as
+  `current_run`, which is what `buggy hunt` prints.
+- A run whose process died (restart, crash) is closed as `interrupted` at
+  the next start and the engagement becomes due again. Finished stages are
+  cached, so the resumed run only does what was left.
+- `pipeline.seed_urls` (written by `buggy hunt` from the URLs you name)
+  tells the live stage which non-default port to probe when the port scan
+  is off and gives the crawler a starting path. Seeds are scope-filtered
+  like every other input.
+- The recon report (`buggy/pipeline/report.py`) is built by `buggy-cli hunt`
+  from the read-only recon server and written to
+  `control/<engagement>/recon-report.md`.
+

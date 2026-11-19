@@ -72,10 +72,12 @@ Supported on macOS (Apple Silicon + Intel), Linux (amd64 + arm64), and Windows (
 ```bash
 curl -fsSL https://buggy.red/install | bash
 buggy onboard   # Interactive setup wizard (provider, API key, model profile)
-buggy hunt example.com   # One command: bring the stack up and hunt a target
+buggy hunt https://example.com   # One command: scope, recon, report, then agents
 buggy bounty             # Pick a HackerOne/Bugcrowd program and hunt it
 buggy           # Or open the full interactive terminal CLI
 ```
+
+`buggy hunt <url>` enforces a scope of exactly that host, maps it with the deterministic recon pipeline (no LLM), writes a recon report, then lets the agents choose what to test. State-changing requests wait for your approval. See [Quick Start](docs/quickstart.md).
 
 The default start brings up the core management plane (LiteLLM, PostgreSQL, Neo4j, Skillogy, LangGraph, sandbox) and launches the terminal CLI. Specialist workloads (BloodHound CE, Sliver C2, Ghidra MCP, …) and the web dashboard come up on demand — the orchestrator spawns specialists via `ops_start("ad")` etc., and you bring up the dashboard from inside the CLI with `/web` (see [Web Dashboard](docs/web-dashboard.md)).
 

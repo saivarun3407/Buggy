@@ -41,4 +41,5 @@ ensure() {
 
 ensure SANDBOX_TOKEN
 ensure EGRESS_GUARD_TOKEN
+ensure BUGGY_STACK_MCP_TOKEN
 ensure BUGGY_AUDIT_HMAC_KEY

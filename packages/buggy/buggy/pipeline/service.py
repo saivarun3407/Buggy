@@ -14,9 +14,12 @@ from __future__ import annotations
 
 import fcntl
 import json
+import logging
 import os
+import threading
 import time
 from collections.abc import Iterator
+from concurrent.futures import Future, ThreadPoolExecutor
 from contextlib import contextmanager
 from pathlib import Path
 from typing import Any
@@ -63,6 +66,9 @@ def load_scope(engagement: str, control: Path | None = None) -> tuple[ScopeFilte
     scope = ScopeFilter.from_file(path)
     document = json.loads(path.read_text(encoding="utf-8"))
     return scope, document
+
+
+log = logging.getLogger("buggy.pipeline.service")
 
 
 class PipelineBusy(RuntimeError):
@@ -243,6 +249,10 @@ def engagements_due(
             due.append((engagement, "scope:new"))
         elif last["status"] == "running":
             continue
+        elif last["status"] == "interrupted":
+            # The process running it died (restart, crash). Finished stages are
+            # cached, so running again only does what was left.
+            due.append((engagement, "resume"))
         elif last["scope_digest"] != scope.digest:
             due.append((engagement, "scope:changed"))
         elif refresh_seconds > 0 and time.time() - float(last["started_at"]) > refresh_seconds:
@@ -282,22 +292,126 @@ def worker_tick(
     return results
 
 
+def close_orphaned_runs(root: Path | None = None) -> list[str]:
+    """Mark runs left ``running`` by a dead process as ``interrupted``.
+
+    A run is orphaned when nothing holds its engagement's lock. Without this
+    a restart mid-run would leave the engagement stuck: a run that looks
+    in-progress forever is never due again.
+    """
+    base = root or data_root()
+    closed: list[str] = []
+    store = open_store(root=base)
+    try:
+        for run in store.running_runs():
+            try:
+                with engagement_lock(base, run["engagement"]):
+                    store.interrupt_run(run["id"], reason="the pipeline process stopped mid-run")
+                    closed.append(run["id"])
+            except PipelineBusy:
+                continue  # genuinely running in another process
+    finally:
+        store.close()
+    return closed
+
+
+DEFAULT_PARALLEL_ENGAGEMENTS = 3
+
+
+class EngagementRunner:
+    """Runs due engagements side by side, one run per engagement at a time.
+
+    A slow scan (a polite request rate against a large target) must not hold
+    up an engagement that was started after it. Each engagement still has at
+    most one run in flight: the per-engagement lock and this in-flight set
+    both guarantee it.
+    """
+
+    def __init__(
+        self, *, parallel: int = DEFAULT_PARALLEL_ENGAGEMENTS, **pipeline_kwargs: Any
+    ) -> None:
+        self._pool = ThreadPoolExecutor(max_workers=max(1, parallel), thread_name_prefix="recon")
+        self._in_flight: dict[str, Future[Any]] = {}
+        self._pipeline_kwargs = pipeline_kwargs
+        self._guard = threading.Lock()
+
+    def in_flight(self) -> list[str]:
+        with self._guard:
+            return sorted(name for name, future in self._in_flight.items() if not future.done())
+
+    def _run(self, engagement: str, trigger: str, root: Path, control: Path) -> None:
+        try:
+            summary = run_engagement(
+                engagement, trigger=trigger, root=root, control=control, **self._pipeline_kwargs
+            )
+            log.info(
+                "recon run %s for %s: %s", summary.get("run_id"), engagement, summary.get("status")
+            )
+        except (ScopeError, PipelineBusy) as exc:
+            log.info("recon for %s skipped: %s", engagement, exc)
+        except Exception:
+            log.exception("recon for %s failed", engagement)
+
+    def submit_due(
+        self, *, root: Path | None = None, control: Path | None = None, refresh_seconds: float = 0.0
+    ) -> list[str]:
+        """Start a run for every due engagement that has none in flight. Returns those started."""
+        base, ctl = root or data_root(), control or control_root()
+        store = open_store(root=base)
+        try:
+            due = engagements_due(store, ctl, refresh_seconds=refresh_seconds)
+        finally:
+            store.close()
+        started: list[str] = []
+        with self._guard:
+            for name in [n for n, f in self._in_flight.items() if f.done()]:
+                del self._in_flight[name]
+            for engagement, trigger in due:
+                if engagement in self._in_flight:
+                    continue
+                self._in_flight[engagement] = self._pool.submit(
+                    self._run, engagement, trigger, base, ctl
+                )
+                started.append(engagement)
+        return started
+
+    def wait(self, timeout: float | None = None) -> None:
+        """Block until every run started so far has ended (tests, ``--once``)."""
+        with self._guard:
+            futures = list(self._in_flight.values())
+        for future in futures:
+            future.result(timeout=timeout)
+
+    def shutdown(self) -> None:
+        self._pool.shutdown(wait=False, cancel_futures=True)
+
+
 def worker_loop(*, interval: float = 15.0, once: bool = False) -> None:
     """Run due engagements and serve re-run requests until interrupted."""
     refresh = float(os.environ.get("BUGGY_PIPELINE_REFRESH_SECONDS") or 0)
+    parallel = int(os.environ.get("BUGGY_PIPELINE_PARALLEL") or DEFAULT_PARALLEL_ENGAGEMENTS)
+    for run_id in close_orphaned_runs():
+        log.warning("closed orphaned pipeline run %s; it will resume", run_id)
+    runner = EngagementRunner(parallel=parallel)
     queue = open_queue()
     try:
         while True:
-            worker_tick(queue, refresh_seconds=refresh)
+            for engagement in runner.submit_due(refresh_seconds=refresh):
+                log.info("recon started for %s", engagement)
+            process_rerun_requests(queue)
             if once:
+                runner.wait()
                 return
             time.sleep(interval)
     finally:
+        runner.shutdown()
         queue.close()
 
 
 __all__ = [
+    "EngagementRunner",
     "PipelineBusy",
+    "close_orphaned_runs",
     "control_root",
     "data_root",
     "engagement_lock",

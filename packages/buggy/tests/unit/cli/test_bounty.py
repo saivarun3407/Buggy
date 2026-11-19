@@ -21,7 +21,10 @@ def test_scout_kickoff_single_platform() -> None:
 
 
 def test_scout_kickoff_forbids_testing_before_scope() -> None:
-    assert "Do not test anything until the scope is ingested" in scout_kickoff()
+    text = scout_kickoff()
+    assert "Do not test anything until scope_show reports an enforced scope" in text
+    # The agent drafts; only the operator's import enforces.
+    assert "buggy-cli scope import" in text and "cannot enforce a scope yourself" in text
 
 
 def test_print_kickoff_emits_and_exits_ok(capsys: pytest.CaptureFixture[str]) -> None:

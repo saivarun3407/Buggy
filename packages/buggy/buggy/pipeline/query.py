@@ -63,10 +63,23 @@ class ReconQueries:
         """Record counts by type, the last run and what it changed."""
         name = self._engagement(engagement)
         run = self._store.latest_run(name)
+        newest = self._store.latest_run(name, finished_only=False)
+        current = newest if newest and newest["status"] == "running" else None
         return {
             "engagement": name,
             "record_types": [t.value for t in RecordType],
             "records": self._store.count_records(name),
+            "current_run": (
+                {
+                    "run_id": current["id"],
+                    "trigger": current["trigger"],
+                    "started_at": current["started_at"],
+                    "stage": current["stats"].get("stage", ""),
+                    "stages_done": current["stats"].get("stages_done", []),
+                }
+                if current
+                else None
+            ),
             "last_run": (
                 {
                     "run_id": run["id"],

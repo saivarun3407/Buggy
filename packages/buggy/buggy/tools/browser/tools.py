@@ -331,6 +331,44 @@ async def _dispatch(action: str, kwargs: dict[str, Any]) -> dict[str, Any]:
     raise BrowserActionError(f"unreachable: {action}")
 
 
+#: ``browser_action`` verbs and the scoped-browser tool each one maps to.
+_SCOPED_ACTIONS: dict[str, str] = {
+    "goto": "browser_open",
+    "click": "browser_click",
+    "type": "browser_fill",
+    "eval_js": "browser_eval",
+    "page_source": "browser_html",
+    "screenshot": "browser_screenshot",
+    "console_logs": "browser_requests",
+    "close": "browser_close",
+}
+
+
+async def _scoped_browser_action(action: str, params: dict[str, Any]) -> dict[str, Any]:
+    """Run one ``browser_action`` verb on the stack's scoped browser."""
+    from buggy.tools.stack_mcp import browser_call
+
+    if action == "launch":
+        return {"launched": True, "note": "the scoped browser starts on the first goto"}
+    target = _SCOPED_ACTIONS.get(action)
+    if target is None:
+        return {
+            "error": f"action '{action}' is not available on the scoped browser",
+            "supported": sorted([*_SCOPED_ACTIONS, "launch"]),
+        }
+    if action == "goto":
+        return await browser_call(target, url=str(params["url"]))
+    if action == "click":
+        return await browser_call(target, selector=str(params["selector"]))
+    if action == "type":
+        return await browser_call(
+            target, selector=str(params["selector"]), text=str(params["text"])
+        )
+    if action == "eval_js":
+        return await browser_call(target, expression=str(params["expression"]))
+    return await browser_call(target)
+
+
 @tool
 async def browser_action(action: str, params_json: str = "{}") -> str:
     """Drive a persistent Playwright browser session for SPA / auth / DOM work.
@@ -360,6 +398,16 @@ async def browser_action(action: str, params_json: str = "{}") -> str:
         return _json({"error": f"params_json is not valid JSON: {exc}"})
     if not isinstance(params, dict):
         return _json({"error": "params_json must decode to a JSON object."})
+
+    from buggy.tools.stack_mcp import server_configured
+
+    if server_configured("browser"):
+        # The stack runs a scoped browser in its own container; this process
+        # never launches one against a target.
+        try:
+            return _json(await _scoped_browser_action(action, params))
+        except KeyError as exc:
+            return _json({"error": f"missing required parameter: {exc!s}"})
 
     try:
         result = await _dispatch(action, params)

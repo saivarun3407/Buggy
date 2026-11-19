@@ -46,8 +46,11 @@ func bountyScoutKickoff(platform string) string {
 		"environment), list the programs I can access, and let me pick one. " +
 		"Then fetch that program's structured scope, exclusions, and reporting " +
 		"policy, confirm in-scope / out-of-scope with me, and call " +
-		"ingest_bounty_scope to write the enforced RoE before any recon. Do " +
-		"not test anything until the scope is ingested."
+		"ingest_bounty_scope to write a draft I can read. You cannot enforce a " +
+		"scope yourself: tell me to run `buggy-cli scope import --platform " +
+		"<platform> --handle <program>`, which builds the enforced scope from " +
+		"the program's official data. Do not test anything until scope_show " +
+		"reports an enforced scope for this engagement."
 }
 
 func runBounty(cmd *cobra.Command, args []string) error {

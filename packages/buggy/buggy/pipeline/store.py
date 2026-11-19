@@ -238,6 +238,30 @@ class ReconStore:
             )
         return run_id
 
+    def set_run_progress(self, run_id: str, *, stage: str, done: list[str]) -> None:
+        """Record which stage a running run is in, for readers watching it."""
+        with self._tx() as cur:
+            cur.execute(
+                "UPDATE runs SET stats = ? WHERE id = ? AND status = 'running'",
+                (json.dumps({"stage": stage, "stages_done": done}, sort_keys=True), run_id),
+            )
+
+    def running_runs(self) -> list[dict[str, Any]]:
+        rows = self._db.execute("SELECT * FROM runs WHERE status = 'running'").fetchall()
+        return [self._run_row(row) for row in rows]
+
+    def interrupt_run(self, run_id: str, *, reason: str) -> None:
+        """Close a run whose process is gone. Its completed stages stay cached."""
+        with self._tx() as cur:
+            row = cur.execute("SELECT stats FROM runs WHERE id = ?", (run_id,)).fetchone()
+            stats = json.loads((row["stats"] if row else None) or "{}")
+            stats["error"] = reason
+            cur.execute(
+                "UPDATE runs SET status = 'interrupted', finished_at = ?, stats = ? "
+                "WHERE id = ? AND status = 'running'",
+                (time.time(), json.dumps(stats, sort_keys=True), run_id),
+            )
+
     def finish_run(self, run_id: str, *, status: str, stats: dict[str, Any]) -> dict[str, int]:
         """Close a run: compute its diff from ``run_touch`` and store ``stats``."""
         with self._tx() as cur:
