@@ -1,0 +1,797 @@
+{
+ "updated": "2026-11-19",
+ "columns": [
+  "backlog",
+  "ready",
+  "in_progress",
+  "review",
+  "done",
+  "blocked"
+ ],
+ "epics": [
+  {
+   "id": "E01",
+   "name": "Time to first result",
+   "score_now": 1,
+   "score_target": 3,
+   "leaders": "Shannon, Strix, Xalgorix",
+   "they_do_right": [
+    "Two commands from install to report (Shannon: `setup` wizard, then `start`)",
+    "Resume by re-using the workspace name; partial scans retry only what failed",
+    "`status --json` and per-agent logs while it runs",
+    "Headless mode with exit codes for CI (Strix `-n`)",
+    "A setup step that validates before running (`--validate-auth`)"
+   ],
+   "we_build": "Preflight (`doctor`), a two-service lite stack that needs no model, a bundled demo target, `status`, resume and exit codes."
+  },
+  {
+   "id": "E02",
+   "name": "Recon by code, not the model",
+   "score_now": 3,
+   "score_target": 3,
+   "leaders": "RedAmon (Buggy already 3)",
+   "they_do_right": [
+    "Coverage stamps so a missing finding is never read as clean",
+    "Wildcard-DNS probe with random names",
+    "Parameter nodes; JS recon with ~100 patterns, source maps, DOM sinks",
+    "LLM decisions only as a cascade after a deterministic path"
+   ],
+   "we_build": "Keep the lead: coverage stamps, wildcard filter, parameter records, deeper JS analysis."
+  },
+  {
+   "id": "E03",
+   "name": "Scope enforced technically",
+   "score_now": 3,
+   "score_target": 3,
+   "leaders": "RedAmon, Hacker Bob (Buggy already 3)",
+   "they_do_right": [
+    "CyberStrikeAI tool guard: ordered rules over every argument, percent-decoded, right before execution, independent of approvals",
+    "Dry-run endpoint for a rule"
+   ],
+   "we_build": "Extend the forbidden-pattern check to every tool and argument, with decoding and a dry run."
+  },
+  {
+   "id": "E04",
+   "name": "Approval before state changes",
+   "score_now": 3,
+   "score_target": 3,
+   "leaders": "RedAmon, CyberStrikeAI (Buggy already 3)",
+   "they_do_right": [
+    "Approve / reject / edit in the UI (RedAmon)",
+    "Notifications when something waits (Xalgorix, Strix Cloud)"
+   ],
+   "we_build": "Tell the operator: webhook / Slack / Discord notifications; approve from the dashboard (A6)."
+  },
+  {
+   "id": "E05",
+   "name": "Findings proven before reporting",
+   "score_now": 2,
+   "score_target": 3,
+   "leaders": "Shannon, Xalgorix, Hacker Bob",
+   "they_do_right": [
+    "'No exploit, no report': only status `exploited` reaches the report and the CI gate (Shannon)",
+    "A separate verifier re-exploits every candidate; inconclusive is flagged, never confirmed (Xalgorix)",
+    "Labels: exploit-verified vs source-verified",
+    "Reconcile all candidate streams into one deduplicated queue (Shannon)",
+    "VERIFY then GRADE: submit / hold / discard (Hacker Bob)"
+   ],
+   "we_build": "Findings with machine-checkable assertions, an independent verifier, a grader, one candidate queue."
+  },
+  {
+   "id": "E06",
+   "name": "Evidence and audit trail",
+   "score_now": 3,
+   "score_target": 3,
+   "leaders": "CyberStrikeAI, RedAmon (Buggy already 3)",
+   "they_do_right": [
+    "Step-by-step replay of an attack chain (CyberStrikeAI)",
+    "Scratchpad of scripts per finding (Shannon)"
+   ],
+   "we_build": "Evidence bundle per finding: HAR, runnable curl, ledger excerpt, hash manifest."
+  },
+  {
+   "id": "E07",
+   "name": "Memory and knowledge",
+   "score_now": 2,
+   "score_target": 3,
+   "leaders": "RedAmon, PentAGI, Cairn",
+   "they_do_right": [
+    "Recon writes a graph the agent traverses: Domain -> Subdomain -> IP -> Port -> Service -> Endpoint -> Parameter -> Vulnerability (RedAmon)",
+    "Per-run memory separate from reusable guide / answer / code knowledge, retrieved with a threshold and a limit of 3 (PentAGI)",
+    "Facts (append-only), Intents (claimed with a heartbeat lease), Hints; workers coordinate only through the board (Cairn)"
+   ],
+   "we_build": "Project recon into the graph; a cross-engagement lessons store; a fact / intent / hint board."
+  },
+  {
+   "id": "E08",
+   "name": "Published results",
+   "score_now": 1,
+   "score_target": 3,
+   "leaders": "RedAmon, Hacker Bob",
+   "they_do_right": [
+    "Per-target raw transcript, model, wall time and tokens, failures listed (RedAmon)",
+    "A self-critical coverage audit: complete / backlog / excluded per class",
+    "Historical results labelled as historical (PentestGPT)",
+    "Real-world receipts with links, pending marked pending (Hacker Bob)"
+   ],
+   "we_build": "An evidence contract and verifier for benchmark runs, a coverage audit that sums. The run itself needs a model key."
+  },
+  {
+   "id": "E09",
+   "name": "Web and API depth",
+   "score_now": 2,
+   "score_target": 3,
+   "leaders": "Shannon, Strix, Xalgorix",
+   "they_do_right": [
+    "Five specialist classes: injection, XSS, SSRF, authentication, authorization (Shannon)",
+    "Declarative login flow with TOTP and a success condition, validated first (Shannon)",
+    "OpenAPI / Postman contracts as input so every declared endpoint is tested (Strix)",
+    "22 phases including IDOR, race conditions, open redirect, CORS (Xalgorix)"
+   ],
+   "we_build": "Deterministic probes for SQLi, XSS, SSTI, command injection, redirect, traversal, CORS; identities and an authorization matrix; operator-supplied contracts."
+  },
+  {
+   "id": "E10",
+   "name": "Breadth beyond web",
+   "score_now": 2,
+   "score_target": 3,
+   "leaders": "CyberStrikeAI, HexStrike, Decepticon",
+   "they_do_right": [
+    "100-150+ tools by category; health endpoint with tool availability (HexStrike)",
+    "Missing tools are skipped or substituted, visibly (CyberStrikeAI)"
+   ],
+   "we_build": "Buggy inherits the breadth. Verify it: a tool and domain readiness matrix from the real sandbox."
+  },
+  {
+   "id": "E11",
+   "name": "Reports and developer workflow",
+   "score_now": 2,
+   "score_target": 3,
+   "leaders": "Shannon, Strix, Xalgorix, RedAmon",
+   "they_do_right": [
+    "PDF + Markdown + JSON + SARIF, validated findings only (Shannon)",
+    "GitHub Action with `fail-on-severity` and SARIF upload; incomplete is not clean (Shannon)",
+    "CVSS, PoC and remediation per finding (Xalgorix)",
+    "Fix loop: PRs and retest (RedAmon CypherFix, Strix Cloud)"
+   ],
+   "we_build": "One report over verified findings in Markdown, HTML, JSON; SARIF; a CI gate and Action; retest."
+  },
+  {
+   "id": "E12",
+   "name": "UI, API, observability",
+   "score_now": 1,
+   "score_target": 3,
+   "leaders": "RedAmon, PentAGI, CyberStrikeAI",
+   "they_do_right": [
+    "Live run page: phase, tool activity, findings (PentAGI, RedAmon)",
+    "Approve / deny inline; stop and steer (RedAmon)",
+    "Execution monitor: repeated tool calls trigger an intervention; per-role caps (PentAGI)",
+    "Traces of LLM and tool calls with cost (PentAGI)"
+   ],
+   "we_build": "A run page in the dashboard (recon, approvals, findings); a loop guard; per-run telemetry."
+  },
+  {
+   "id": "E13",
+   "name": "Bug-bounty program support",
+   "score_now": 3,
+   "score_target": 3,
+   "leaders": "Buggy leads; h1-brain, Hacker Bob adjacent",
+   "they_do_right": [
+    "`hack(handle)` briefing: fresh scope, weaknesses that paid, untouched scope, suggested vectors (h1-brain)",
+    "Grade for submission (Hacker Bob)"
+   ],
+   "we_build": "A program brief from scope, recon and report history; duplicate risk."
+  },
+  {
+   "id": "INT",
+   "name": "Integration and proof",
+   "score_now": 0,
+   "score_target": 3,
+   "leaders": "\u2014",
+   "they_do_right": [
+    "Nothing counts until it runs on the real stack"
+   ],
+   "we_build": "Wire, ship, verify."
+  }
+ ],
+ "tasks": [
+  {
+   "id": "A1",
+   "epic": "E01",
+   "lane": "A",
+   "title": "`buggy-cli doctor`: preflight that says exactly what is missing",
+   "depends": [],
+   "status": "ready",
+   "agent": "",
+   "branch": "",
+   "commit": "",
+   "tests": "",
+   "note": "",
+   "order": 0
+  },
+  {
+   "id": "A2",
+   "epic": "E01",
+   "lane": "A",
+   "title": "`buggy-cli status <engagement>`: one snapshot of a run, with `--json` and `--follow`",
+   "depends": [],
+   "status": "backlog",
+   "agent": "",
+   "branch": "",
+   "commit": "",
+   "tests": "",
+   "note": "",
+   "order": 1
+  },
+  {
+   "id": "A3",
+   "epic": "E01",
+   "lane": "A",
+   "title": "Lite stack: recon and report with two services",
+   "depends": [],
+   "status": "backlog",
+   "agent": "",
+   "branch": "",
+   "commit": "",
+   "tests": "",
+   "note": "",
+   "order": 2
+  },
+  {
+   "id": "A4",
+   "epic": "E01",
+   "lane": "A",
+   "title": "Launcher: `buggy hunt --lite`, `buggy doctor`, `buggy demo`",
+   "depends": [
+    "A1",
+    "A3"
+   ],
+   "status": "backlog",
+   "agent": "",
+   "branch": "",
+   "commit": "",
+   "tests": "",
+   "note": "",
+   "order": 3
+  },
+  {
+   "id": "A5",
+   "epic": "E01",
+   "lane": "A",
+   "title": "`hunt`: resume, exit codes for CI, and a machine-readable result file",
+   "depends": [
+    "A2"
+   ],
+   "status": "backlog",
+   "agent": "",
+   "branch": "",
+   "commit": "",
+   "tests": "",
+   "note": "",
+   "order": 4
+  },
+  {
+   "id": "A6",
+   "epic": "E12",
+   "lane": "A",
+   "title": "Dashboard: engagement run page (recon, approvals, evidence, findings)",
+   "depends": [
+    "A2"
+   ],
+   "status": "backlog",
+   "agent": "",
+   "branch": "",
+   "commit": "",
+   "tests": "",
+   "note": "",
+   "order": 5
+  },
+  {
+   "id": "B1",
+   "epic": "E02",
+   "lane": "B",
+   "title": "Coverage stamps: a missing result is never read as clean",
+   "depends": [],
+   "status": "ready",
+   "agent": "",
+   "branch": "",
+   "commit": "",
+   "tests": "",
+   "note": "",
+   "order": 6
+  },
+  {
+   "id": "B2",
+   "epic": "E02",
+   "lane": "B",
+   "title": "Wildcard DNS filter",
+   "depends": [
+    "B1"
+   ],
+   "status": "backlog",
+   "agent": "",
+   "branch": "",
+   "commit": "",
+   "tests": "",
+   "note": "",
+   "order": 7
+  },
+  {
+   "id": "B3",
+   "epic": "E02",
+   "lane": "B",
+   "title": "Parameter records: every input the target accepts, as data",
+   "depends": [
+    "B2"
+   ],
+   "status": "backlog",
+   "agent": "",
+   "branch": "",
+   "commit": "",
+   "tests": "",
+   "note": "",
+   "order": 8
+  },
+  {
+   "id": "B4",
+   "epic": "E09",
+   "lane": "B",
+   "title": "Operator-supplied API contracts (OpenAPI, Postman)",
+   "depends": [
+    "B3"
+   ],
+   "status": "backlog",
+   "agent": "",
+   "branch": "",
+   "commit": "",
+   "tests": "",
+   "note": "",
+   "order": 9
+  },
+  {
+   "id": "B5",
+   "epic": "E07",
+   "lane": "B",
+   "title": "Project the recon store into the knowledge graph",
+   "depends": [
+    "B4"
+   ],
+   "status": "backlog",
+   "agent": "",
+   "branch": "",
+   "commit": "",
+   "tests": "",
+   "note": "",
+   "order": 10
+  },
+  {
+   "id": "B6",
+   "epic": "E02",
+   "lane": "B",
+   "title": "JavaScript analysis: source maps, DOM sinks, dependency names",
+   "depends": [
+    "B5"
+   ],
+   "status": "backlog",
+   "agent": "",
+   "branch": "",
+   "commit": "",
+   "tests": "",
+   "note": "",
+   "order": 11
+  },
+  {
+   "id": "C1",
+   "epic": "E09",
+   "lane": "C",
+   "title": "SQL injection probe (boolean, error and time based, with controls)",
+   "depends": [],
+   "status": "ready",
+   "agent": "",
+   "branch": "",
+   "commit": "",
+   "tests": "",
+   "note": "",
+   "order": 12
+  },
+  {
+   "id": "C2",
+   "epic": "E09",
+   "lane": "C",
+   "title": "Reflected XSS probe with context analysis",
+   "depends": [
+    "C1"
+   ],
+   "status": "backlog",
+   "agent": "",
+   "branch": "",
+   "commit": "",
+   "tests": "",
+   "note": "",
+   "order": 13
+  },
+  {
+   "id": "C3",
+   "epic": "E09",
+   "lane": "C",
+   "title": "Server-side template injection and OS command injection probes",
+   "depends": [
+    "C2"
+   ],
+   "status": "backlog",
+   "agent": "",
+   "branch": "",
+   "commit": "",
+   "tests": "",
+   "note": "",
+   "order": 14
+  },
+  {
+   "id": "C4",
+   "epic": "E09",
+   "lane": "C",
+   "title": "Open redirect, path traversal and CORS probes",
+   "depends": [
+    "C3"
+   ],
+   "status": "backlog",
+   "agent": "",
+   "branch": "",
+   "commit": "",
+   "tests": "",
+   "note": "",
+   "order": 15
+  },
+  {
+   "id": "C5",
+   "epic": "E08",
+   "lane": "C",
+   "title": "Coverage audit: one explicit verdict per vulnerability class and known bug",
+   "depends": [
+    "C4"
+   ],
+   "status": "backlog",
+   "agent": "",
+   "branch": "",
+   "commit": "",
+   "tests": "",
+   "note": "",
+   "order": 16
+  },
+  {
+   "id": "D1",
+   "epic": "E09",
+   "lane": "D",
+   "title": "Identities: declarative login and multi-role sessions the agent never sees",
+   "depends": [],
+   "status": "ready",
+   "agent": "",
+   "branch": "",
+   "commit": "",
+   "tests": "",
+   "note": "",
+   "order": 17
+  },
+  {
+   "id": "D2",
+   "epic": "E09",
+   "lane": "D",
+   "title": "Authorization matrix: every endpoint against every identity",
+   "depends": [
+    "D1"
+   ],
+   "status": "backlog",
+   "agent": "",
+   "branch": "",
+   "commit": "",
+   "tests": "",
+   "note": "",
+   "order": 18
+  },
+  {
+   "id": "D3",
+   "epic": "E06",
+   "lane": "D",
+   "title": "Evidence bundle: a reproducible package per finding",
+   "depends": [
+    "D2"
+   ],
+   "status": "backlog",
+   "agent": "",
+   "branch": "",
+   "commit": "",
+   "tests": "",
+   "note": "",
+   "order": 19
+  },
+  {
+   "id": "D4",
+   "epic": "E04",
+   "lane": "D",
+   "title": "Notifications: tell the operator when something waits for them",
+   "depends": [
+    "D3"
+   ],
+   "status": "backlog",
+   "agent": "",
+   "branch": "",
+   "commit": "",
+   "tests": "",
+   "note": "",
+   "order": 20
+  },
+  {
+   "id": "D5",
+   "epic": "E03",
+   "lane": "D",
+   "title": "Tool-call guard: ordered rules over every argument, decoded, before execution",
+   "depends": [
+    "D4"
+   ],
+   "status": "backlog",
+   "agent": "",
+   "branch": "",
+   "commit": "",
+   "tests": "",
+   "note": "",
+   "order": 21
+  },
+  {
+   "id": "E1",
+   "epic": "E05",
+   "lane": "E",
+   "title": "Findings store and an independent verifier (`exploit_verified` or it is not a finding)",
+   "depends": [],
+   "status": "ready",
+   "agent": "",
+   "branch": "",
+   "commit": "",
+   "tests": "",
+   "note": "",
+   "order": 22
+  },
+  {
+   "id": "E2",
+   "epic": "E05",
+   "lane": "E",
+   "title": "Grade: submit, hold or discard, with stated reasons",
+   "depends": [
+    "E1"
+   ],
+   "status": "backlog",
+   "agent": "",
+   "branch": "",
+   "commit": "",
+   "tests": "",
+   "note": "",
+   "order": 23
+  },
+  {
+   "id": "E3",
+   "epic": "E05",
+   "lane": "E",
+   "title": "Candidate queue: one deduplicated list of things to prove",
+   "depends": [
+    "E2"
+   ],
+   "status": "backlog",
+   "agent": "",
+   "branch": "",
+   "commit": "",
+   "tests": "",
+   "note": "",
+   "order": 24
+  },
+  {
+   "id": "E4",
+   "epic": "E11",
+   "lane": "E",
+   "title": "Report: Markdown, self-contained HTML and JSON from one finding schema",
+   "depends": [
+    "E3"
+   ],
+   "status": "backlog",
+   "agent": "",
+   "branch": "",
+   "commit": "",
+   "tests": "",
+   "note": "",
+   "order": 25
+  },
+  {
+   "id": "E5",
+   "epic": "E11",
+   "lane": "E",
+   "title": "SARIF 2.1.0, a CI gate, and a GitHub Action",
+   "depends": [
+    "E4"
+   ],
+   "status": "backlog",
+   "agent": "",
+   "branch": "",
+   "commit": "",
+   "tests": "",
+   "note": "",
+   "order": 26
+  },
+  {
+   "id": "E6",
+   "epic": "E11",
+   "lane": "E",
+   "title": "Retest: prove a fix with the same proof",
+   "depends": [
+    "E5"
+   ],
+   "status": "backlog",
+   "agent": "",
+   "branch": "",
+   "commit": "",
+   "tests": "",
+   "note": "",
+   "order": 27
+  },
+  {
+   "id": "F1",
+   "epic": "E07",
+   "lane": "F",
+   "title": "Lessons: what worked and what failed, kept across engagements",
+   "depends": [],
+   "status": "ready",
+   "agent": "",
+   "branch": "",
+   "commit": "",
+   "tests": "",
+   "note": "",
+   "order": 28
+  },
+  {
+   "id": "F2",
+   "epic": "E07",
+   "lane": "F",
+   "title": "Fact / intent / hint board: agents coordinate through shared state, not chat",
+   "depends": [
+    "F1"
+   ],
+   "status": "backlog",
+   "agent": "",
+   "branch": "",
+   "commit": "",
+   "tests": "",
+   "note": "",
+   "order": 29
+  },
+  {
+   "id": "F3",
+   "epic": "E08",
+   "lane": "F",
+   "title": "Benchmark evidence contract: results anyone can check",
+   "depends": [
+    "F2"
+   ],
+   "status": "backlog",
+   "agent": "",
+   "branch": "",
+   "commit": "",
+   "tests": "",
+   "note": "",
+   "order": 30
+  },
+  {
+   "id": "F4",
+   "epic": "E10",
+   "lane": "F",
+   "title": "Tool and domain readiness matrix: know what actually works before a run",
+   "depends": [
+    "F3"
+   ],
+   "status": "backlog",
+   "agent": "",
+   "branch": "",
+   "commit": "",
+   "tests": "",
+   "note": "",
+   "order": 31
+  },
+  {
+   "id": "F5",
+   "epic": "E13",
+   "lane": "F",
+   "title": "Program brief: where to look first on a bounty program",
+   "depends": [
+    "F4"
+   ],
+   "status": "backlog",
+   "agent": "",
+   "branch": "",
+   "commit": "",
+   "tests": "",
+   "note": "",
+   "order": 32
+  },
+  {
+   "id": "F6",
+   "epic": "E12",
+   "lane": "F",
+   "title": "Run telemetry and a loop guard: see cost and stop wasted work",
+   "depends": [
+    "F5"
+   ],
+   "status": "backlog",
+   "agent": "",
+   "branch": "",
+   "commit": "",
+   "tests": "",
+   "note": "",
+   "order": 33
+  },
+  {
+   "id": "I1",
+   "epic": "INT",
+   "lane": "I",
+   "title": "Integration: expose the new capabilities to agents through the stack's MCP servers",
+   "depends": [
+    "D5",
+    "E6",
+    "F6",
+    "B6",
+    "C5"
+   ],
+   "status": "backlog",
+   "agent": "",
+   "branch": "",
+   "commit": "",
+   "tests": "",
+   "note": "",
+   "order": 34
+  },
+  {
+   "id": "I2",
+   "epic": "INT",
+   "lane": "I",
+   "title": "Integration: images, compose, secrets root, docs",
+   "depends": [
+    "I1"
+   ],
+   "status": "backlog",
+   "agent": "",
+   "branch": "",
+   "commit": "",
+   "tests": "",
+   "note": "",
+   "order": 35
+  },
+  {
+   "id": "I3",
+   "epic": "INT",
+   "lane": "I",
+   "title": "Verification: full suite, scope e2e, lab probes, and a live hunt on the real stack",
+   "depends": [
+    "I2"
+   ],
+   "status": "backlog",
+   "agent": "",
+   "branch": "",
+   "commit": "",
+   "tests": "",
+   "note": "",
+   "order": 36
+  },
+  {
+   "id": "X1",
+   "epic": "E08",
+   "lane": "X",
+   "title": "Run the agents on the lab and XBOW suites and publish verifiable results",
+   "depends": [
+    "I3",
+    "F3"
+   ],
+   "status": "blocked",
+   "agent": "",
+   "branch": "",
+   "commit": "",
+   "tests": "",
+   "note": "",
+   "order": 37
+  }
+ ]
+}

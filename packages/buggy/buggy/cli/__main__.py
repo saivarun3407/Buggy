@@ -86,6 +86,22 @@ def main(argv: list[str] | None = None) -> int:
         return export_transcript_main(rest)
     if sub == "telemetry":
         return telemetry_main(rest)
+    # Any other command is a module `buggy.cli.<name>` exposing
+    # `main(argv) -> int` (dashes in the command become underscores), so a new
+    # command is one new file and never an edit here.
+    module_name = sub.replace("-", "_")
+    if module_name.isidentifier() and not module_name.startswith("_"):
+        import importlib
+
+        try:
+            module = importlib.import_module(f"buggy.cli.{module_name}")
+        except ModuleNotFoundError as exc:
+            if exc.name != f"buggy.cli.{module_name}":
+                raise
+        else:
+            entry = getattr(module, "main", None)
+            if callable(entry):
+                return int(entry(rest) or 0)
     print(f"unknown subcommand: {sub}\n", file=sys.stderr)
     _print_help()
     return 2

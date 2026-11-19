@@ -163,12 +163,20 @@ def lab(tmp_path_factory: pytest.TempPathFactory) -> Iterator[Lab]:
         os.environ.pop(proxy, None)  # the targets are local containers
     gateway = None
     canary = Canary()
+    # A lab that is already running (shared by several test runs) is used as is:
+    # nothing is started and nothing is removed at the end.
+    shared_juice = os.environ.get("BUGGY_LAB_JUICE_URL", "").rstrip("/")
+    shared_dvga = os.environ.get("BUGGY_LAB_DVGA_URL", "").rstrip("/")
+    shared = bool(shared_juice and shared_dvga)
     try:
-        up = _compose("up", "-d", "--no-deps", "juice-shop", "dvga", env=env)
-        if up.returncode != 0:
-            pytest.skip(f"could not start the lab containers:\n{up.stderr[-800:]}")
-        juice = f"http://{_container_ip('juice-shop')}:3000"
-        dvga = f"http://{_container_ip('dvga')}:5013"
+        if shared:
+            juice, dvga = shared_juice, shared_dvga
+        else:
+            up = _compose("up", "-d", "--no-deps", "juice-shop", "dvga", env=env)
+            if up.returncode != 0:
+                pytest.skip(f"could not start the lab containers:\n{up.stderr[-800:]}")
+            juice = f"http://{_container_ip('juice-shop')}:3000"
+            dvga = f"http://{_container_ip('dvga')}:5013"
         if not _wait(f"{juice}/rest/admin/application-version") or not _wait(f"{dvga}/"):
             pytest.skip(
                 "lab containers are not reachable from the host (needs a Linux Docker host)"
@@ -194,7 +202,8 @@ def lab(tmp_path_factory: pytest.TempPathFactory) -> Iterator[Lab]:
             )
         )
         port = canary.serve("0.0.0.0", 0)  # noqa: S104 - reachable from the lab bridge only
-        canary.base_url = f"http://{_gateway_ip()}:{port}"
+        canary_host = os.environ.get("BUGGY_LAB_CANARY_HOST") or _gateway_ip()
+        canary.base_url = f"http://{canary_host}:{port}"
         gateway = CaptureGateway(roots)
         # DVGA has a hardened mode toggled by a GET link; make sure it is off
         # whatever touched the container before these tests.
@@ -204,7 +213,7 @@ def lab(tmp_path_factory: pytest.TempPathFactory) -> Iterator[Lab]:
         canary.close()
         if gateway is not None:
             gateway.store.close()
-        if os.environ.get("BUGGY_LAB_KEEP") != "1":
+        if not shared and os.environ.get("BUGGY_LAB_KEEP") != "1":
             _compose("rm", "-sf", "juice-shop", "dvga", env=env)
         if created:
             dotenv.unlink(missing_ok=True)
