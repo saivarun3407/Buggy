@@ -1,5 +1,5 @@
 {
- "updated": "2026-11-19 21:12 UTC",
+ "updated": "2026-11-19 21:30 UTC",
  "columns": [
   "backlog",
   "ready",
@@ -201,12 +201,12 @@
    "lane": "A",
    "title": "`buggy-cli doctor`: preflight that says exactly what is missing",
    "depends": [],
-   "status": "in_progress",
+   "status": "done",
    "agent": "",
    "branch": "",
-   "commit": "",
-   "tests": "",
-   "note": "",
+   "commit": "db418b3",
+   "tests": "369 CLI tests pass",
+   "note": "merged; doctor reports truthfully on this machine",
    "order": 0
   },
   {
@@ -215,7 +215,7 @@
    "lane": "A",
    "title": "`buggy-cli status <engagement>`: one snapshot of a run, with `--json` and `--follow`",
    "depends": [],
-   "status": "backlog",
+   "status": "in_progress",
    "agent": "",
    "branch": "",
    "commit": "",
