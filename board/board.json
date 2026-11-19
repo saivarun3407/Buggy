@@ -1,5 +1,5 @@
 {
- "updated": "2026-11-19 21:30 UTC",
+ "updated": "2026-11-19 21:47 UTC",
  "columns": [
   "backlog",
   "ready",
@@ -292,12 +292,12 @@
    "lane": "B",
    "title": "Coverage stamps: a missing result is never read as clean",
    "depends": [],
-   "status": "in_progress",
+   "status": "done",
    "agent": "",
    "branch": "",
-   "commit": "",
-   "tests": "",
-   "note": "",
+   "commit": "d05d65e",
+   "tests": "148 pipeline tests pass",
+   "note": "merged; coverage stamps per asset and stage, report says what was not checked",
    "order": 6
   },
   {
@@ -308,7 +308,7 @@
    "depends": [
     "B1"
    ],
-   "status": "backlog",
+   "status": "in_progress",
    "agent": "",
    "branch": "",
    "commit": "",
