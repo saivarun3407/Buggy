@@ -532,10 +532,16 @@ func TestConfigSyncTargets_IncludesTunOverlay(t *testing.T) {
 	// operators there cannot enable ligolo-ng Layer-3 pivoting. It must
 	// also carry a config-checksums.txt entry, so it has to be one of the
 	// files SyncConfigFiles downloads and manifest-verifies.
+	// The lite file (`buggy hunt --lite`) and the two overlays `buggy demo`
+	// layers on it (lab, demo) are release-tracked for the same reason: an
+	// install that never receives them cannot run those commands.
 	want := map[string]string{
-		"docker-compose.yml":     filepath.Join(home, "docker-compose.yml"),
-		"docker-compose.tun.yml": filepath.Join(home, "docker-compose.tun.yml"),
-		"config/litellm.yaml":    filepath.Join(home, "config", "litellm.yaml"),
+		"docker-compose.yml":      filepath.Join(home, "docker-compose.yml"),
+		"docker-compose.tun.yml":  filepath.Join(home, "docker-compose.tun.yml"),
+		"docker-compose.lite.yml": filepath.Join(home, "docker-compose.lite.yml"),
+		"docker-compose.lab.yml":  filepath.Join(home, "docker-compose.lab.yml"),
+		"docker-compose.demo.yml": filepath.Join(home, "docker-compose.demo.yml"),
+		"config/litellm.yaml":     filepath.Join(home, "config", "litellm.yaml"),
 	}
 	if len(targets) != len(want) {
 		t.Fatalf("configSyncTargets has %d entries, want %d: %v", len(targets), len(want), targets)

@@ -142,6 +142,26 @@ func runStart(cmd *cobra.Command, args []string) error {
 // services up, so headless entry points (hunt) and interactive ones (start,
 // bounty) can diverge after it. Returns the resolved home dir and env.
 func prepareStack(cmd *cobra.Command) (string, map[string]string, error) {
+	return prepareStackFor(cmd, false)
+}
+
+// validateAuthFn is indirected so tests can see whether the model-auth gate
+// ran without configuring a real provider.
+var validateAuthFn = config.ValidateAuth
+
+// checkModelAuth is the model-auth gate of prepareStack: at least one model
+// provider must be usable. A run that never calls a model (hunt --lite, demo)
+// passes skip and is not held to it.
+func checkModelAuth(env map[string]string, skip bool) error {
+	if skip {
+		return nil
+	}
+	return validateAuthFn(env)
+}
+
+// prepareStackFor is prepareStack with the model-auth gate optional. Every
+// other step is the same for both.
+func prepareStackFor(cmd *cobra.Command, skipModelAuth bool) (string, map[string]string, error) {
 	// 1. Check .env exists
 	if !config.EnvExists() {
 		ui.Warning("No configuration found. Running setup wizard...")
@@ -169,7 +189,7 @@ func prepareStack(cmd *cobra.Command) (string, map[string]string, error) {
 	// 2.1. Apply idempotent config/policy migrations for already-onboarded users.
 	migrate.RunAll(env)
 
-	if err := config.ValidateAuth(env); err != nil {
+	if err := checkModelAuth(env, skipModelAuth); err != nil {
 		return "", nil, err
 	}
 
