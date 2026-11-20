@@ -51,3 +51,7 @@ INTEGRATION NOTES: <what the integrator must wire: tool names, env, compose, doc
 
 If you are blocked, say exactly what is missing. A truthful "blocked" is a good result; a
 green test that proves nothing is not.
+
+## No key-shaped literals
+
+GitHub push protection rejects commits that contain strings shaped like real provider keys (Stripe `sk_live_...`, GitHub `ghp_...`, Slack `xox...`, AWS, Google). Test fixtures that need such a value must build it at runtime (`"sk_" + "live_" + "..."`), never as one literal.
