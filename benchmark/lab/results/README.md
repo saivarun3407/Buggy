@@ -11,11 +11,11 @@ not run. The XBOW benchmark was not run.
 | business_logic | 2 | 0/2 | 1/2 | not run | not run |
 | api | 2 | 0/2 | 1/2 | not run | not run |
 | graphql | 4 | 2/4 | 2/4 | not run | not run |
-| injection | 6 | 0/6 | 0/6 | not run | not run |
+| injection | 6 | 0/6 | 5/6 | not run | not run |
 | xss | 3 | 0/3 | 0/3 | not run | not run |
 | file_handling | 2 | 0/2 | 0/2 | not run | not run |
 | csrf | 1 | 0/1 | 0/1 | not run | not run |
-| open_redirect | 1 | 0/1 | 0/1 | not run | not run |
+| open_redirect | 1 | 0/1 | 1/1 | not run | not run |
 | crypto | 1 | 0/1 | 0/1 | not run | not run |
 | misconfiguration | 2 | 1/2 | 0/2 | not run | not run |
 | info_exposure | 4 | 3/4 | 0/4 | not run | not run |
@@ -34,8 +34,12 @@ not run. The XBOW benchmark was not run.
   It matched 6 of 40 known entries, missed 34, and reported 30 items with no
   ground-truth entry (missing security headers, cookie flags, technology
   fingerprints, GraphQL batching — real observations, low value).
-- **probes** — 8 entries are reproduced by `packages/buggy/tests/lab`
-  (15 tests including negative controls, all passing against the live apps).
+- **probes** — 14 entries are reproduced by `packages/buggy/tests/lab`
+  (47 test cases including negative controls, all passing against the live
+  apps on 2026-11-20). Each entry's `verified_by` names the test that asserts
+  the probe reports that bug. The reflected-XSS, SSTI, path-traversal and CORS
+  probes have lab tests too, but only negative ones (neither app has a bug of
+  that shape they can reach), so they prove no entry here.
 - **agent arms** — not run: the environment this was produced in has no model
   provider credentials. Found / missed / false positive, cost, time, and the
   token comparison with vs without the pipeline are therefore unmeasured.
@@ -51,6 +55,29 @@ a state change: `auth_session`, `access_control`, `ssrf`, `business_logic`,
 `api`. Each now has a deterministic probe that finds one known instance once
 it is aimed at the right endpoint.
 
-Not covered by the pipeline or any probe: `injection` (0/6), `xss` (0/3),
-`file_handling` (0/2), `csrf`, `open_redirect`, `crypto`. These are agent-only
-until the agent arms are measured.
+Proven by a probe since the first run: `injection` 5/6 (SQL injection in
+Juice Shop search and login and in DVGA's `pastes(filter:)`, command injection
+in DVGA `importPaste` and `systemDiagnostics`; the probes show the injectable
+parameter, not the login bypass or data extraction built on it) and
+`open_redirect` 1/1 (the Juice Shop allow-list bypass).
+
+Not covered by the pipeline or any probe: `xss` (0/3), `file_handling` (0/2),
+`csrf`, `crypto`, and NoSQL injection. These are agent-only until the agent
+arms are measured.
+
+## Coverage audit
+
+`uv run python -m benchmark.lab coverage --apps juice-shop,dvga` gives every
+known entry of the two apps run here exactly one verdict (`proven`: a lab
+test, `pipeline`: pipeline signals only, `backlog`: nothing deterministic,
+`excluded`: prohibited denial of service). Totals:
+
+| Apps | Entries | proven | pipeline | backlog | excluded |
+|---|---:|---:|---:|---:|---:|
+| juice-shop, dvga | 42 | 14 | 4 | 22 | 2 |
+| all four ground-truth files | 71 | 14 | 4 | 50 | 3 |
+
+`pipeline` counts only entries without a lab test: the pipeline column above
+also credits `dvga-introspection` and `dvga-field-suggestions`, which are
+`proven`. DVWA and crAPI were not run, so none of their entries is proven.
+Per class and per entry: [`coverage.md`](coverage.md).
