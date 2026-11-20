@@ -735,7 +735,111 @@ def write_report(
         "candidates": len(rank_candidates(records)),
         "secrets": len(records.get("secret", [])),
     }
+    digest["records"] = records
     return path, digest
+
+
+def capture_available() -> bool:
+    from buggy.pipeline.mcp_client import server_configured  # noqa: PLC0415
+
+    return server_configured("capture")
+
+
+def queue_leads(engagement: str, records: dict[str, list[dict[str, Any]]]) -> dict[str, Any]:
+    """Queue scanner hits and ranked recon leads as candidates for the agents.
+
+    Deterministic: the capture server classifies and deduplicates them. Returns
+    its answer, or ``{"error": ...}`` when the queue cannot be reached.
+    """
+    from buggy.pipeline.report import rank_candidates  # noqa: PLC0415
+
+    items = {
+        "pipeline": records.get("vulnerability", []),
+        "ranked": rank_candidates(records),
+    }
+    return _capture("candidates_add", engagement, items_json=json.dumps(items), actor="recon")
+
+
+FINDINGS_REPORTS = (("markdown", "report.md"), ("html", "report.html"), ("json", "report.json"))
+SARIF_FILE = "findings.sarif"
+
+
+def write_findings_reports(
+    control: Path, engagement: str, summary: dict[str, Any] | None, *, complete: bool
+) -> dict[str, Any]:
+    """Write the findings report (Markdown, HTML, JSON) and SARIF into the control dir.
+
+    The capture server builds them from the findings store: only findings the
+    verifier proved are listed as findings. Returns ``{"written": [...]}`` and,
+    when something could not be produced, ``"errors"``.
+    """
+    directory = control / engagement
+    written: list[str] = []
+    errors: list[str] = []
+    report_json = ""
+    slim = {k: v for k, v in (summary or {}).items() if k in ("records", "last_run", "current_run")}
+    for fmt, filename in FINDINGS_REPORTS:
+        built = _capture(
+            "report_build",
+            engagement,
+            fmt=fmt,
+            recon_summary_json=json.dumps(slim) if slim else "",
+            complete=complete,
+        )
+        text = built.get("report") if isinstance(built, dict) else None
+        if not isinstance(text, str):
+            errors.append(f"{filename}: {(built or {}).get('error') or built}")
+            continue
+        try:
+            directory.mkdir(parents=True, exist_ok=True)
+            (directory / filename).write_text(text, encoding="utf-8")
+        except OSError as exc:
+            errors.append(f"{filename}: {exc}")
+            continue
+        written.append(filename)
+        if fmt == "json":
+            report_json = text
+    if report_json:
+        try:
+            from buggy import __version__  # noqa: PLC0415
+            from buggy.findings.sarif import to_sarif  # noqa: PLC0415
+
+            document = to_sarif(json.loads(report_json), tool_version=str(__version__))
+            (directory / SARIF_FILE).write_text(
+                json.dumps(document, indent=2, sort_keys=True) + "\n", encoding="utf-8"
+            )
+            written.append(SARIF_FILE)
+        except (ImportError, OSError, ValueError) as exc:
+            errors.append(f"{SARIF_FILE}: {exc}")
+    return {"written": written, "errors": errors} if errors else {"written": written}
+
+
+def _notify(event_builder: str, *args: Any) -> None:
+    """Tell the operator (if a webhook is configured). Never raises, never blocks long."""
+    try:
+        from buggy import notify  # noqa: PLC0415
+
+        notifier = notify.Notifier.from_env()
+        notifier.notify(getattr(notify, event_builder)(*args))
+    except Exception:  # noqa: BLE001, S110 - a notification must never fail a hunt
+        pass
+
+
+def project_graph(engagement: str) -> str:
+    """Project the recon store into the knowledge graph when this process can.
+
+    Returns a one-line outcome. The projection needs the graph database and the
+    recon store, which only the full stack's operator has; elsewhere it is skipped.
+    """
+    try:
+        from buggy.pipeline import graph_export  # noqa: PLC0415
+
+        if not graph_export._kg_configured():  # noqa: SLF001
+            return "skipped (no graph database configured here)"
+        code = graph_export.main([engagement])
+    except Exception as exc:  # noqa: BLE001 - the graph is a convenience, never a blocker
+        return f"skipped ({type(exc).__name__}: {str(exc)[:120]})"
+    return "done" if code == 0 else f"failed (exit {code})"
 
 
 # ── agents ───────────────────────────────────────────────────────────
@@ -783,10 +887,16 @@ def kickoff_text(slug: str, scope: dict[str, Any], *, recon_done: bool, instruct
             else "The recon pipeline may still be running: read what exists with recon_summary "
             "and recon_query before doing any enumeration yourself."
         ),
+        "Work the queue: candidates_next returns the leads to prove, most promising first "
+        "(scanner hits, recon leads, probe results), already deduplicated and claimed for you. "
+        "Read facts_list before starting and record what you learn with fact_add so other "
+        "agents do not repeat it; memory_search returns lessons from earlier engagements on "
+        "the same technology. recon_coverage shows what recon did not check.",
         "Spend your effort on what needs judgement: choose what to test, run the deterministic "
         "probes (probe_list, probe_run) on the best candidates, and chain confirmed results into "
         "impact. Priorities: access control and IDOR, authentication and session, SSRF, business "
-        "logic, API flaws, GraphQL.",
+        "logic, API flaws, GraphQL. For access control use identities_list and authz_matrix_run, "
+        "or http_send with identity=...; you never handle a credential.",
         (
             "The sandbox has no network path to the target. Send every request with http_send, "
             "probe_run or the browser_* tools; a state-changing request returns APPROVAL_REQUIRED "
@@ -794,8 +904,12 @@ def kickoff_text(slug: str, scope: dict[str, Any], *, recon_done: bool, instruct
             if blocked
             else "Prefer http_send, probe_run and browser_* for anything that counts as evidence."
         ),
-        "Record each finding with report_record_finding, citing capture_ids and a remediation. "
-        "No denial of service, no social engineering, no data beyond what proves the issue.",
+        "A claim is not a finding. Submit it with finding_submit (cite capture_ids as "
+        "assertions against the endpoint you name, and say what the owner should change), then "
+        "call finding_verify: only the independent verifier makes it exploit_verified. Fix or "
+        "drop what comes back inconclusive, then finding_grade. Also record verified findings "
+        "with report_record_finding. No denial of service, no social engineering, no data "
+        "beyond what proves the issue.",
     ]
     if instruction.strip():
         parts.append(f"Operator instruction: {instruction.strip()}")
@@ -1015,8 +1129,25 @@ def run_stages(  # noqa: PLR0912, PLR0915
                 print(f"  exposed secrets  {digest['secrets']}", file=sys.stderr)
                 print(f"  test candidates  {digest['candidates']}", file=sys.stderr)
                 print(f"  report           {_host_path(path)}", file=sys.stderr)
+                records = digest.pop("records", {})
+                if capture_available():
+                    queued = queue_leads(slug, records)
+                    if queued.get("error") or queued.get("ok") is False:
+                        print(
+                            f"  leads            not queued ({queued.get('error') or queued})",
+                            file=sys.stderr,
+                        )
+                    else:
+                        print(
+                            f"  leads queued     {len(queued.get('ids') or [])} "
+                            f"({queued.get('created', 0)} new, {queued.get('merged', 0)} merged, "
+                            f"{queued.get('unclassified', 0)} scanner hits without a class left out)",
+                            file=sys.stderr,
+                        )
+                print(f"  knowledge graph  {project_graph(slug)}", file=sys.stderr)
                 if args.non_interactive:
                     print(json.dumps({"type": "recon_report", "path": str(path), **digest}))
+            _notify("recon_event", {**summary, "engagement": slug})
     outcome = {"recon": recon_outcome(state, summary), "issues": issues, "agent": agent}
 
     if args.no_agent:
@@ -1046,6 +1177,7 @@ def run_stages(  # noqa: PLR0912, PLR0915
         )
     except Exception as exc:  # noqa: BLE001 - recon and the report already stand on their own
         agent["error"] = f"{type(exc).__name__}: {str(exc)[:300]}"
+        _notify("failure_event", slug, "agents", agent["error"])
         print(
             f"  the agent run did not complete: {agent['error']}\n"
             + (
@@ -1181,6 +1313,21 @@ def main(argv: list[str] | None = None) -> int:  # noqa: PLR0911, PLR0912, PLR09
         print(f"error: cannot write {control / slug / RESULT_FILE}: {exc}", file=sys.stderr)
         return EXIT_INCOMPLETE
     print(f"\n  result           {_host_path(path)}", file=sys.stderr)
+    if capture_available():
+        reports = write_findings_reports(
+            control,
+            slug,
+            {"records": outcome["recon"]["records"]},
+            complete=bool(result["complete"]),
+        )
+        if reports["written"]:
+            print(
+                f"  findings report  {_host_path(control / slug)}/ "
+                f"({', '.join(reports['written'])})",
+                file=sys.stderr,
+            )
+        for problem in reports.get("errors", []):
+            print(f"  findings report  not written: {problem}", file=sys.stderr)
     if not result["complete"]:
         reasons = []
         if not recon_is_complete(result["recon"]["state"]):

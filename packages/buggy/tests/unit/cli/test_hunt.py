@@ -1055,3 +1055,88 @@ class TestScopeDiff:
         assert hunt.scope_diff(without, self._requested()) == [
             '  network: (not set) -> {"allow_private_targets": false}'
         ]
+
+
+# ── leads, findings reports and the kickoff ──────────────────────────────────────────
+
+
+class TestLeadsAndFindingsReports:
+    RECORDS = {
+        "vulnerability": [{"id": "v1", "value": "CVE-2024-0001 at https://app.acme.test/x"}],
+        "url": [{"asset": "app.acme.test", "value": "https://app.acme.test/api/orders/1001"}],
+    }
+
+    def test_recon_leads_are_queued_through_the_capture_server(self, monkeypatch) -> None:
+        calls: list[tuple[str, str, dict]] = []
+
+        def capture(tool, engagement, **arguments):
+            calls.append((tool, engagement, arguments))
+            return {"ok": True, "ids": ["F-1"], "created": 1, "merged": 0, "unclassified": 0}
+
+        monkeypatch.setattr(hunt, "_capture", capture)
+        assert hunt.queue_leads("acme", self.RECORDS)["ids"] == ["F-1"]
+        ((tool, engagement, arguments),) = calls
+        assert (tool, engagement, arguments["actor"]) == ("candidates_add", "acme", "recon")
+        items = json.loads(arguments["items_json"])
+        assert items["pipeline"] == self.RECORDS["vulnerability"]
+        assert isinstance(items["ranked"], list)
+
+    def test_findings_reports_and_sarif_are_written_from_the_servers_report(
+        self, tmp_path, monkeypatch
+    ) -> None:
+        report = {
+            "engagement": "acme",
+            "findings": [],
+            "unverified": [],
+            "leads": [],
+            "summary": {},
+            "generated_at": "2026-01-01T00:00:00Z",
+        }
+        asked: list[tuple[str, bool]] = []
+
+        def capture(tool, _engagement, **arguments):
+            assert tool == "report_build"
+            asked.append((arguments["fmt"], arguments["complete"]))
+            body = {"markdown": "# report", "html": "<!doctype html>", "json": json.dumps(report)}
+            return {"ok": True, "report": body[arguments["fmt"]]}
+
+        monkeypatch.setattr(hunt, "_capture", capture)
+        out = hunt.write_findings_reports(tmp_path, "acme", {"records": {"url": 3}}, complete=True)
+        assert out == {"written": ["report.md", "report.html", "report.json", "findings.sarif"]}
+        assert asked == [("markdown", True), ("html", True), ("json", True)]
+        sarif = json.loads((tmp_path / "acme" / "findings.sarif").read_text())
+        assert sarif["version"] == "2.1.0" and sarif["runs"][0]["results"] == []
+        assert json.loads((tmp_path / "acme" / "report.json").read_text()) == report
+
+    def test_an_unreachable_capture_server_is_reported_and_writes_nothing(
+        self, tmp_path, monkeypatch
+    ) -> None:
+        monkeypatch.setattr(hunt, "_capture", lambda *_a, **_k: {"error": "capture is unreachable"})
+        out = hunt.write_findings_reports(tmp_path, "acme", None, complete=False)
+        assert out["written"] == [] and len(out["errors"]) == 3
+        assert not (tmp_path / "acme").exists()
+
+    def test_the_kickoff_sends_agents_to_the_queue_and_the_verifier(self) -> None:
+        scope = {
+            "targets": ["https://app.acme.test"],
+            "enforcement_extra": {"sandbox_egress": "blocked"},
+        }
+        text = hunt.kickoff_text("acme", scope, recon_done=True, instruction="")
+        for tool in (
+            "candidates_next",
+            "finding_submit",
+            "finding_verify",
+            "finding_grade",
+            "facts_list",
+            "memory_search",
+            "identities_list",
+            "authz_matrix_run",
+            "recon_coverage",
+        ):
+            assert tool in text, tool
+        assert "A claim is not a finding" in text
+
+    def test_the_graph_projection_is_skipped_without_a_graph_database(self, monkeypatch) -> None:
+        for name in ("BUGGY_NEO4J_URI", "BUGGY_NEO4J_USER", "BUGGY_NEO4J_PASSWORD"):
+            monkeypatch.delenv(name, raising=False)
+        assert hunt.project_graph("acme").startswith("skipped")
