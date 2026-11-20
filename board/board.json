@@ -1,5 +1,5 @@
 {
- "updated": "2026-11-20 16:40 UTC",
+ "updated": "2026-11-20 16:43 UTC",
  "columns": [
   "backlog",
   "ready",
@@ -434,12 +434,12 @@
    "depends": [
     "C3"
    ],
-   "status": "in_progress",
+   "status": "done",
    "agent": "",
    "branch": "",
-   "commit": "",
-   "tests": "",
-   "note": "",
+   "commit": "d56e893",
+   "tests": "523 unit, 47 lab passed",
+   "note": "Open redirect, path traversal and CORS probes merged. Open redirect found for real on Juice Shop; traversal and CORS have no lab positive (unit-proven)",
    "order": 15
   },
   {
@@ -450,7 +450,7 @@
    "depends": [
     "C4"
    ],
-   "status": "backlog",
+   "status": "in_progress",
    "agent": "",
    "branch": "",
    "commit": "",
