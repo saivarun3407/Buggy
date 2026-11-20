@@ -1,5 +1,5 @@
 {
- "updated": "2026-11-20 17:25 UTC",
+ "updated": "2026-11-20 21:12 UTC",
  "columns": [
   "backlog",
   "ready",
@@ -768,12 +768,12 @@
    "depends": [
     "I2"
    ],
-   "status": "in_progress",
+   "status": "done",
    "agent": "",
    "branch": "",
-   "commit": "",
-   "tests": "",
-   "note": "",
+   "commit": "10954 unit, 47 lab, 12 e2e passed:92ebfd3",
+   "tests": " full stack up in 2 min with the Kali sandbox; hunt on both lab apps in 9m33s; SQL injection found, verified by probe re-run, graded, reported; resume, gate exit 10, CI gate, retest, graph projection, approval hold all live; lite demo in 5m17s; 12 scope e2e tests on Kali. Four faults found by running were fixed (nmap in the sandbox, unresolved named target, doctor mount check, operator graph settings)",
+   "note": "Verified on the real stack\\",
    "order": 36
   },
   {
@@ -789,8 +789,8 @@
    "agent": "",
    "branch": "",
    "commit": "",
-   "tests": "",
-   "note": "",
+   "tests": " no agent run has been measured. The evidence contract and scorecard are ready (benchmark/RESULTS_POLICY.md).",
+   "note": "Needs a model key\\",
    "order": 37
   }
  ]
