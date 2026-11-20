@@ -133,6 +133,10 @@ def run_engagement(
                 public_repos=repos,
                 **pipeline_kwargs,
             )
+            if control is not None:
+                # Operator-supplied API contracts are read from the same
+                # control tree the scope came from, not from the environment.
+                pipeline.control_dir = control / engagement
             return pipeline.run(trigger=trigger)
     finally:
         if owned:

@@ -923,3 +923,36 @@ class TestContractAndPublishedSpec:
         self._republish(env)
         _pipeline(env, _roe()).run()
         assert _values(env, "api_operation") == {"GET https://www.acme.test/v1/ping"}
+
+
+class TestServicePassesItsControlTree:
+    """`run_engagement(control=...)` reads contracts from that tree, not from the environment."""
+
+    def test_the_pipeline_is_given_the_control_directory_of_the_run(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        from buggy.pipeline import service
+
+        control = tmp_path / "control"
+        (control / "acme").mkdir(parents=True)
+        (control / "acme" / "roe.json").write_text(
+            json.dumps({"machine_enforcement": {"mode": "enforce", "in_scope": ["app.acme.test"]}})
+        )
+        monkeypatch.setenv("BUGGY_CONTROL_ROOT", str(tmp_path / "elsewhere"))
+        seen: dict[str, object] = {}
+
+        def fake_run(self, trigger="manual"):
+            seen["control_dir"] = self.control_dir
+            return {}
+
+        monkeypatch.setattr(service.Pipeline, "run", fake_run)
+        service.run_engagement("acme", root=tmp_path / "data", control=control)
+        assert seen["control_dir"] == control / "acme"
+
+        # Control: without an explicit tree the pipeline falls back to the environment.
+        (tmp_path / "elsewhere" / "acme").mkdir(parents=True)
+        (tmp_path / "elsewhere" / "acme" / "roe.json").write_text(
+            (control / "acme" / "roe.json").read_text()
+        )
+        service.run_engagement("acme", root=tmp_path / "data")
+        assert seen["control_dir"] is None
