@@ -38,16 +38,28 @@ CREATE TABLE IF NOT EXISTS captures (
     probe TEXT NOT NULL DEFAULT '',
     replay_of TEXT NOT NULL DEFAULT '',
     approval_id TEXT NOT NULL DEFAULT '',
-    scope_digest TEXT NOT NULL DEFAULT ''
+    scope_digest TEXT NOT NULL DEFAULT '',
+    identity TEXT NOT NULL DEFAULT '',
+    redaction TEXT NOT NULL DEFAULT ''
 );
 CREATE INDEX IF NOT EXISTS captures_engagement ON captures (engagement, created_at);
 CREATE INDEX IF NOT EXISTS captures_host ON captures (engagement, host);
 """
 
+# Columns added after the first release: a store created before them gains them on open.
+_MIGRATIONS = {
+    "identity": "ALTER TABLE captures ADD COLUMN identity TEXT NOT NULL DEFAULT ''",
+    "redaction": "ALTER TABLE captures ADD COLUMN redaction TEXT NOT NULL DEFAULT ''",
+}
+
 # Header names whose values are credentials: stored, never echoed back in listings.
 SENSITIVE_HEADERS = frozenset(
     {"authorization", "cookie", "set-cookie", "x-api-key", "proxy-authorization"}
 )
+REDACTED = "<redacted>"
+# A session value shorter than this is not searched for in bodies: replacing every
+# occurrence of a two-character string would shred the evidence without hiding anything.
+MIN_SCRUBBED_VALUE = 8
 
 
 def sha256_hex(data: bytes) -> str:
@@ -83,6 +95,14 @@ class Capture:
     replay_of: str
     approval_id: str
     scope_digest: str
+    # The named identity whose session the gateway attached ("" = none).
+    identity: str = ""
+    # Lower-case header names redacted for this capture on top of SENSITIVE_HEADERS:
+    # the headers an identity's session is carried in.
+    redact_headers: tuple[str, ...] = ()
+    # True for the gateway's own login exchange: the request holds the account's
+    # password and the response the fresh session, so neither body is ever shown.
+    redact_bodies: bool = False
 
     def summary(self) -> dict[str, Any]:
         return {
@@ -98,26 +118,59 @@ class Capture:
             "note": self.note,
             "replay_of": self.replay_of,
             "error": self.error,
+            "identity": self.identity,
         }
 
+    def _session_values(self, hidden: frozenset[str]) -> list[str]:
+        """The credential strings an identity's session put on this request.
+
+        A target that echoes its caller's token or cookie back in a body would
+        otherwise hand the agent the very value the header redaction hides.
+        Only captures sent as a named identity are searched: there the gateway
+        attached the credentials and the caller never held them.
+        """
+        if not self.identity:
+            return []
+        values: set[str] = set()
+        for name, value in self.request_headers.items():
+            if name.lower() not in hidden:
+                continue
+            values.add(value.strip())
+            if name.lower() == "cookie":
+                for pair in value.split(";"):
+                    values.add(pair.partition("=")[2].strip())
+            else:
+                values.add(value.strip().rpartition(" ")[2])  # "Bearer <token>" -> token
+        return sorted((v for v in values if len(v) >= MIN_SCRUBBED_VALUE), key=len, reverse=True)
+
     def detail(self, *, body_chars: int = 8000, reveal_credentials: bool = False) -> dict[str, Any]:
+        hidden = SENSITIVE_HEADERS | frozenset(self.redact_headers)
+        secrets = [] if reveal_credentials else self._session_values(hidden)
+
+        def _scrub(value: str) -> str:
+            for secret in secrets:
+                value = value.replace(secret, REDACTED)
+            return value
+
         def _headers(headers: dict[str, str]) -> dict[str, str]:
             if reveal_credentials:
                 return headers
-            return {
-                k: ("<redacted>" if k.lower() in SENSITIVE_HEADERS else v)
-                for k, v in headers.items()
-            }
+            return {k: (REDACTED if k.lower() in hidden else _scrub(v)) for k, v in headers.items()}
+
+        def _body(raw: bytes) -> str:
+            if self.redact_bodies and not reveal_credentials:
+                return REDACTED
+            return _scrub(raw.decode("utf-8", "replace"))[:body_chars]
 
         text = self.response_body.decode("utf-8", "replace")
         return {
             **self.summary(),
             "engagement": self.engagement,
             "request_headers": _headers(self.request_headers),
-            "request_body": self.request_body.decode("utf-8", "replace")[:body_chars],
+            "request_body": _body(self.request_body),
             "request_sha256": self.request_sha256,
             "response_headers": _headers(self.response_headers),
-            "response_body": text[:body_chars],
+            "response_body": _body(self.response_body),
             "response_truncated": len(text) > body_chars
             or self.response_bytes > len(self.response_body),
             "approval_id": self.approval_id,
@@ -138,6 +191,10 @@ class CaptureStore:
             self._db = sqlite3.connect(self.path, check_same_thread=False, timeout=30)
             with self._tx() as cur:
                 cur.executescript(_SCHEMA)
+                present = {row[1] for row in cur.execute("PRAGMA table_info(captures)")}
+                for column, statement in _MIGRATIONS.items():
+                    if column not in present:
+                        cur.execute(statement)
         self._db.row_factory = sqlite3.Row
 
     def close(self) -> None:
@@ -176,10 +233,21 @@ class CaptureStore:
         replay_of: str = "",
         approval_id: str = "",
         scope_digest: str = "",
+        identity: str = "",
+        redact_headers: tuple[str, ...] | list[str] = (),
+        redact_bodies: bool = False,
     ) -> Capture:
         capture_id = f"cap-{uuid.uuid4().hex[:16]}"
         now = time.time()
         stored_response = response_body[:MAX_STORED_BODY]
+        redaction = ""
+        if redact_headers or redact_bodies:
+            redaction = json.dumps(
+                {
+                    "headers": sorted({str(name).lower() for name in redact_headers}),
+                    "bodies": bool(redact_bodies),
+                }
+            )
         row = (
             capture_id,
             engagement,
@@ -202,14 +270,16 @@ class CaptureStore:
             replay_of,
             approval_id,
             scope_digest,
+            identity[:64],
+            redaction,
         )
         with self._tx() as cur:
             cur.execute(
                 "INSERT INTO captures (id, engagement, created_at, method, url, host, "
                 "request_headers, request_body, request_sha256, status, response_headers, "
                 "response_body, response_sha256, response_bytes, elapsed_ms, error, note, probe, "
-                "replay_of, approval_id, scope_digest) "
-                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                "replay_of, approval_id, scope_digest, identity, redaction) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
                 row,
             )
         found = self.get(engagement, capture_id)
@@ -218,6 +288,11 @@ class CaptureStore:
 
     @staticmethod
     def _row(row: sqlite3.Row) -> Capture:
+        # A read-only handle cannot migrate, so an older file may lack the new columns.
+        columns = row.keys()
+        redaction: dict[str, Any] = {}
+        if "redaction" in columns and row["redaction"]:
+            redaction = json.loads(row["redaction"])
         return Capture(
             id=row["id"],
             engagement=row["engagement"],
@@ -240,6 +315,9 @@ class CaptureStore:
             replay_of=row["replay_of"],
             approval_id=row["approval_id"],
             scope_digest=row["scope_digest"],
+            identity=(row["identity"] or "") if "identity" in columns else "",
+            redact_headers=tuple(redaction.get("headers") or ()),
+            redact_bodies=bool(redaction.get("bodies")),
         )
 
     def get(self, engagement: str, capture_id: str) -> Capture | None:
@@ -270,6 +348,7 @@ class CaptureStore:
 
 __all__ = [
     "MAX_STORED_BODY",
+    "REDACTED",
     "SENSITIVE_HEADERS",
     "Capture",
     "CaptureStore",

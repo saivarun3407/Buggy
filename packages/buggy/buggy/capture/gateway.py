@@ -10,6 +10,15 @@ leaves:
 
 Only then is the request sent, and whatever happens (response, error) is
 recorded with a ledger line.
+
+A request may name an ``identity`` (see :mod:`buggy.capture.identities`). The
+gateway then attaches that test account's session, logging in first if it has
+none. The login is itself a request through :meth:`CaptureGateway.send`, marked
+``internal``. That flag waives check 2 and nothing else, and only for a request
+the operator declared as an identity's login in the secrets root: scope, the
+internal-address block, the rate limit, the capture and the ledger line all
+still apply, and the ledger line says ``internal_login`` where an approval id
+would be.
 """
 
 from __future__ import annotations
@@ -23,11 +32,21 @@ import time
 import urllib.error
 import urllib.request
 import uuid
+from collections.abc import Iterable
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 from urllib.parse import urlsplit
 
+from buggy.capture.identities import (
+    Identity,
+    IdentityError,
+    IdentityStore,
+    LoginError,
+    Session,
+    SessionManager,
+    UnknownIdentity,
+)
 from buggy.capture.store import Capture, CaptureStore, request_fingerprint, sha256_hex
 from buggy.egress_guard.ledger import Ledger
 from buggy.pipeline.http import RateLimiter
@@ -52,6 +71,54 @@ _BLOCKED_HEADERS = frozenset(
     }
 )
 APPROVAL_MAX_USES = 3
+# What a capture and its ledger line carry instead of an approval id when the
+# request was the gateway's own login for a declared identity.
+INTERNAL_LOGIN = "internal_login"
+
+
+def _collect_headers(items: Iterable[tuple[str, str]]) -> dict[str, str]:
+    """Response headers as a dict that keeps repeated headers.
+
+    A response usually sets several cookies, each in its own ``Set-Cookie``.
+    Those are kept one per line (a cookie's ``Expires`` contains a comma);
+    any other repeated header is joined with ``", "`` as HTTP allows.
+    """
+    out: dict[str, str] = {}
+    for key, value in items:
+        existing = next((k for k in out if k.lower() == key.lower()), None)
+        if existing is None:
+            out[key] = value
+        else:
+            separator = "\n" if key.lower() == "set-cookie" else ", "
+            out[existing] = out[existing] + separator + value
+    return out
+
+
+def _with_session(headers: dict[str, str] | None, session: Session) -> dict[str, str]:
+    """The caller's headers with the identity's session on top.
+
+    A header the session sets replaces the caller's header of the same name.
+    Session cookies are merged into the caller's ``Cookie`` header, again
+    winning over a caller cookie of the same name.
+    """
+    merged = {str(k): str(v) for k, v in (headers or {}).items()}
+
+    def take(name: str) -> list[str]:
+        return [merged.pop(k) for k in [k for k in merged if k.lower() == name.lower()]]
+
+    for name, value in session.headers.items():
+        take(name)
+        merged[name] = value
+    if session.cookies:
+        jar: dict[str, str] = {}
+        for line in take("cookie"):
+            for pair in line.split(";"):
+                cookie, _, value = pair.strip().partition("=")
+                if cookie:
+                    jar[cookie] = value
+        jar.update(session.cookies)
+        merged["Cookie"] = "; ".join(f"{k}={v}" for k, v in jar.items())
+    return merged
 
 
 def internal_address_block(url: str, scope: ScopeFilter, document: dict[str, Any]) -> str | None:
@@ -116,11 +183,13 @@ class _NoRedirect(urllib.request.HTTPRedirectHandler):
 
 @dataclass(frozen=True, slots=True)
 class Roots:
-    """Where the gateway reads scope and approvals, and writes its records."""
+    """Where the gateway reads scope, approvals and identities, and writes its records."""
 
     control: Path
     audit: Path
     data: Path
+    # Operator-written test accounts; never mounted into an agent-facing container.
+    secrets: Path = Path("/secrets")
 
     @classmethod
     def from_env(cls) -> Roots:
@@ -128,6 +197,7 @@ class Roots:
             control=Path(os.environ.get("BUGGY_CONTROL_ROOT") or "/control"),
             audit=Path(os.environ.get("BUGGY_AUDIT_ROOT") or "/audit"),
             data=Path(os.environ.get("BUGGY_CAPTURE_DATA") or "/data/capture"),
+            secrets=Path(os.environ.get("BUGGY_SECRETS_ROOT") or "/secrets"),
         )
 
 
@@ -165,6 +235,8 @@ class CaptureGateway:
         self._lock = threading.Lock()
         self._limiters: dict[tuple[str, int], RateLimiter] = {}
         self._ledgers: dict[str, Ledger] = {}
+        self.identities = IdentityStore(roots.secrets)
+        self.sessions = SessionManager(self, self.identities)
 
     # ── scope / policy ──────────────────────────────────────────────
 
@@ -287,8 +359,134 @@ class CaptureGateway:
         note: str = "",
         probe: str = "",
         replay_of: str = "",
+        identity: str = "",
+        internal: bool = False,
     ) -> Capture:
-        """Send one request and return its capture, or raise :class:`GatewayRefusal`."""
+        """Send one request and return its capture, or raise :class:`GatewayRefusal`.
+
+        ``identity`` names a declared test account whose session is attached
+        (its headers and cookies win over the caller's of the same name). If
+        that session is answered with 401 it is renewed with one login and the
+        request is sent once more; both exchanges are recorded and the second
+        is returned.
+
+        ``internal`` is for the session manager's own login request and waives
+        the approval hold only. It is honoured for nothing but a request the
+        operator declared as an identity's login; no tool argument reaches it.
+        """
+        return self._send(
+            engagement,
+            method,
+            url,
+            headers=headers,
+            body=body,
+            note=note,
+            probe=probe,
+            replay_of=replay_of,
+            identity=identity,
+            internal=internal,
+        )
+
+    def _send(
+        self,
+        engagement: str,
+        method: str,
+        url: str,
+        *,
+        headers: dict[str, str] | None,
+        body: bytes | str | None,
+        note: str,
+        probe: str,
+        replay_of: str,
+        identity: str,
+        internal: bool = False,
+        also_redact: tuple[str, ...] = (),
+    ) -> Capture:
+        def exchange(session: Session | None) -> tuple[Capture, Session | None, bool]:
+            return self._exchange(
+                engagement,
+                method,
+                url,
+                headers=headers,
+                body=body,
+                note=note,
+                probe=probe,
+                replay_of=replay_of,
+                identity=identity,
+                internal=internal,
+                also_redact=also_redact,
+                session=session,
+            )
+
+        capture, session, fresh = exchange(None)
+        if session is None or session.identity.login is None or fresh or capture.status != 401:
+            return capture
+        # A cached session was rejected: it expired or was revoked. Log in once and
+        # ask again. Every check runs again for the second request, so if it cannot
+        # be sent (the login fails, an approval is spent) the 401 is the answer.
+        try:
+            renewed, _ = self._session(engagement, identity, rejected=session)
+            return exchange(renewed)[0]
+        except GatewayRefusal:
+            return capture
+
+    def _session(
+        self, engagement: str, identity: str, *, rejected: Session | None = None
+    ) -> tuple[Session, bool]:
+        """The identity's session (and whether it is new), or a refusal safe to show."""
+        try:
+            if rejected is not None:
+                return self.sessions.renew(engagement, identity, rejected), True
+            return self.sessions.session_for(engagement, identity)
+        except UnknownIdentity:
+            raise GatewayRefusal(
+                "UNKNOWN_IDENTITY",
+                f"no identity {identity!r} is declared for this engagement; not sent",
+            ) from None
+        except IdentityError as exc:
+            raise GatewayRefusal(
+                "BAD_IDENTITIES", f"the engagement's identities file is invalid ({exc}); not sent"
+            ) from exc
+        except LoginError as exc:
+            raise GatewayRefusal("LOGIN_FAILED", f"{exc}; the request was not sent") from exc
+        except GatewayRefusal as exc:
+            raise GatewayRefusal(
+                "LOGIN_FAILED",
+                f"the login for identity {identity!r} was refused ({exc.code}: {exc.detail}); "
+                "the request was not sent",
+            ) from exc
+
+    def _refused(self, engagement: str, method: str, url: str, reason: str) -> None:
+        self._ledger(engagement).append(
+            {
+                "ts": time.time(),
+                "event": "capture_refused",
+                "engagement": engagement,
+                "decision": "drop",
+                "method": method,
+                "url": url,
+                "reason": reason,
+            }
+        )
+
+    def _exchange(
+        self,
+        engagement: str,
+        method: str,
+        url: str,
+        *,
+        headers: dict[str, str] | None,
+        body: bytes | str | None,
+        note: str,
+        probe: str,
+        replay_of: str,
+        identity: str,
+        internal: bool,
+        also_redact: tuple[str, ...],
+        session: Session | None,
+    ) -> tuple[Capture, Session | None, bool]:
+        """One request through every check. Returns the capture, the session used and
+        whether that session was opened (logged in) for this request."""
         method = (method or "").upper()
         if method not in ALLOWED_METHODS:
             raise GatewayRefusal("BAD_METHOD", f"method must be one of {sorted(ALLOWED_METHODS)}")
@@ -300,44 +498,64 @@ class CaptureGateway:
         payload = body.encode("utf-8") if isinstance(body, str) else (body or b"")
         if len(payload) > MAX_REQUEST_BODY:
             raise GatewayRefusal("BODY_TOO_LARGE", f"request body exceeds {MAX_REQUEST_BODY} bytes")
+        if not isinstance(identity, str) or (identity and internal):
+            raise GatewayRefusal("BAD_ARGUMENT", "identity must be a name; a login names none")
 
         scope, document = self.scope_for(engagement)
         allowed, reason = scope.decide(url)
         if not allowed:
-            self._ledger(engagement).append(
-                {
-                    "ts": time.time(),
-                    "event": "capture_refused",
-                    "engagement": engagement,
-                    "decision": "drop",
-                    "method": method,
-                    "url": url,
-                    "reason": reason,
-                }
-            )
+            self._refused(engagement, method, url, reason)
             raise GatewayRefusal(
                 "OUT_OF_SCOPE",
                 f"{host_of(url)!r} is not in the enforced scope ({reason}); not sent",
             )
 
-        internal = internal_address_block(url, scope, document)
-        if internal is not None:
-            self._ledger(engagement).append(
-                {
-                    "ts": time.time(),
-                    "event": "capture_refused",
-                    "engagement": engagement,
-                    "decision": "drop",
-                    "method": method,
-                    "url": url,
-                    "reason": "INTERNAL_ADDRESS",
-                }
-            )
-            raise GatewayRefusal("INTERNAL_ADDRESS", f"{internal}; not sent")
+        blocked = internal_address_block(url, scope, document)
+        if blocked is not None:
+            self._refused(engagement, method, url, "INTERNAL_ADDRESS")
+            raise GatewayRefusal("INTERNAL_ADDRESS", f"{blocked}; not sent")
+
+        # Who is asking. An unknown name stops here, before an approval is filed.
+        logins: list[Identity] = []
+        try:
+            if identity:
+                self.identities.get(engagement, identity)
+            if internal is True:
+                logins = self.identities.logins_at(engagement, method, url)
+        except UnknownIdentity:
+            raise GatewayRefusal(
+                "UNKNOWN_IDENTITY",
+                f"no identity {identity!r} is declared for this engagement; not sent",
+            ) from None
+        except IdentityError as exc:
+            raise GatewayRefusal(
+                "BAD_IDENTITIES", f"the engagement's identities file is invalid ({exc}); not sent"
+            ) from exc
 
         approval_id = ""
-        if method not in SAFE_METHODS and self.approval_required(document):
+        if internal is True and logins:
+            # The one exemption from the approval hold: the operator wrote this
+            # request down as a test account's login. Recorded as such below.
+            approval_id = INTERNAL_LOGIN
+        elif internal:
+            self._refused(engagement, method, url, "NOT_A_DECLARED_LOGIN")
+            raise GatewayRefusal(
+                "NOT_A_DECLARED_LOGIN",
+                "only a login request the operator declared for an identity of this "
+                "engagement may be sent as internal; not sent",
+            )
+        elif method not in SAFE_METHODS and self.approval_required(document):
             approval_id = self._check_approval(engagement, method, url, payload, note)
+
+        fresh = False
+        redact_headers = set(also_redact)
+        if identity:
+            if session is None:
+                session, fresh = self._session(engagement, identity)
+            headers = _with_session(headers, session)
+            redact_headers.update(session.identity.session_header_names())
+        for login_identity in logins:
+            redact_headers.update(login_identity.login_header_names())
 
         clean = {
             str(k): str(v)
@@ -361,11 +579,11 @@ class CaptureGateway:
         try:
             with self._opener.open(request, timeout=self._timeout) as raw:
                 status = raw.status
-                response_headers = {k: v for k, v in raw.headers.items()}
+                response_headers = _collect_headers(raw.headers.items())
                 response_body = raw.read(MAX_RESPONSE)
         except urllib.error.HTTPError as exc:
             status = exc.code
-            response_headers = {k: v for k, v in (exc.headers.items() if exc.headers else [])}
+            response_headers = _collect_headers(exc.headers.items() if exc.headers else [])
             response_body = exc.read(MAX_RESPONSE) if exc.fp else b""
         except (OSError, ValueError) as exc:
             error = f"{type(exc).__name__}: {exc}"[:300]
@@ -388,6 +606,9 @@ class CaptureGateway:
             replay_of=replay_of,
             approval_id=approval_id,
             scope_digest=scope.digest,
+            identity=identity,
+            redact_headers=tuple(sorted(redact_headers)),
+            redact_bodies=approval_id == INTERNAL_LOGIN,
         )
         self._ledger(engagement).append(
             {
@@ -403,18 +624,30 @@ class CaptureGateway:
                 "probe": probe,
                 "replay_of": replay_of,
                 "approval_id": approval_id,
+                "identity": identity,
                 "scope_sha256": scope.digest,
                 "error": error,
             }
         )
-        return capture
+        return capture, session, fresh
 
     def replay(self, engagement: str, capture_id: str, *, note: str = "") -> dict[str, Any]:
-        """Re-send a captured request from the gateway and compare the outcomes."""
+        """Re-send a captured request from the gateway and compare the outcomes.
+
+        A request sent as an identity is replayed as that identity, with its
+        current session. The gateway's own login exchanges are not replayable:
+        only the session manager sends an account's password.
+        """
         original = self.store.get(engagement, capture_id)
         if original is None:
             raise GatewayRefusal("UNKNOWN_CAPTURE", f"no capture {capture_id!r} in this engagement")
-        fresh = self.send(
+        if original.approval_id == INTERNAL_LOGIN or original.redact_bodies:
+            raise GatewayRefusal(
+                "LOGIN_NOT_REPLAYABLE",
+                f"{capture_id} is the gateway's login for an identity and cannot be replayed; "
+                "send a request with that identity instead",
+            )
+        fresh = self._send(
             engagement,
             original.method,
             original.url,
@@ -423,6 +656,8 @@ class CaptureGateway:
             note=note or f"replay of {capture_id}",
             probe=original.probe,
             replay_of=capture_id,
+            identity=original.identity,
+            also_redact=original.redact_headers,
         )
         return {
             "original": original.summary(),
@@ -453,6 +688,7 @@ class CaptureGateway:
 
 __all__ = [
     "ALLOWED_METHODS",
+    "INTERNAL_LOGIN",
     "SAFE_METHODS",
     "CaptureGateway",
     "GatewayRefusal",
