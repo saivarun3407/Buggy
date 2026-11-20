@@ -1,0 +1,61 @@
+{
+  "swagger": "2.0",
+  "info": {
+    "title": "Legacy accounts API",
+    "version": "1.0",
+    "description": "Hand-written test contract (Swagger 2). Values containing LEAKCANARY are fake secrets."
+  },
+  "host": "legacy.example.test",
+  "basePath": "/api",
+  "schemes": ["https", "http"],
+  "securityDefinitions": {
+    "api_key": {"type": "apiKey", "name": "X-Api-Key", "in": "header", "x-example": "LEAKCANARY-apikey"}
+  },
+  "security": [{"api_key": []}],
+  "paths": {
+    "/users/{id}": {
+      "parameters": [{"name": "id", "in": "path", "required": true, "type": "integer"}],
+      "get": {
+        "operationId": "getUser",
+        "parameters": [{"name": "expand", "in": "query", "type": "string", "default": "LEAKCANARY-default"}]
+      }
+    },
+    "/users": {
+      "post": {
+        "operationId": "createUser",
+        "consumes": ["application/json"],
+        "parameters": [
+          {"name": "body", "in": "body", "required": true, "schema": {"$ref": "#/definitions/User"}}
+        ]
+      }
+    },
+    "/login": {
+      "post": {
+        "operationId": "login",
+        "security": [],
+        "consumes": ["application/x-www-form-urlencoded"],
+        "parameters": [
+          {"name": "username", "in": "formData", "type": "string", "required": true},
+          {"name": "password", "in": "formData", "type": "string", "required": true, "x-example": "LEAKCANARY-password"}
+        ]
+      }
+    }
+  },
+  "definitions": {
+    "User": {
+      "type": "object",
+      "properties": {
+        "username": {"type": "string"},
+        "password": {"type": "string", "example": "LEAKCANARY-password"},
+        "profile": {"$ref": "#/definitions/Profile"}
+      }
+    },
+    "Profile": {
+      "type": "object",
+      "properties": {
+        "display_name": {"type": "string"},
+        "avatar_url": {"type": "string"}
+      }
+    }
+  }
+}

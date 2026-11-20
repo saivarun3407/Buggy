@@ -50,6 +50,7 @@ INTROSPECTION_QUERY = (
 
 _HTTP_METHODS = ("get", "post", "put", "patch", "delete", "head", "options")
 _MAX_LIST = 200
+_MAX_SCHEMA_DEPTH = 6
 
 
 def _embedded_swagger_doc(text: str) -> dict[str, Any] | None:
@@ -131,15 +132,97 @@ def _base_url(spec: dict[str, Any], spec_url: str) -> str:
     return urljoin(spec_url, "/")
 
 
-def parse_openapi(spec: dict[str, Any], *, spec_url: str) -> Iterator[Record]:
-    spec_url = normalize_url(spec_url)
-    asset = host_of(spec_url)
-    info = as_dict(spec.get("info"))
-    base = _base_url(spec, spec_url).rstrip("/")
-    global_security = bool(spec.get("security"))
-    components = as_dict(spec.get("components"))
-    schemes = components.get("securitySchemes") or spec.get("securityDefinitions") or {}
+def _deref(
+    spec: dict[str, Any], node: Any, trail: tuple[str, ...]
+) -> tuple[dict[str, Any], tuple[str, ...]]:
+    """``node`` with its local ``$ref`` chain followed, and the references taken.
 
+    A reference outside the document, one that points at nothing, and one
+    already on ``trail`` (a schema that contains itself) resolve to ``{}``.
+    """
+    while isinstance(node, dict) and isinstance(node.get("$ref"), str):
+        ref = node["$ref"]
+        if not ref.startswith("#/") or ref in trail:
+            return {}, trail
+        trail = (*trail, ref)
+        node = spec
+        for step in ref[2:].split("/"):
+            node = (
+                node.get(step.replace("~1", "/").replace("~0", "~"))
+                if isinstance(node, dict)
+                else None
+            )
+    return (node if isinstance(node, dict) else {}), trail
+
+
+def _schema_names(
+    spec: dict[str, Any],
+    schema: Any,
+    prefix: str,
+    trail: tuple[str, ...],
+    depth: int,
+    names: dict[str, None],
+) -> bool:
+    """Add the dotted name of every leaf property of ``schema``; whether it had any.
+
+    The names are the ones ``params`` gives a JSON Schema: ``profile.age`` for
+    a nested object, ``items[].id`` for an array of objects.
+    """
+    node, trail = _deref(spec, schema, trail)
+    if not node or depth > _MAX_SCHEMA_DEPTH or len(names) >= _MAX_LIST:
+        return False
+    found = False
+    for keyword in ("allOf", "oneOf", "anyOf"):
+        for branch in as_list_of(node.get(keyword)):
+            found |= _schema_names(spec, branch, prefix, trail, depth + 1, names)
+    if isinstance(node.get("items"), dict):
+        found |= _schema_names(spec, node["items"], f"{prefix}[]", trail, depth + 1, names)
+    for name, child in as_dict(node.get("properties")).items():
+        dotted = f"{prefix}.{name}" if prefix else str(name)
+        if not _schema_names(spec, child, dotted, trail, depth + 1, names):
+            names.setdefault(dotted)
+        found = True
+    return found
+
+
+def _body_properties(
+    spec: dict[str, Any], operation: dict[str, Any], parameters: list[Any]
+) -> list[str]:
+    """Property names of the request body an operation declares, references resolved.
+
+    OpenAPI 3 keeps the schema under ``requestBody.content.<media type>``;
+    Swagger 2 in the parameter that is ``in: body``. Names only: an example or
+    a default in the schema is never copied.
+    """
+    names: dict[str, None] = {}
+    body, trail = _deref(spec, operation.get("requestBody"), ())
+    content = as_dict(body.get("content"))
+    for media in sorted(content, key=str):
+        _schema_names(spec, as_dict(content[media]).get("schema"), "", trail, 0, names)
+    for parameter in parameters:
+        declared, trail = _deref(spec, parameter, ())
+        if declared.get("in") == "body":
+            _schema_names(spec, declared.get("schema"), "", trail, 0, names)
+    return list(names)[:_MAX_LIST]
+
+
+def openapi_operations(
+    spec: dict[str, Any],
+    *,
+    base: str,
+    spec_ref: str,
+    asset: str = "",
+    tool: str = OPENAPI_TOOL,
+    extra: dict[str, Any] | None = None,
+) -> list[Record]:
+    """One ``api_operation`` record per path and method of ``spec``, served under ``base``.
+
+    Shared by the discovery stage (``spec_ref`` is the URL the document was
+    fetched from) and by operator-supplied contracts (``spec_ref`` names the
+    file). ``asset`` is used for an operation whose URL has no host; ``extra``
+    is added to every record's attrs.
+    """
+    global_security = bool(spec.get("security"))
     operations: list[Record] = []
     for path, item in spec["paths"].items():
         if not isinstance(item, dict) or not isinstance(path, str):
@@ -173,7 +256,7 @@ def parse_openapi(spec: dict[str, Any], *, spec_url: str) -> Iterator[Record]:
                     type=RecordType.API_OPERATION,
                     asset=host_of(url) or asset,
                     value=f"{method.upper()} {url}",
-                    source_tool=OPENAPI_TOOL,
+                    source_tool=tool,
                     attrs={
                         "method": method.upper(),
                         "url": url,
@@ -183,25 +266,45 @@ def parse_openapi(spec: dict[str, Any], *, spec_url: str) -> Iterator[Record]:
                         "tags": [str(t) for t in operation.get("tags") or []][:20],
                         "parameters": parameters,
                         "request_body_types": body_types,
+                        "request_body_properties": _body_properties(
+                            spec, operation, [*shared, *own]
+                        ),
                         "auth_required": auth_required,
-                        "spec_url": spec_url,
+                        "spec_url": spec_ref,
+                        **(extra or {}),
                     },
                 )
             )
+    return operations
+
+
+def openapi_spec_attrs(spec: dict[str, Any], *, base: str, operation_count: int) -> dict[str, Any]:
+    """The attrs of the ``api_spec`` record that describes ``spec``."""
+    info = as_dict(spec.get("info"))
+    components = as_dict(spec.get("components"))
+    schemes = components.get("securitySchemes") or spec.get("securityDefinitions") or {}
+    return {
+        "format": "openapi" if spec.get("openapi") else "swagger",
+        "spec_version": str(spec.get("openapi") or spec.get("swagger")),
+        "title": str(info.get("title") or "")[:200],
+        "api_version": str(info.get("version") or ""),
+        "base_url": base,
+        "operation_count": operation_count,
+        "security_schemes": sorted(schemes) if isinstance(schemes, dict) else [],
+    }
+
+
+def parse_openapi(spec: dict[str, Any], *, spec_url: str) -> Iterator[Record]:
+    spec_url = normalize_url(spec_url)
+    asset = host_of(spec_url)
+    base = _base_url(spec, spec_url).rstrip("/")
+    operations = openapi_operations(spec, base=base, spec_ref=spec_url, asset=asset)
     yield Record(
         type=RecordType.API_SPEC,
         asset=asset,
         value=spec_url,
         source_tool=OPENAPI_TOOL,
-        attrs={
-            "format": "openapi" if spec.get("openapi") else "swagger",
-            "spec_version": str(spec.get("openapi") or spec.get("swagger")),
-            "title": str(info.get("title") or "")[:200],
-            "api_version": str(info.get("version") or ""),
-            "base_url": base,
-            "operation_count": len(operations),
-            "security_schemes": sorted(schemes) if isinstance(schemes, dict) else [],
-        },
+        attrs=openapi_spec_attrs(spec, base=base, operation_count=len(operations)),
     )
     yield from operations
 

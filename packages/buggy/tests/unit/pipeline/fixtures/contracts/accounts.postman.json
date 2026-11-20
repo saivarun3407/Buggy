@@ -1,0 +1,129 @@
+{
+  "info": {
+    "name": "Accounts API",
+    "description": "Hand-written test contract (Postman v2.1). Values containing LEAKCANARY are fake secrets.",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "variable": [
+    {"key": "baseUrl", "value": "https://{{apiHost}}"},
+    {"key": "apiHost", "value": "api.example.test"},
+    {"key": "apiVersion", "value": "v2"},
+    {"key": "partnerUrl", "value": "https://partner.example.net"},
+    {"key": "token", "value": "LEAKCANARY-variable-token"},
+    {"key": "adminPassword", "value": "LEAKCANARY-variable-password"}
+  ],
+  "auth": {
+    "type": "bearer",
+    "bearer": [{"key": "token", "value": "LEAKCANARY-collection-bearer", "type": "string"}]
+  },
+  "item": [
+    {
+      "name": "Users",
+      "item": [
+        {
+          "name": "List users",
+          "request": {
+            "method": "GET",
+            "header": [
+              {"key": "Accept", "value": "application/json"},
+              {"key": "X-Trace-Id", "value": "LEAKCANARY-header-value"},
+              {"key": "Authorization", "value": "Bearer LEAKCANARY-authorization-header"}
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/{{apiVersion}}/users?limit=10&api_key=LEAKCANARY-query-value",
+              "host": ["{{baseUrl}}"],
+              "path": ["{{apiVersion}}", "users"],
+              "query": [
+                {"key": "limit", "value": "10"},
+                {"key": "api_key", "value": "LEAKCANARY-query-value"}
+              ]
+            }
+          }
+        },
+        {
+          "name": "Create user",
+          "request": {
+            "method": "POST",
+            "header": [{"key": "Content-Type", "value": "application/json"}],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"email\": \"new.user@example.test\",\n  \"password\": \"LEAKCANARY-body-password\",\n  \"age\": {{age}},\n  \"profile\": {\"display_name\": \"New\", \"avatar_url\": \"https://img.example.test/a.png\"},\n  \"roles\": [{\"role_id\": 3}],\n  \"tags\": [\"a\", \"b\"]\n}",
+              "options": {"raw": {"language": "json"}}
+            },
+            "url": "{{baseUrl}}/{{apiVersion}}/users"
+          }
+        },
+        {
+          "name": "Get user",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "auth": {
+              "type": "basic",
+              "basic": [
+                {"key": "username", "value": "admin"},
+                {"key": "password", "value": "LEAKCANARY-basic-password"}
+              ]
+            },
+            "url": {
+              "raw": "{{baseUrl}}/{{apiVersion}}/users/:userId?fields=email",
+              "host": ["{{baseUrl}}"],
+              "path": ["{{apiVersion}}", "users", ":userId"],
+              "query": [{"key": "fields", "value": "email"}],
+              "variable": [{"key": "userId", "value": "42"}]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "Public",
+      "auth": {"type": "noauth"},
+      "item": [
+        {
+          "name": "Login",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "body": {
+              "mode": "urlencoded",
+              "urlencoded": [
+                {"key": "username", "value": "admin"},
+                {"key": "password", "value": "LEAKCANARY-form-password"}
+              ]
+            },
+            "url": "https://user:LEAKCANARY-userinfo@api.example.test/login"
+          }
+        },
+        {
+          "name": "Health",
+          "request": "{{baseUrl}}/health"
+        }
+      ]
+    },
+    {
+      "name": "Partner export",
+      "request": {
+        "method": "GET",
+        "header": [],
+        "url": "{{partnerUrl}}/export?since=2026-01-01"
+      }
+    },
+    {
+      "name": "Tenant report",
+      "request": {
+        "method": "GET",
+        "header": [],
+        "url": "https://{{tenant}}.example.test/report?key=LEAKCANARY-dropped-query"
+      }
+    },
+    {
+      "name": "Webhook ping",
+      "request": {
+        "method": "POST",
+        "header": [],
+        "url": "{{baseUrl}}/hooks/{{token}}/ping"
+      }
+    }
+  ]
+}
