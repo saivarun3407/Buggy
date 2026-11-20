@@ -75,7 +75,7 @@ def register_tools(mcp: Any, queries: ReconQueries) -> None:
     ) -> dict[str, Any]:
         """Query records. record_type is one of: subdomain, dns_record, port, http_service,
         technology, tls, header, url, js_file, endpoint, api_spec, api_operation, graphql,
-        parameter, vulnerability, secret. A parameter record names one input (query, path,
+        parameter, js_finding, vulnerability, secret. A parameter record names one input (query, path,
         body, header, cookie, form) with hints such as id-like or url-like. Filter by asset (host) and/or a substring of the value.
         Results are paged: follow next_offset while truncated is true."""
         return _guard(queries.query)(
@@ -96,6 +96,14 @@ def register_tools(mcp: Any, queries: ReconQueries) -> None:
     def recon_scope_drops(engagement: str, run_id: str = "", limit: int = 100) -> dict[str, Any]:
         """Candidates dropped as out of scope before any scan, with the reason."""
         return _guard(queries.scope_drops)(engagement, run_id, limit)
+
+    @mcp.tool()
+    def recon_coverage(
+        engagement: str, asset: str = "", limit: int = 200, offset: int = 0
+    ) -> dict[str, Any]:
+        """What recon checked, per asset and stage: complete, partial, failed or skipped, and
+        why. Gaps come first. No stamp for an asset or stage means it was not checked."""
+        return _guard(queries.coverage)(engagement, asset, limit, offset)
 
     @mcp.tool()
     def recon_raw(engagement: str, raw_ref: str, context_lines: int = 0) -> dict[str, Any]:
@@ -121,6 +129,7 @@ TOOL_NAMES = (
     "recon_record",
     "recon_diff",
     "recon_scope_drops",
+    "recon_coverage",
     "recon_raw",
     "recon_request_rerun",
     "recon_rerun_status",

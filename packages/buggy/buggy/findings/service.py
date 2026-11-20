@@ -12,6 +12,7 @@ can make a finding ``exploit_verified``.
 from __future__ import annotations
 
 import json
+from collections.abc import Callable
 from dataclasses import replace
 from typing import Any
 
@@ -163,8 +164,15 @@ class FindingService:
         *,
         allow_state_change: bool = False,
         actor: str = "verifier",
+        prover: Callable[[Finding], verifier.Verification | None] | None = None,
     ) -> dict[str, Any]:
-        """Run the independent verifier on a stored finding and record its decision."""
+        """Run the independent verifier on a stored finding and record its decision.
+
+        ``prover`` is tried first: the capture server passes one that re-runs
+        the deterministic probe a finding came from. When it returns ``None``
+        (no probe run is recorded for the finding) the stored assertions are
+        replayed instead.
+        """
         finding = self.store.get(engagement, finding_id)
         if finding is None:
             return _error("UNKNOWN_FINDING", f"no finding {finding_id!r} in this engagement")
@@ -174,9 +182,11 @@ class FindingService:
                 "note": "source-verified and has no assertions; there is nothing to replay",
                 "finding": finding.to_dict(),
             }
-        outcome = verifier.verify(
-            finding, self.gateway, sessions=self.sessions, allow_state_change=allow_state_change
-        )
+        outcome = prover(finding) if prover is not None else None
+        if outcome is None:
+            outcome = verifier.verify(
+                finding, self.gateway, sessions=self.sessions, allow_state_change=allow_state_change
+            )
         stored = self.store.set_status(
             engagement,
             finding_id,

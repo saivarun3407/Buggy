@@ -63,6 +63,33 @@ def current_engagement() -> str:
     return get_active_engagement() or os.environ.get("BUGGY_ENGAGEMENT_ID", "")
 
 
+def current_actor() -> str:
+    """Who is acting in this run: agent name plus the thread, never chosen by the model.
+
+    The capture server records it as the author of findings, facts and lessons
+    and uses it as the worker identity for claims.
+    """
+    name, thread = "agent", ""
+    try:
+        from langgraph.config import get_config  # noqa: PLC0415
+
+        config = get_config() or {}
+        configurable = config.get("configurable") or {}
+        metadata = config.get("metadata") or {}
+        for candidate in (
+            metadata.get("lc_agent_name"),
+            configurable.get("agent_name"),
+            metadata.get("langgraph_node"),
+        ):
+            if isinstance(candidate, str) and candidate.strip():
+                name = candidate.strip()
+                break
+        thread = str(configurable.get("thread_id") or "")
+    except Exception:  # noqa: BLE001, S110 - outside a run there is no config
+        pass
+    return f"{name}:{thread[:12]}" if thread else name
+
+
 def _result_text(result: Any) -> str:
     structured = getattr(result, "structuredContent", None)
     if isinstance(structured, dict):
@@ -260,12 +287,19 @@ async def recon_rerun_status(request_id: str) -> str:
 
 @tool
 async def http_send(
-    method: str, url: str, headers_json: str = "", body: str = "", note: str = ""
+    method: str,
+    url: str,
+    headers_json: str = "",
+    body: str = "",
+    note: str = "",
+    identity: str = "",
 ) -> str:
     """Send one HTTP request to an in-scope target through the capture gateway. The exchange
     is recorded outside your reach; the returned capture_id is what a finding cites as proof.
     Redirects are returned, not followed. A state-changing method may return
-    APPROVAL_REQUIRED: tell the operator, then re-send the identical request."""
+    APPROVAL_REQUIRED: tell the operator, then re-send the identical request. identity names a
+    test account from identities_list: the gateway logs in and attaches the session, so you
+    never handle a password or token."""
     return await _engagement_call(
         "capture",
         "http_send",
@@ -274,6 +308,7 @@ async def http_send(
         headers_json=headers_json,
         body=body,
         note=note,
+        identity=identity,
     )
 
 
@@ -397,6 +432,212 @@ async def browser_cookies() -> str:
     return await _engagement_call("browser", "browser_cookies")
 
 
+# ── findings, queue, evidence ────────────────────────────────────────
+
+
+async def _actor_call(tool_name: str, **arguments: Any) -> str:
+    """A capture-server call that records who acted. The actor comes from the run."""
+    return await _engagement_call("capture", tool_name, actor=current_actor(), **arguments)
+
+
+@tool
+async def candidates_next(limit: int = 5) -> str:
+    """The next leads to prove, most promising first: scanner hits, recon leads, probe
+    results and access-control mismatches, deduplicated. They are claimed for you for a
+    while so two agents do not work the same lead. Start testing from this list."""
+    return await _actor_call("candidates_next", limit=limit)
+
+
+@tool
+async def finding_submit(finding_json: str) -> str:
+    """Record a claim. finding_json: title, class, severity, endpoint, method, parameter,
+    description, remediation (what the owner should change), source, and assertions:
+    [{capture_id, identity, expect: {status, body_contains, body_not_contains, differs_from,
+    same_as}}]. Cite captures made against the endpoint you name. A claim is a candidate
+    until finding_verify proves it."""
+    return await _actor_call("finding_submit", finding_json=finding_json)
+
+
+@tool
+async def finding_verify(finding_id: str) -> str:
+    """Have the independent verifier re-prove a finding: it re-runs the probe the finding
+    came from, or re-sends the cited captures and checks your assertions. Only this makes a
+    finding exploit_verified. Read the reasons when it comes back inconclusive."""
+    return await _engagement_call("capture", "finding_verify", finding_id=finding_id)
+
+
+@tool
+async def finding_get(finding_id: str) -> str:
+    """One finding with its verification, grade and history."""
+    return await _engagement_call("capture", "finding_get", finding_id=finding_id)
+
+
+@tool
+async def findings_list(status: str = "", grade: str = "") -> str:
+    """Findings of this engagement by status (candidate, exploit_verified, inconclusive,
+    discarded) or grade (submit, hold, discard)."""
+    return await _engagement_call("capture", "findings_list", status=status, grade=grade)
+
+
+@tool
+async def finding_grade(finding_id: str) -> str:
+    """Grade a verified finding against the program's rules: submit, hold or discard, with
+    the reasons and what would have to change. Scanner-known issues are taken into account."""
+    engagement = current_engagement()
+    if not engagement:
+        return json.dumps({"error": "no engagement is active for this run"})
+    known: list[Any] = []
+    if server_url("recon"):
+        raw = await call_mcp(
+            "recon",
+            "recon_query",
+            {"engagement": engagement, "record_type": "vulnerability", "limit": 200},
+        )
+        try:
+            known = list((json.loads(raw) or {}).get("records") or [])
+        except (TypeError, ValueError):
+            known = []
+    return await call_mcp(
+        "capture",
+        "finding_grade",
+        {
+            "engagement": engagement,
+            "finding_id": finding_id,
+            "known_issues_json": json.dumps(known),
+        },
+    )
+
+
+@tool
+async def report_build(fmt: str = "markdown") -> str:
+    """The engagement report as markdown, html or json. Only verified findings are listed
+    as findings; candidates and inconclusive items appear as not proven."""
+    return await _engagement_call("capture", "report_build", fmt=fmt)
+
+
+@tool
+async def evidence_export(finding_id: str = "", capture_ids_json: str = "") -> str:
+    """A redacted evidence bundle for a finding or a list of captures: HAR, a curl script
+    that reproduces the requests, and a manifest with hashes. Written for the operator."""
+    return await _engagement_call(
+        "capture", "evidence_export", capture_ids_json=capture_ids_json, finding_id=finding_id
+    )
+
+
+@tool
+async def identities_list() -> str:
+    """Test accounts the operator declared for this engagement: name, role and what each
+    owns. Use a name as identity=... in http_send. Secrets are never shown."""
+    return await _engagement_call("capture", "identities_list")
+
+
+@tool
+async def authz_matrix_run(
+    urls_json: str, identities_json: str = "", owners_json: str = "", max_requests: int = 120
+) -> str:
+    """Access-control check without guessing: request each URL (GET/HEAD only) as every
+    declared identity and as nobody, and report which objects are readable by someone who
+    does not own them. urls_json is a list of URLs; owners_json maps url -> identity name.
+    Mismatches are queued as candidates."""
+    return await _engagement_call(
+        "capture",
+        "authz_matrix_run",
+        urls_json=urls_json,
+        identities_json=identities_json,
+        owners_json=owners_json,
+        max_requests=max_requests,
+    )
+
+
+# ── lessons and the shared board ─────────────────────────────────────
+
+
+@tool
+async def memory_search(
+    query: str = "", classes_json: str = "", technologies_json: str = "", kind: str = ""
+) -> str:
+    """Lessons from earlier engagements that match a technology or bug class (JSON lists).
+    Verified lessons come first. Check before testing a familiar stack."""
+    return await _engagement_call(
+        "capture",
+        "memory_search",
+        query=query,
+        classes_json=classes_json,
+        technologies_json=technologies_json,
+        kind=kind,
+    )
+
+
+@tool
+async def memory_save(lesson_json: str) -> str:
+    """Save a reusable technique for future engagements. lesson_json: kind, title, body,
+    classes, technologies, finding_id. Describe the technique, not the target: secrets and
+    target names are removed. It is trusted only if finding_id is a verified finding."""
+    return await _actor_call("memory_save", lesson_json=lesson_json)
+
+
+@tool
+async def facts_list() -> str:
+    """The shared board for this engagement: facts other agents recorded, open work nobody
+    has claimed, and hints. Read it before starting something."""
+    return await _engagement_call("capture", "facts_list")
+
+
+@tool
+async def fact_add(text: str, evidence_json: str = "") -> str:
+    """Record an observation on the shared board (append-only). evidence_json is a list of
+    capture ids or record ids that support it."""
+    return await _actor_call("fact_add", text=text, evidence_json=evidence_json)
+
+
+@tool
+async def intent_open(text: str, from_facts_json: str) -> str:
+    """Open a piece of work that follows from facts on the board (from_facts_json: list of
+    fact ids). Others can then claim it."""
+    return await _actor_call("intent_open", text=text, from_facts_json=from_facts_json)
+
+
+@tool
+async def intent_claim(intent_id: str) -> str:
+    """Claim a piece of open work, or renew your claim while you are still on it. A live
+    claim by another agent is refused: pick something else."""
+    return await _actor_call("intent_claim", intent_id=intent_id)
+
+
+@tool
+async def intent_conclude(
+    intent_id: str, fact_text: str, evidence_json: str = "", abandon: bool = False
+) -> str:
+    """Finish work you claimed by stating the fact it produced, or abandon it with the
+    reason (abandon=true) so someone else can take it."""
+    return await _actor_call(
+        "intent_conclude",
+        intent_id=intent_id,
+        fact_text=fact_text,
+        evidence_json=evidence_json,
+        abandon=abandon,
+    )
+
+
+@tool
+async def hints_list() -> str:
+    """Guidance left on the board by the operator or other agents."""
+    return await _engagement_call("capture", "hints_list")
+
+
+@tool
+async def hint_add(text: str) -> str:
+    """Leave a short hint for other agents on the board."""
+    return await _actor_call("hint_add", text=text)
+
+
+@tool
+async def recon_coverage(asset: str = "") -> str:
+    """What recon did and did not check, per asset and stage. An absent stamp means "not
+    checked", never "clean". Use it before concluding an asset has nothing to test."""
+    return await _engagement_call("recon", "recon_coverage", asset=asset)
+
+
 _BY_SERVER: dict[str, list[Any]] = {
     "recon": [
         recon_summary,
@@ -407,6 +648,7 @@ _BY_SERVER: dict[str, list[Any]] = {
         recon_raw,
         recon_request_rerun,
         recon_rerun_status,
+        recon_coverage,
     ],
     "capture": [
         http_send,
@@ -416,6 +658,25 @@ _BY_SERVER: dict[str, list[Any]] = {
         capture_verify,
         probe_list,
         probe_run,
+        candidates_next,
+        finding_submit,
+        finding_verify,
+        finding_get,
+        findings_list,
+        finding_grade,
+        report_build,
+        evidence_export,
+        identities_list,
+        authz_matrix_run,
+        memory_search,
+        memory_save,
+        facts_list,
+        fact_add,
+        intent_open,
+        intent_claim,
+        intent_conclude,
+        hints_list,
+        hint_add,
     ],
     "scope": [scope_show, scope_check, program_info],
     "browser": [
@@ -457,12 +718,32 @@ _TESTERS = frozenset(
 )
 
 
+_READER_CAPTURE_TOOLS: tuple[Any, ...] = (
+    findings_list,
+    finding_get,
+    report_build,
+    identities_list,
+    memory_search,
+    facts_list,
+    fact_add,
+    intent_open,
+    hints_list,
+)
+
+
 def stack_mcp_tools_for(role: str) -> list[Any]:
     """The configured stack MCP tools appropriate for ``role`` (empty for other roles)."""
     if role in _TESTERS:
         servers = ("recon", "scope", "capture", "browser")
     elif role in _READERS:
-        servers = ("recon", "scope")
+        # Planning and analysis roles read the queue, the findings, the board and the
+        # lessons; they do not send requests or run probes.
+        tools = [
+            t for server in ("recon", "scope") if server_url(server) for t in _BY_SERVER[server]
+        ]
+        if server_url("capture"):
+            tools += list(_READER_CAPTURE_TOOLS)
+        return tools
     else:
         return []
     return [t for server in servers if server_url(server) for t in _BY_SERVER[server]]
@@ -472,6 +753,7 @@ __all__ = [
     "ALL_STACK_MCP_TOOLS",
     "SERVER_ENV",
     "call_mcp",
+    "current_actor",
     "current_engagement",
     "stack_mcp_tools",
     "stack_mcp_tools_for",

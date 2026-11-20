@@ -128,6 +128,7 @@ REPORT_TYPES: dict[str, int] = {
     "graphql": 50,
     "api_operation": 1000,
     "parameter": 1500,
+    "js_finding": 500,
     "endpoint": 1500,
     "url": 1500,
 }

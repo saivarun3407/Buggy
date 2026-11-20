@@ -901,10 +901,20 @@ class TestInternalLoginIsNotACallerOption:
         assert held.value.code == "APPROVAL_REQUIRED"
         # Smuggling the word in through the arguments a tool does take changes nothing.
         via_tool = tools.http_send(
-            "acme", "DELETE", ORDER_URL, headers_json='{"internal": "true", "X-Internal": "1"}'
+            "acme",
+            "DELETE",
+            ORDER_URL,
+            headers_json='{"internal": "true", "X-Internal": "1"}',
+            identity="alice",
         )
         assert via_tool["code"] == "APPROVAL_REQUIRED"
         assert via_tool["request_id"] == held.value.extra["request_id"]
+        # The same request as nobody, or as another account, is a different approval:
+        # allowing alice's request must not allow bob's.
+        as_nobody = tools.http_send("acme", "DELETE", ORDER_URL)
+        as_bob = tools.http_send("acme", "DELETE", ORDER_URL, identity="bob")
+        assert as_nobody["code"] == as_bob["code"] == "APPROVAL_REQUIRED"
+        assert len({via_tool["request_id"], as_nobody["request_id"], as_bob["request_id"]}) == 3
         probe = tools.probe_run(
             "acme",
             "mass_assignment",

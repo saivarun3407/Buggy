@@ -12,11 +12,14 @@ from __future__ import annotations
 
 import json
 import os
+import threading
 from typing import Any
 
 from buggy.capture.canary import Canary
 from buggy.capture.gateway import CaptureGateway, GatewayRefusal, Roots
 from buggy.capture.probes import describe, run_probe
+from buggy.capture.workbench import WORKBENCH_TOOL_NAMES, Workbench, register_workbench
+from buggy.notify import Notifier, approval_event, finding_event
 
 DEFAULT_PORT = 9461
 
@@ -27,7 +30,13 @@ INSTRUCTIONS = (
     "GET/HEAD/OPTIONS) may come back APPROVAL_REQUIRED: tell the operator and re-send the "
     "identical request once approved. probe_run performs a fixed, deterministic check "
     "(probe_list shows them); you choose the endpoint and identities, the probe does the "
-    "requests and comparison and returns a verdict with capture ids."
+    "requests and comparison and returns a verdict with capture ids; a positive result is "
+    "queued as a candidate (finding_id in the result). Name a declared test account with "
+    "identity=... (identities_list) and the gateway attaches its session; you never hold a "
+    "credential. A claim becomes a finding only through finding_verify, which re-runs the "
+    "probe or re-sends the cited captures. candidates_next is the list of leads to prove; "
+    "facts_list / intent_* coordinate work with other agents; memory_search returns lessons "
+    "from earlier engagements."
 )
 
 TOOL_NAMES = (
@@ -38,6 +47,7 @@ TOOL_NAMES = (
     "capture_verify",
     "probe_list",
     "probe_run",
+    *WORKBENCH_TOOL_NAMES,
 )
 
 
@@ -59,6 +69,8 @@ class CaptureTools:
         self.gateway = gateway
         self.canary = canary
         self._bound = engagement or None
+        # Set by build_server: queues positive probe results as candidates.
+        self.workbench: Workbench | None = None
 
     def _engagement(self, engagement: str) -> str:
         name = (engagement or "").strip()
@@ -82,11 +94,14 @@ class CaptureTools:
         headers_json: str = "",
         body: str = "",
         note: str = "",
+        identity: str = "",
     ) -> dict[str, Any]:
         def run() -> dict[str, Any]:
             headers = _json_arg(headers_json, "headers_json")
             if not isinstance(headers, dict):
                 raise GatewayRefusal("BAD_ARGUMENT", "headers_json must be a JSON object")
+            # Only the named identity is forwarded; nothing else reaches the gateway's
+            # keyword arguments from here.
             capture = self.gateway.send(
                 self._engagement(engagement),
                 method,
@@ -94,6 +109,7 @@ class CaptureTools:
                 headers=headers,
                 body=body or None,
                 note=note,
+                identity=str(identity or ""),
             )
             return {"status": "sent", **capture.detail(body_chars=6000)}
 
@@ -151,9 +167,11 @@ class CaptureTools:
             params = _json_arg(params_json, "params_json")
             if not isinstance(params, dict):
                 raise GatewayRefusal("BAD_ARGUMENT", "params_json must be a JSON object")
-            return run_probe(
-                self.gateway, self._engagement(engagement), probe, params, canary=self.canary
-            )
+            name = self._engagement(engagement)
+            result = run_probe(self.gateway, name, probe, params, canary=self.canary)
+            if self.workbench is not None:
+                result = self.workbench.after_probe(name, probe, params, result)
+            return result
 
         return self._guard(run)
 
@@ -167,11 +185,13 @@ def register_tools(mcp: Any, tools: CaptureTools) -> None:
         headers_json: str = "",
         body: str = "",
         note: str = "",
+        identity: str = "",
     ) -> dict[str, Any]:
         """Send one HTTP request to an in-scope target and record it. Returns capture_id,
         status, headers and body. Redirects are returned, not followed. State-changing
-        methods may return APPROVAL_REQUIRED. headers_json is a JSON object."""
-        return tools.http_send(engagement, method, url, headers_json, body, note)
+        methods may return APPROVAL_REQUIRED. headers_json is a JSON object. identity names
+        a declared test account (identities_list) whose session the gateway attaches."""
+        return tools.http_send(engagement, method, url, headers_json, body, note, identity)
 
     @mcp.tool()
     def http_replay(engagement: str, capture_id: str) -> dict[str, Any]:
@@ -220,9 +240,26 @@ def build_server(
         bind_host, _, bind_port = bind.rpartition(":")
         canary.serve(bind_host or "0.0.0.0", int(bind_port))  # noqa: S104 - container-internal
     tools = CaptureTools(gateway, canary, os.environ.get("BUGGY_CAPTURE_ENGAGEMENT") or None)
+    notifier = Notifier.from_env()
+    bench = Workbench(
+        gateway,
+        canary,
+        tools._engagement,  # noqa: SLF001 - the same engagement binding as the HTTP tools
+        on_verified=lambda finding: _in_background(notifier.notify, finding_event(finding)),
+    )
+    tools.workbench = bench
+    gateway.on_approval_request = lambda record: _in_background(
+        notifier.notify, approval_event(record)
+    )
     mcp = FastMCP("buggy-capture", instructions=INSTRUCTIONS, host=host, port=port)
     register_tools(mcp, tools)
+    register_workbench(mcp, bench)
     return mcp
+
+
+def _in_background(fn: Any, *args: Any) -> None:
+    """Run a notification without delaying or failing the request that caused it."""
+    threading.Thread(target=fn, args=args, daemon=True).start()
 
 
 def main() -> None:

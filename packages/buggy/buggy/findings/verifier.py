@@ -24,6 +24,7 @@ from __future__ import annotations
 
 import inspect
 import time
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from typing import Any
 from urllib.parse import urlsplit
@@ -366,6 +367,61 @@ def mark_source_verified(finding: Finding, note: str) -> Verification:
     )
 
 
+PROBE_NOT_REPRODUCED = "the probe no longer reports this issue"
+PROBE_UNDECIDED = "the probe could not decide when re-run"
+PROBE_OTHER_ENDPOINT = "the recorded probe run targets another endpoint than the finding names"
+
+
+def verify_by_probe(
+    finding: Finding,
+    probe: str,
+    url: str,
+    rerun: Callable[[], dict[str, Any]],
+) -> Verification:
+    """Re-prove a probe-sourced finding by running its probe again.
+
+    A probe carries its own controls (baseline, negative control, proof), so a
+    fresh ``vulnerable: true`` is stronger than replaying single requests, and
+    it is the only sound proof for probes whose evidence is not a response
+    body (an out-of-band callback, a delay, a follow-up read). Anything other
+    than a fresh ``true`` leaves the finding ``inconclusive``; a fixed target
+    is never reported as verified.
+    """
+    now = time.time()
+    if not _on_endpoint(url, finding.endpoint):
+        return Verification(Status.INCONCLUSIVE.value, now, reasons=[PROBE_OTHER_ENDPOINT])
+    try:
+        result = rerun()
+    except GatewayRefusal as refusal:
+        return Verification(
+            Status.INCONCLUSIVE.value,
+            now,
+            reasons=[f"probe {probe} was refused ({refusal.code}: {_short(refusal.detail)})"],
+        )
+    result = result if isinstance(result, dict) else {}
+    ids = [str(c) for c in result.get("evidence_capture_ids") or [] if c]
+    summary = _short(str(result.get("summary") or ""), 200)
+    entry = {
+        "index": 0,
+        "capture_id": ids[0] if ids else "",
+        "identity": "",
+        "outcome": PASSED if result.get("vulnerable") is True else FAILED,
+        "replay_capture_id": ids[-1] if ids else "",
+        "replay_status": None,
+        "failed_checks": [] if result.get("vulnerable") is True else ["probe"],
+        "reasons": [f"probe {probe}: {summary}"] if summary else [],
+        "method": "probe_rerun",
+        "probe": probe,
+    }
+    if result.get("vulnerable") is True and ids:
+        return Verification(Status.EXPLOIT_VERIFIED.value, now, ids, [], [entry])
+    reason = PROBE_NOT_REPRODUCED if result.get("vulnerable") is False else PROBE_UNDECIDED
+    code = str(result.get("code") or "")
+    if code:
+        reason = f"{reason} ({code})"
+    return Verification(Status.INCONCLUSIVE.value, now, ids, [reason], [entry])
+
+
 __all__ = [
     "DIFFERS_BELOW",
     "FAILED",
@@ -374,6 +430,9 @@ __all__ = [
     "NOT_REPLAYED",
     "EVIDENCE_NOT_ON_ENDPOINT",
     "NO_ASSERTIONS",
+    "PROBE_NOT_REPRODUCED",
+    "PROBE_OTHER_ENDPOINT",
+    "PROBE_UNDECIDED",
     "PASSED",
     "REFUSED",
     "SAME_AS_MIN",
@@ -382,4 +441,5 @@ __all__ = [
     "evaluate",
     "mark_source_verified",
     "verify",
+    "verify_by_probe",
 ]

@@ -168,7 +168,10 @@ class Capture:
             "engagement": self.engagement,
             "request_headers": _headers(self.request_headers),
             "request_body": _body(self.request_body),
-            "request_sha256": self.request_sha256,
+            # The hash of a login body would allow offline guessing of the password.
+            "request_sha256": (
+                REDACTED if self.redact_bodies and not reveal_credentials else self.request_sha256
+            ),
             "response_headers": _headers(self.response_headers),
             "response_body": _body(self.response_body),
             "response_truncated": len(text) > body_chars

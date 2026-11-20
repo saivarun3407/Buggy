@@ -25,6 +25,7 @@ from __future__ import annotations
 
 import ipaddress
 import json
+import logging
 import os
 import socket
 import threading
@@ -73,7 +74,10 @@ _BLOCKED_HEADERS = frozenset(
 APPROVAL_MAX_USES = 3
 # What a capture and its ledger line carry instead of an approval id when the
 # request was the gateway's own login for a declared identity.
+log = logging.getLogger("buggy.capture.gateway")
+
 INTERNAL_LOGIN = "internal_login"
+REDACTED_HASH = "<redacted>"
 
 
 def _collect_headers(items: Iterable[tuple[str, str]]) -> dict[str, str]:
@@ -237,6 +241,9 @@ class CaptureGateway:
         self._ledgers: dict[str, Ledger] = {}
         self.identities = IdentityStore(roots.secrets)
         self.sessions = SessionManager(self, self.identities)
+        # Called with the request record when a NEW approval request is filed
+        # (the capture server sets it to notify the operator). Never raises here.
+        self.on_approval_request: Any = None
 
     # ── scope / policy ──────────────────────────────────────────────
 
@@ -279,10 +286,16 @@ class CaptureGateway:
         )
 
     def _check_approval(
-        self, engagement: str, method: str, url: str, body: bytes, note: str
+        self, engagement: str, method: str, url: str, body: bytes, note: str, identity: str = ""
     ) -> str:
-        """Return the approving request id, or raise a refusal that names the pending request."""
+        """Return the approving request id, or raise a refusal that names the pending request.
+
+        An approval covers one exact request sent as one identity: allowing a
+        request as one test account does not allow the same request as another.
+        """
         fingerprint = request_fingerprint(method, url, body)
+        if identity:
+            fingerprint = sha256_hex(f"{fingerprint}|identity:{identity}".encode())
         requests_path, decisions_path = self._approval_paths(engagement)
         mine = [
             r
@@ -324,6 +337,7 @@ class CaptureGateway:
                     "url": url,
                     "body_sha256": sha256_hex(body),
                     "body_preview": body[:400].decode("utf-8", "replace"),
+                    "identity": identity,
                 },
                 "matched_rule": {
                     "technique_tag": None,
@@ -338,6 +352,11 @@ class CaptureGateway:
             requests_path.parent.mkdir(parents=True, exist_ok=True)
             with requests_path.open("a", encoding="utf-8") as handle:
                 handle.write(json.dumps(record) + "\n")
+            if self.on_approval_request is not None:
+                try:
+                    self.on_approval_request(record)
+                except Exception:  # noqa: BLE001 - telling the operator must not change the hold
+                    log.warning("the approval-request hook failed", exc_info=True)
         raise GatewayRefusal(
             "APPROVAL_REQUIRED",
             f"{method} can change state on the target, so a human must approve this exact "
@@ -545,7 +564,7 @@ class CaptureGateway:
                 "engagement may be sent as internal; not sent",
             )
         elif method not in SAFE_METHODS and self.approval_required(document):
-            approval_id = self._check_approval(engagement, method, url, payload, note)
+            approval_id = self._check_approval(engagement, method, url, payload, note, identity)
 
         fresh = False
         redact_headers = set(also_redact)
@@ -619,7 +638,10 @@ class CaptureGateway:
                 "method": method,
                 "url": url,
                 "status": status,
-                "request_sha256": capture.request_sha256,
+                # A login body holds a password: its hash would allow offline guessing.
+                "request_sha256": (
+                    REDACTED_HASH if approval_id == INTERNAL_LOGIN else capture.request_sha256
+                ),
                 "response_sha256": capture.response_sha256,
                 "probe": probe,
                 "replay_of": replay_of,
