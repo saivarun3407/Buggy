@@ -584,3 +584,139 @@ def test_execution_probes_are_listed(lab: Lab) -> None:  # noqa: F811
         result = lab.probe(name, {"url": "http://172.17.0.1/lookup?host=x", "parameter": "host"})
         assert result["vulnerable"] is None
         assert result["details"]["refusal"]["code"] == "OUT_OF_SCOPE"
+
+
+# ── open_redirect, path_traversal and cors (task C4) ─────────────────
+#
+# Juice Shop's /redirect?to= checks its allow-list with a substring test: the
+# target must CONTAIN an allowed URL. The plain form, //host, https:host and
+# the userinfo form are all refused (406); the fragment form puts the allowed
+# URL after "#", passes the substring test and sends the browser to the
+# random host. That is the known bypass, and the probe finds it.
+#
+# Juice Shop's /ftp/<file> null-byte read (eastere.gg%2500.md) is a file-type
+# bypass inside the ftp directory, not a traversal: any value with a "/" is
+# refused. So path_traversal reports False there, honestly, and does not
+# claim the null-byte file read as a traversal. Neither app reads files
+# outside a directory, so path_traversal has no lab positive (its positives
+# are in the unit tests). Neither app allows a credentialed cross-origin read
+# either: Juice Shop answers Access-Control-Allow-Origin: * (informational
+# only), DVGA sends no CORS headers at all.
+
+_ALLOWED_REDIRECT = "https://" + "github.com/juice-shop/juice-shop"  # on Juice Shop's allow-list
+_RANDOM_HOST = r"bg[0-9a-f]{12}\.example"
+
+
+def _check_c4_evidence(lab: Lab, result: dict[str, Any], bound: int) -> None:  # noqa: F811
+    """Every capture id is a real recorded request of this probe, within its bound."""
+    ids = result["evidence_capture_ids"]
+    details = result["details"]
+    assert 1 <= len(ids) == details["requests_sent"] <= bound == details["max_requests"]
+    assert list(details["captures"].values()) == ids
+    assert next(iter(details["captures"])) == "baseline" and details["control"]
+    for capture_id in ids:
+        capture = lab.gateway.store.get(ENGAGEMENT, capture_id)
+        assert capture is not None and capture.probe == result["probe"] and not capture.error
+
+
+def test_open_redirect_probe_finds_the_juice_shop_allowlist_bypass(lab: Lab) -> None:  # noqa: F811
+    result = lab.probe(
+        "open_redirect", {"url": f"{lab.juice}/redirect?to={_ALLOWED_REDIRECT}", "parameter": "to"}
+    )
+    _found(result)
+    assert result["class"] == "open_redirect" and result["cwe"] == "CWE-601"
+    details = result["details"]
+    host = details["random_host"]
+    assert re.fullmatch(_RANDOM_HOST, host)
+    assert details["technique"] == "fragment"
+    # The allow-listed original value redirects to its own (allowed) host: the control holds.
+    assert details["baseline"]["status"] == 302
+    assert [r["host"] for r in details["baseline"]["redirects"]] == ["github.com"]
+    # Every other form was refused by the allow-list.
+    assert [(t["form"], t["status"]) for t in details["tried"]] == [
+        ("plain", 406),
+        ("scheme_relative", 406),
+        ("missing_slashes", 406),
+        ("userinfo", 406),
+        ("fragment", 302),
+    ]
+    proof = lab.gateway.store.get(ENGAGEMENT, details["captures"]["fragment"])
+    location = next(v for k, v in proof.response_headers.items() if k.lower() == "location")
+    assert location == f"https://{host}/#{_ALLOWED_REDIRECT}"
+    _check_c4_evidence(lab, result, 6)
+
+
+def test_open_redirect_probe_does_not_flag_a_search_parameter(lab: Lab) -> None:  # noqa: F811
+    result = lab.probe(
+        "open_redirect", {"url": f"{lab.juice}/rest/products/search?q=apple", "parameter": "q"}
+    )
+    _not_found(result)
+    details = result["details"]
+    assert details["requests_sent"] == 6 and details["technique"] is None
+    assert all(t["outcome"] == "refused" and t["status"] == 200 for t in details["tried"])
+    _check_c4_evidence(lab, result, 6)
+
+
+@pytest.mark.parametrize(
+    "value", ["legal.md", "eastere.gg%2500.md"], ids=["plain-file", "null-byte-file-type-bypass"]
+)
+def test_path_traversal_probe_does_not_claim_the_ftp_null_byte_read(
+    lab: Lab,  # noqa: F811
+    value: str,
+) -> None:
+    result = lab.probe(
+        "path_traversal",
+        {
+            "url": f"{lab.juice}/ftp/{{file}}",
+            "parameter": "file",
+            "location": "path",
+            "value": value,
+        },
+    )
+    _not_found(result)
+    assert result["class"] == "file_handling" and result["cwe"] == "CWE-22"
+    details = result["details"]
+    # The baseline really reads the file (for the second value, through the
+    # file-type bypass) ...
+    assert details["baseline"]["status"] == 200 and details["baseline"]["markers_present"] == []
+    assert details["extension"] == ".md"
+    # ... but every traversal is refused (403 for a "/", 400 for a NUL with a "/").
+    assert details["requests_sent"] == 10
+    assert all(t["status"] in (400, 403) and t["marker"] is False for t in details["tried"])
+    _check_c4_evidence(lab, result, 10)
+
+
+@pytest.mark.parametrize("app", ["juice", "dvga"])
+def test_cors_probe_finds_no_credentialed_cross_origin_read(lab: Lab, app: str) -> None:  # noqa: F811
+    url = {
+        "juice": f"{lab.juice}/rest/products/search?q=apple",
+        "dvga": f"{lab.dvga}/graphql?query=%7B__typename%7D",
+    }[app]
+    result = lab.probe("cors", {"url": url})
+    _not_found(result)
+    assert result["class"] == "misconfiguration" and result["cwe"] == "CWE-942"
+    details = result["details"]
+    assert list(details["captures"]) == ["baseline", "origin_random", "origin_null"]
+    if app == "juice":
+        assert details["informational"] == ["wildcard-without-credentials"]
+        assert details["responses"]["origin_random"]["allow_origin"] == "*"
+    else:
+        assert details["informational"] == []
+        assert details["responses"]["origin_random"]["allow_origin"] == ""
+    _check_c4_evidence(lab, result, 3)
+
+
+def test_c4_probes_are_listed_and_stay_in_the_lab(lab: Lab) -> None:  # noqa: F811
+    from buggy.capture.probes import describe
+
+    listed = {d["probe"]: d for d in describe()}
+    assert (listed["open_redirect"]["class"], listed["open_redirect"]["cwe"]) == (
+        "open_redirect",
+        "CWE-601",
+    )
+    assert listed["path_traversal"]["class"] == "file_handling"
+    assert listed["cors"]["class"] == "misconfiguration"
+    for name in ("open_redirect", "path_traversal", "cors"):
+        result = lab.probe(name, {"url": "http://172.17.0.1/go?to=x", "parameter": "to"})
+        assert result["vulnerable"] is None
+        assert result["details"]["refusal"]["code"] == "OUT_OF_SCOPE"
