@@ -1,5 +1,5 @@
 {
- "updated": "2026-11-20 01:17 UTC",
+ "updated": "2026-11-20 13:42 UTC",
  "columns": [
   "backlog",
   "ready",
@@ -246,12 +246,12 @@
     "A1",
     "A3"
    ],
-   "status": "in_progress",
+   "status": "done",
    "agent": "",
    "branch": "",
-   "commit": "",
-   "tests": "",
-   "note": "",
+   "commit": "launcher go test ok, 84 compose tests:83f4cdf",
+   "tests": " up in 10 s, recon report in 4m54s",
+   "note": "Launcher --lite, doctor, demo merged; doctor merges host+container checks; first recon-only run skips the model wizard. Lite stack run live\\",
    "order": 3
   },
   {
@@ -262,7 +262,7 @@
    "depends": [
     "A2"
    ],
-   "status": "backlog",
+   "status": "in_progress",
    "agent": "",
    "branch": "",
    "commit": "",
