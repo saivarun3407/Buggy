@@ -48,6 +48,8 @@ from enum import StrEnum
 from typing import Any, Iterable
 from urllib.parse import urlsplit
 
+from buggy_core.types.tool_guard import GuardRule, guard_rules_from_config
+
 MAX_INTER_REQUEST_DELAY_MS = 3_600_000
 
 
@@ -120,6 +122,9 @@ class MachineEnforcement:
     # through the evidence gateway, the scoped browser or the pipeline, which
     # are the only places a state-changing request can be held for approval.
     sandbox_egress: str = "scoped"
+    # Ordered tool-call guard rules over every argument of every gated tool
+    # (see ``buggy_core.types.tool_guard``). They only add refusals.
+    tool_guard: tuple[GuardRule, ...] = field(default_factory=tuple)
 
     @classmethod
     def from_dict(cls, data: dict[str, Any] | None) -> MachineEnforcement:
@@ -144,6 +149,14 @@ class MachineEnforcement:
             blackout_windows=tuple(_parse_windows(data.get("blackout_windows") or ())),
             sandbox_egress=(
                 "blocked" if str(data.get("sandbox_egress", "")).lower() == "blocked" else "scoped"
+            ),
+            # Lenient like the rest of from_dict, but never lossy: an invalid
+            # entry becomes an errored rule that refuses every call it covers.
+            # parse_roe_document rejects such a document at load.
+            tool_guard=(
+                guard_rules_from_config(data["tool_guard"], source="tool_guard")
+                if data.get("tool_guard") is not None
+                else ()
             ),
         )
 

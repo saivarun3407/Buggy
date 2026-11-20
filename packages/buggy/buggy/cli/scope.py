@@ -10,6 +10,7 @@ an operator promotes it here:
     buggy-cli scope approve <engagement> [--yes]    # promote the draft
     buggy-cli scope set     <engagement> --file roe.json [--yes]
     buggy-cli scope import  --platform hackerone --handle <program> [--csv scope.csv]
+    buggy-cli scope test-call <engagement> --tool NAME --args JSON   # tool-guard dry run
 
 ``import`` builds the enforced scope from a bounty program's official scope
 data (platform API, or the scope CSV downloaded from the program page). The
@@ -34,6 +35,7 @@ from buggy.cli import _paths
 
 EXIT_OK = 0
 EXIT_CONFIG = 2
+EXIT_BLOCKED = 1
 
 
 def _build_parser() -> argparse.ArgumentParser:
@@ -72,7 +74,54 @@ def _build_parser() -> argparse.ArgumentParser:
         "--port-scan", action="store_true", help="Allow the pipeline's port scan (off by default)."
     )
     imp.add_argument("--yes", action="store_true", help="Do not prompt for confirmation.")
+    test_call = sub.add_parser(
+        "test-call",
+        help="Dry run: would the enforced scope's tool guard block this call? (exit 1 = blocked)",
+    )
+    test_call.add_argument("engagement")
+    test_call.add_argument("--tool", required=True, help="Tool name, e.g. http_send.")
+    test_call.add_argument("--args", required=True, help="Tool arguments as a JSON object.")
     return p
+
+
+def _test_call(args: argparse.Namespace, control: Path) -> int:
+    """Run the tool-call guard of the enforced scope against one call; execute nothing."""
+    from buggy_core.types.roe_document import InvalidRoEError, parse_roe_document
+    from buggy_core.types.tool_guard import compile_rules, evaluate_call
+
+    enforced_path = control / args.engagement / "roe.json"
+    try:
+        call_args = json.loads(args.args)
+    except ValueError as exc:
+        print(f"error: --args is not valid JSON: {exc}", file=sys.stderr)
+        return EXIT_CONFIG
+    if not isinstance(call_args, dict):
+        print("error: --args must be a JSON object", file=sys.stderr)
+        return EXIT_CONFIG
+    try:
+        document = _load(enforced_path)
+    except SystemExit as exc:
+        print(exc, file=sys.stderr)
+        return EXIT_CONFIG
+    if document is None:
+        print(f"error: no enforced scope at {enforced_path}", file=sys.stderr)
+        return EXIT_CONFIG
+    try:
+        rules = parse_roe_document(document, required=True)
+    except InvalidRoEError as exc:
+        print(f"error: scope rejected: {exc}", file=sys.stderr)
+        return EXIT_CONFIG
+    legacy, _ = compile_rules(rules.forbidden_command_patterns, source="forbidden_command_patterns")
+    decision = evaluate_call(args.tool, call_args, (*legacy, *rules.tool_guard))
+    if not decision.blocked:
+        print(f"allowed: no tool-guard rule matches {args.tool} (scope checks not evaluated)")
+        return EXIT_OK
+    print(f"blocked: rule {decision.rule!r} matched {decision.where}")
+    if decision.match:
+        print(f"  matched text: {decision.match!r}")
+    if decision.message:
+        print(f"  message: {decision.message}")
+    return EXIT_BLOCKED
 
 
 def _import_program(args: argparse.Namespace, control: Path) -> int:
@@ -215,6 +264,8 @@ def main(argv: list[str] | None = None) -> int:
     control = _paths.control_root(args.control_root)
     if args.command == "import":
         return _import_program(args, control)
+    if args.command == "test-call":
+        return _test_call(args, control)
     slug = args.engagement
     draft_path = workspace / slug / "plan" / "roe.json"
     enforced_path = control / slug / "roe.json"
