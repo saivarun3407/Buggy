@@ -1,5 +1,5 @@
 {
- "updated": "2026-11-20 16:58 UTC",
+ "updated": "2026-11-20 16:59 UTC",
  "columns": [
   "backlog",
   "ready",
@@ -700,12 +700,12 @@
    "depends": [
     "F4"
    ],
-   "status": "in_progress",
+   "status": "done",
    "agent": "",
    "branch": "",
-   "commit": "",
-   "tests": "",
-   "note": "",
+   "commit": "609 passed (agent run), program suite re-run:38fada8",
+   "tests": " where to look and why, from the program rules, recon and your own report history; excluded classes never suggested",
+   "note": "Program brief merged\\",
    "order": 32
   },
   {
