@@ -1,5 +1,5 @@
 {
- "updated": "2026-11-19 21:50 UTC",
+ "updated": "2026-11-20 00:52 UTC",
  "columns": [
   "backlog",
   "ready",
@@ -464,12 +464,12 @@
    "lane": "D",
    "title": "Identities: declarative login and multi-role sessions the agent never sees",
    "depends": [],
-   "status": "in_progress",
+   "status": "done",
    "agent": "",
    "branch": "",
-   "commit": "",
-   "tests": "",
-   "note": "",
+   "commit": "90cd3b5",
+   "tests": "283 unit, 15 lab passed",
+   "note": "Identities, gateway-held sessions, internal login merged. 283 unit + 15 lab tests pass",
    "order": 17
   },
   {
@@ -480,7 +480,7 @@
    "depends": [
     "D1"
    ],
-   "status": "backlog",
+   "status": "in_progress",
    "agent": "",
    "branch": "",
    "commit": "",
@@ -636,12 +636,12 @@
    "lane": "F",
    "title": "Lessons: what worked and what failed, kept across engagements",
    "depends": [],
-   "status": "in_progress",
+   "status": "done",
    "agent": "",
    "branch": "",
-   "commit": "",
-   "tests": "",
-   "note": "",
+   "commit": "2e6bf31",
+   "tests": "63 passed",
+   "note": "Lessons store merged. 63 tests pass on main tree",
    "order": 28
   },
   {
@@ -652,7 +652,7 @@
    "depends": [
     "F1"
    ],
-   "status": "backlog",
+   "status": "in_progress",
    "agent": "",
    "branch": "",
    "commit": "",
