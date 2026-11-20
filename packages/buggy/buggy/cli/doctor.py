@@ -49,10 +49,13 @@ REQUIRED_SECRETS = ("SANDBOX_TOKEN", "EGRESS_GUARD_TOKEN", "BUGGY_STACK_MCP_TOKE
 # The lite stack has no sandbox and no egress guard: it needs the MCP token only.
 LITE_SECRETS = ("BUGGY_STACK_MCP_TOKEN",)
 # Inside the operator container the host's BUGGY_HOME is seen as these mounts.
+# (label, variable, default path, must be writable). The audit root is mounted
+# read-only for the operator on purpose: only the services that produce the
+# ledgers write there.
 CONTAINER_ROOTS = (
-    ("workspace", "BUGGY_WORKSPACE_ROOT", "/workspace"),
-    ("control", "BUGGY_CONTROL_ROOT", "/control"),
-    ("audit", "BUGGY_AUDIT_ROOT", "/audit"),
+    ("workspace", "BUGGY_WORKSPACE_ROOT", "/workspace", True),
+    ("control", "BUGGY_CONTROL_ROOT", "/control", True),
+    ("audit", "BUGGY_AUDIT_ROOT", "/audit", False),
 )
 SECRETS_FIX = (
     "run scripts/ensure-stack-secrets.sh (generates the missing secrets in ./.env; "
@@ -436,13 +439,13 @@ def check_mounts(env: Mapping[str, str], *, exists: Exists, writable: Writable) 
         "start the operator through `buggy` or docker compose so BUGGY_HOME is mounted, "
         "and make BUGGY_HOME writable for the container user"
     )
-    for label, variable, default in CONTAINER_ROOTS:
+    for label, variable, default, must_write in CONTAINER_ROOTS:
         path = _value(env, variable) or default
         if not exists(path):
             return Check("mounts", FAIL, f"the {label} root {path} is not mounted", fix)
-        if not writable(path):
+        if must_write and not writable(path):
             return Check("mounts", FAIL, f"the {label} root {path} is not writable", fix)
-    return Check("mounts", OK, "workspace, control and audit roots are mounted and writable")
+    return Check("mounts", OK, "workspace and control are mounted and writable; audit is mounted")
 
 
 def run_checks(

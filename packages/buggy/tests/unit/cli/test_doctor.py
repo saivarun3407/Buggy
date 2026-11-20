@@ -791,13 +791,24 @@ class TestInContainer:
         assert mounts.status == doctor.FAIL and "control root" in mounts.detail
         assert world.main("--profile", "lite", "--in-container") == 2
 
-    def test_a_read_only_mount_fails(self, world: World, tmp_path: Path) -> None:
+    def test_a_read_only_control_root_fails(self, world: World, tmp_path: Path) -> None:
+        self._mounted(world, tmp_path)
+        control = str(tmp_path / "control")
+        mounts = _by_name(
+            world.checks("lite", in_container=True, writable=lambda path: path != control)
+        )["mounts"]
+        assert mounts.status == doctor.FAIL and "control root" in mounts.detail
+
+    def test_a_read_only_audit_root_is_how_the_operator_is_meant_to_see_it(
+        self, world: World, tmp_path: Path
+    ) -> None:
+        # docker-compose.yml mounts /audit read-only into the operator container.
         self._mounted(world, tmp_path)
         audit = str(tmp_path / "audit")
         mounts = _by_name(
-            world.checks("lite", in_container=True, writable=lambda path: path != audit)
+            world.checks("full", in_container=True, writable=lambda path: path != audit)
         )["mounts"]
-        assert mounts.status == doctor.FAIL and "audit root" in mounts.detail
+        assert mounts.status == doctor.OK
 
     def test_the_flag_reaches_main(
         self, world: World, tmp_path: Path, capsys: pytest.CaptureFixture[str]
