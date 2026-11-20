@@ -1,5 +1,5 @@
 {
- "updated": "2026-11-20 16:17 UTC",
+ "updated": "2026-11-20 16:25 UTC",
  "columns": [
   "backlog",
   "ready",
@@ -340,12 +340,12 @@
    "depends": [
     "B3"
    ],
-   "status": "in_progress",
+   "status": "done",
    "agent": "",
    "branch": "",
-   "commit": "",
-   "tests": "",
-   "note": "",
+   "commit": "4430111",
+   "tests": "432 passed",
+   "note": "Operator OpenAPI/Swagger/Postman contracts merged; servers are scope-filtered, no requests made. 432 pipeline tests pass",
    "order": 9
   },
   {
@@ -356,7 +356,7 @@
    "depends": [
     "B4"
    ],
-   "status": "backlog",
+   "status": "in_progress",
    "agent": "",
    "branch": "",
    "commit": "",
@@ -418,12 +418,12 @@
    "depends": [
     "C2"
    ],
-   "status": "in_progress",
+   "status": "done",
    "agent": "",
    "branch": "",
-   "commit": "",
-   "tests": "",
-   "note": "",
+   "commit": "4430111",
+   "tests": "692 unit, 40 lab passed",
+   "note": "SSTI + command injection probes merged. Command injection found for real on DVGA importPaste and systemDiagnostics; SSTI has no lab positive (unit-proven)",
    "order": 14
   },
   {
@@ -434,7 +434,7 @@
    "depends": [
     "C3"
    ],
-   "status": "backlog",
+   "status": "in_progress",
    "agent": "",
    "branch": "",
    "commit": "",
@@ -512,12 +512,12 @@
    "depends": [
     "D3"
    ],
-   "status": "in_progress",
+   "status": "done",
    "agent": "",
    "branch": "",
-   "commit": "",
-   "tests": "",
-   "note": "",
+   "commit": "4430111",
+   "tests": "72 passed",
+   "note": "Operator notifications (webhook/Slack/Discord) merged; never carry agent text, bodies or secrets",
    "order": 20
   },
   {
@@ -528,7 +528,7 @@
    "depends": [
     "D4"
    ],
-   "status": "backlog",
+   "status": "in_progress",
    "agent": "",
    "branch": "",
    "commit": "",
@@ -574,12 +574,12 @@
    "depends": [
     "E2"
    ],
-   "status": "in_progress",
+   "status": "done",
    "agent": "",
    "branch": "",
-   "commit": "",
-   "tests": "",
-   "note": "",
+   "commit": "4430111",
+   "tests": "311 passed",
+   "note": "Candidate queue merged (scanner, surface, probe, authz sources into one deduplicated, claimable list)",
    "order": 24
   },
   {
@@ -590,7 +590,7 @@
    "depends": [
     "E3"
    ],
-   "status": "backlog",
+   "status": "in_progress",
    "agent": "",
    "branch": "",
    "commit": "",
