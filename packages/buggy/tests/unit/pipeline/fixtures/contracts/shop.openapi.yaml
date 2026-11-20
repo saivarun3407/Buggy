@@ -1,0 +1,98 @@
+# Hand-written test contract (OpenAPI 3). Every value that contains LEAKCANARY
+# is a fake secret: test_contracts.py asserts that none of them reaches a record.
+openapi: 3.0.3
+info:
+  title: Shop API
+  version: "2.4"
+servers:
+  - url: https://svc:LEAKCANARY-userinfo@api.example.test/v1
+    description: production
+  - url: https://staging.example.net/v1
+    description: not in the engagement's scope
+  - url: https://{tenant}.example.test/v1
+    description: no default for the variable
+    variables:
+      tenant:
+        description: customer name
+security:
+  - bearerAuth: []
+paths:
+  /orders:
+    get:
+      operationId: listOrders
+      summary: List orders
+      tags: [orders]
+      parameters:
+        - name: status
+          in: query
+          example: LEAKCANARY-query-example
+        - name: X-Request-Id
+          in: header
+          example: LEAKCANARY-header-example
+    post:
+      operationId: createOrder
+      summary: Create an order
+      tags: [orders]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/NewOrder"
+  /orders/{orderId}:
+    parameters:
+      - name: orderId
+        in: path
+        required: true
+    get:
+      operationId: getOrder
+    delete:
+      operationId: deleteOrder
+  /health:
+    get:
+      operationId: health
+      security: []
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      x-example: LEAKCANARY-bearer-example
+  schemas:
+    NewOrder:
+      type: object
+      properties:
+        customer_id:
+          type: integer
+          example: 7
+        coupon:
+          type: string
+          example: LEAKCANARY-body-example
+        shipping:
+          type: object
+          properties:
+            address:
+              type: string
+            callback_url:
+              type: string
+              default: https://hooks.example.test/LEAKCANARY-default
+        items:
+          type: array
+          items:
+            $ref: "#/components/schemas/Item"
+        category:
+          $ref: "#/components/schemas/Category"
+    Item:
+      type: object
+      properties:
+        product_id:
+          type: integer
+        quantity:
+          type: integer
+    Category:
+      type: object
+      properties:
+        name:
+          type: string
+        parent:
+          $ref: "#/components/schemas/Category"

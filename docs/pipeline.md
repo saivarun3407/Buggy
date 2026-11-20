@@ -196,3 +196,60 @@ queued and again when the worker serves it.
   from the read-only recon server and written to
   `control/<engagement>/recon-report.md`.
 
+
+## Operator-supplied API contracts
+
+The `apispec` stage only finds a specification the target publishes. When it
+publishes none, hand the pipeline one: put an OpenAPI 3 / Swagger 2 file
+(JSON or YAML) or a Postman v2.1 collection under
+`control/<engagement>/contracts/` and name it in the enforced `roe.json`:
+
+```json
+{
+  "pipeline": {
+    "api_contracts": [
+      {"path": "shop.openapi.yaml"},
+      {"path": "accounts.postman.json", "base_url": "https://api.acme.com", "format": "postman"}
+    ]
+  }
+}
+```
+
+| Key | Meaning |
+|---|---|
+| `path` | file below `contracts/`. An absolute path or one with `..` is rejected when the scope is loaded (the entry is left out, with a warning); the loader also refuses a link that leads out of the directory. At most 10 entries. |
+| `base_url` | optional. Where the API is served, instead of the servers the file names. For a Postman collection it stands in for a leading `{{variable}}` the collection does not define, and otherwise replaces scheme, host and port of every request, so use it only for a collection that describes one API. |
+| `format` | `openapi`, `postman` or `auto` (default). |
+
+A contract is input data, read at the start of the `apispec` stage:
+
+- **No request is made for it.** It adds records, not probes. It is read even
+  with `passive_only`; a disabled `apispec` stage reads nothing.
+- **Scope.** Every server and every operation URL it names goes through the
+  scope filter as an input of the tool `contracts`. An out-of-scope server or
+  request is dropped and listed by `pipeline drops` like any other. Also
+  listed there, with their own reason: a Postman request whose URL has a
+  variable the collection does not define (`UNRESOLVED_VARIABLE`) or one
+  named like a credential, which is never substituted (`SECRET_VARIABLE`),
+  and a server that is not an absolute http(s) URL (`NOT_ABSOLUTE_URL`).
+- **Records.** One `api_spec` per in-scope host (value `contract:<path>`) and
+  one `api_operation` per operation, in the shape discovery writes, with
+  `source_tool` `contracts` and `attrs.source` `"operator"`. An operation the
+  target's own spec also declares is the same record with both sources.
+- **Names only.** A contract can hold credentials. Records carry header,
+  query, form and body-property names (`attrs.parameters`,
+  `attrs.request_body_properties`, `attrs.form`), never a header value, an
+  auth block, a body or example value, a query value or URL userinfo. The raw
+  output kept for a contract is the records, not the file.
+- **Cache.** A contract is one input, keyed on the SHA-256 of its file. An
+  unchanged file is hashed and not parsed again. Contracts are parsed again
+  when a file changes, on `--force`, after `--max-age`, and whenever the
+  stage re-probes an origin. One the scope no longer names is retired.
+- **Parameters.** The stage's parameter extraction reads contract operations
+  like discovered ones, for hosts with a live web service the stage processes
+  in that run. An unreadable or malformed contract is reported under
+  `stages.apispec.tools.contracts.errors` in the run and the run continues.
+
+`tests/unit/pipeline/test_contracts.py` covers the three formats, the scope
+drops, variable resolution, that no fixture credential reaches a record,
+path rejection and the cache.

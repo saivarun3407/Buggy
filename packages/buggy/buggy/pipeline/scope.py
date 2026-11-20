@@ -37,6 +37,10 @@ MAX_CIDR_HOSTS = 1024
 
 DEFAULT_CRAWL_EXCLUDE = (r"(?i)(log|sign)[-_]?(out|off)", r"(?i)/(delete|remove|destroy)(/|\?|$)")
 
+# Operator-supplied API contracts (``pipeline.api_contracts``) the pipeline will read.
+MAX_API_CONTRACTS = 10
+API_CONTRACT_FORMATS = ("auto", "openapi", "postman")
+
 DropLogger = Callable[[str, str, str, str, str], None]  # stage, tool, direction, candidate, reason
 
 
@@ -65,6 +69,11 @@ class PipelineLimits:
     # crawler a starting path. They never widen the scope: each is filtered
     # like any other input.
     seed_urls: tuple[str, ...] = ()
+    # API contracts the operator put under ``<control>/<engagement>/contracts/``:
+    # ``{"path", "base_url", "format"}`` each. The path is relative to that
+    # directory. A contract is input data: every host it names is filtered
+    # like any other input, and nothing is requested because of it.
+    api_contracts: tuple[dict[str, str], ...] = ()
 
     @classmethod
     def from_roe(cls, rules: MachineEnforcement, document: dict[str, Any]) -> PipelineLimits:
@@ -108,7 +117,60 @@ class PipelineLimits:
                 for u in (block.get("seed_urls") or [])[:50]
                 if isinstance(u, str) and u.strip().lower().startswith(("http://", "https://"))
             ),
+            api_contracts=_api_contracts(block.get("api_contracts")),
         )
+
+
+def _api_contracts(value: Any) -> tuple[dict[str, str], ...]:
+    """The usable entries of ``pipeline.api_contracts``, at most ``MAX_API_CONTRACTS``.
+
+    An entry is rejected (left out, with a warning) when its ``path`` is not a
+    relative path below the contracts directory: absolute, or with ``..`` in
+    it. So is one whose ``base_url`` is not an http(s) URL with a host. An
+    unknown ``format`` is read as ``auto``.
+    """
+    import logging  # noqa: PLC0415
+
+    log = logging.getLogger("buggy.pipeline.scope")
+    kept: list[dict[str, str]] = []
+    for index, item in enumerate(value if isinstance(value, list) else []):
+        where = f"pipeline.api_contracts[{index}]"
+        if len(kept) >= MAX_API_CONTRACTS:
+            log.warning("%s ignored: at most %d contracts are read", where, MAX_API_CONTRACTS)
+            break
+        path = item.get("path") if isinstance(item, dict) else None
+        if not isinstance(path, str) or not path.strip():
+            log.warning("%s ignored: no path", where)
+            continue
+        path = path.strip()
+        if (
+            ".." in path
+            or path.startswith(("/", "\\", "~"))
+            or (len(path) > 1 and path[1] == ":")  # a drive letter
+            or len(path) > 300
+            or any(ord(char) < 32 for char in path)
+        ):
+            log.warning("%s rejected: %r is not a relative path under contracts/", where, path)
+            continue
+        base_url = item.get("base_url")
+        if base_url in (None, ""):
+            base_url = ""
+        elif (
+            not isinstance(base_url, str)
+            or not base_url.strip().lower().startswith(("http://", "https://"))
+            or not host_of(base_url.strip())
+        ):
+            log.warning("%s rejected: base_url is not an http(s) URL", where)
+            continue
+        declared = str(item.get("format") or "auto").strip().lower()
+        entry = {
+            "path": path,
+            "base_url": base_url.strip(),
+            "format": declared if declared in API_CONTRACT_FORMATS else "auto",
+        }
+        if entry not in kept:
+            kept.append(entry)
+    return tuple(kept)
 
 
 def _valid_regexes(value: Any) -> tuple[str, ...]:

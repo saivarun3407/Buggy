@@ -1187,8 +1187,99 @@ class Pipeline:
 
     # ── stage 6: API specifications ─────────────────────────────────
 
+    #: ``<control>/<engagement>``, where the operator's ``contracts/`` directory
+    #: is. ``None``: the control root the environment names.
+    control_dir: Path | None = None
+
+    def _load_contracts(self, stats: StageStats, *, refresh: bool) -> None:
+        """Store the operator's API contracts (``pipeline.api_contracts``). No request.
+
+        A contract is one input of its own, cached on the hash of its file: an
+        unchanged file is hashed and not parsed again. All of them are parsed
+        again when one changed, went away or is stale, when the run is forced,
+        and when the stage is about to re-probe an origin (``refresh``): a
+        record a contract and a published spec both report then stays active
+        while either of them reports it.
+        """
+        from buggy.pipeline.tools import contracts  # noqa: PLC0415 - only this step uses it
+
+        entries = {contracts.key(entry): entry for entry in self.scope.limits.api_contracts}
+        gone = set(self.store.cached_keys(self.engagement, contracts.CACHE_STAGE)) - set(entries)
+        if not entries and not gone:
+            return
+        entry_stats = stats.tools.setdefault(contracts.NAME, {})
+        directory = self.control_dir or contracts.control_dir_for(self.engagement)
+        errors: list[str] = []
+        files: dict[str, tuple[bytes, str]] = {}  # key -> (content, input hash)
+        refresh = refresh or self.force or bool(gone)
+        now = time.time()
+        for key, entry in entries.items():
+            try:
+                data = contracts.read(directory, entry)
+            except contracts.ContractError as exc:
+                errors.append(f"{entry['path']}: {exc}")
+                continue
+            digest = _hash(hashlib.sha256(data).hexdigest(), entry, self.scope.digest)
+            files[key] = (data, digest)
+            cached = self.store.cached_input(self.engagement, contracts.CACHE_STAGE, key)
+            refresh = refresh or not (
+                cached is not None
+                and cached["input_hash"] == digest
+                and now - float(cached["completed_at"]) < self.max_age
+            )
+        lines: list[str] = []
+        pairs: list[tuple[Record, str]] = []
+        loaded: dict[str, str] = {}
+        for key, (data, digest) in files.items() if refresh else ():
+            try:
+                records = contracts.parse(data, entries[key], self.scope)
+            except contracts.ContractError as exc:
+                errors.append(f"{entries[key]['path']}: {exc}")
+                continue
+            loaded[key] = digest
+            for record in records:
+                # The raw line is the record itself: the file can hold credentials.
+                line = {"type": record.type.value, "value": record.value, **record.attrs}
+                lines.append(json.dumps(line, sort_keys=True))
+                pairs.append((_with_line(record, len(lines)), key))
+        if pairs:
+            ref = self._save_raw("apispec", contracts.NAME, "\n".join(lines) + "\n")
+            self._store(
+                contracts.CACHE_STAGE,
+                stats,
+                contracts.NAME,
+                pairs,
+                version=versions.BUILTIN_VERSION,
+                raw_ref=ref,
+            )
+        if loaded:
+            stats.retired += self.store.complete_inputs(
+                self.run_id,
+                self.engagement,
+                contracts.CACHE_STAGE,
+                loaded,
+                tool_versions=json.dumps({contracts.NAME: versions.BUILTIN_VERSION}),
+            )
+        for key in sorted(gone):  # the scope document no longer names it
+            stats.retired += self.store.retire_input(
+                self.run_id, self.engagement, contracts.CACHE_STAGE, key
+            )
+        entry_stats.update(
+            {
+                "contracts": len(entries),
+                "loaded": len(loaded),
+                "cached": 0 if refresh else len(files),
+                "records": entry_stats.get("records", 0),
+            }
+        )
+        for error in errors:
+            log.error("pipeline: contract %s", error)
+        if errors:
+            entry_stats["errors"] = errors
+
     def _stage_apispec(self, stats: StageStats) -> None:
         if self.scope.limits.passive_only:
+            self._load_contracts(stats, refresh=False)
             stats.skipped = "passive_only"
             self._stamp_skipped("apispec", "passive_only")
             return
@@ -1204,6 +1295,9 @@ class Pipeline:
             )
         }
         pending = self._pending("apispec", stats, origins)
+        # Before any origin is probed, so the stage's parameter extraction and
+        # its retirement of what a re-probed origin stopped reporting see them.
+        self._load_contracts(stats, refresh=bool(pending))
         if not pending:
             return
         discovered = [
