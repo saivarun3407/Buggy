@@ -590,3 +590,42 @@ class TestQueries:
             bound.coverage("other")
         with pytest.raises(QueryError):
             bound.coverage("")
+
+
+class TestANamedTargetThatDoesNotResolve:
+    """Found on a live run: a scoped host that was down vanished from the report."""
+
+    def _named(self, *hosts: str, **pipeline_block) -> dict:
+        roe = _roe(**pipeline_block)
+        roe["machine_enforcement"]["in_scope"] = [*ROE["machine_enforcement"]["in_scope"], *hosts]
+        return roe
+
+    def test_it_is_a_dns_failure_with_the_reason_and_is_listed_as_not_checked(self, env) -> None:
+        roe = self._named("down.example.test", "www.acme.test")
+        _pipeline(env, roe).run()
+        stamps = _stamps(env["store"])
+        status, detail = stamps[("dns", "down.example.test")]
+        # dnsx itself ran fine, so the stage is "partial" for this asset: not complete.
+        assert status in ("partial", "failed") and "did not resolve" in detail
+        assert stamps[("dns", "www.acme.test")][0] == "complete"  # a named host that resolves
+        gaps = {(g["stage"], g["asset"]) for g in env["store"].coverage_gaps("acme")}
+        assert ("dns", "down.example.test") in gaps
+        summary = _queries(env).summary("acme")
+        text = render_report("acme", summary, {}, scope=roe["machine_enforcement"]["in_scope"])
+        assert "down.example.test" in _section(text, "Not checked")
+
+    def test_a_wildcard_apex_and_a_stale_enumerated_name_are_not_failures(self, env) -> None:
+        # acme.test is the apex of *.acme.test and has no address; crt-only.acme.test
+        # came from a passive source and does not resolve. Neither is a failed check.
+        _pipeline(env).run()
+        stamps = _stamps(env["store"])
+        assert stamps[("dns", "acme.test")][0] == "complete"
+        assert stamps[("dns", "crt-only.acme.test")][0] == "complete"
+        assert env["store"].coverage_gaps("acme") == []
+
+    def test_it_is_retried_and_cleared_once_the_name_resolves(self, env) -> None:
+        roe = self._named("down.example.test")
+        _pipeline(env, roe).run()
+        env["tools"].address["down.example.test"] = "192.0.2.77"
+        _pipeline(env, roe).run()
+        assert _stamps(env["store"])[("dns", "down.example.test")][0] == "complete"

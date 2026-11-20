@@ -741,6 +741,23 @@ class Pipeline:
         if not ref:
             return  # tool unavailable: leave the cache untouched so the next run retries
         records = list(self._dnsx.parse(raw))
+        # A target the operator named that does not resolve is a failure to
+        # report, not a clean result: no later stage will ever look at it. (An
+        # enumerated subdomain that does not resolve is just a stale name.)
+        answered = {r.asset for r in records if r.attrs.get("rtype") in ("A", "AAAA", "CNAME")}
+        # The apex of a wildcard entry is an enumeration root and often has no
+        # address of its own; that is not a failure.
+        named = self._named_hosts() - set(self._enumeration_roots())
+        named |= {host_of(url) for url in self.scope.limits.seed_urls}
+        unresolved = sorted(host for host in named & set(pending) if host not in answered)
+        for host in unresolved:
+            if host not in answered:
+                self._note(
+                    self._dnsx.name,
+                    "failed",
+                    "the scoped name did not resolve, so nothing was checked on it",
+                    assets=[host],
+                )
         # Names that resolve only because their zone answers for everything are
         # dropped here, before anything is stored: no later stage sees them.
         dropped, unsettled = self._wildcard_drops(stats, list(pending), records)
@@ -754,9 +771,18 @@ class Pipeline:
         )
         # A name whose wildcard check failed stays out of the cache, so the
         # next run resolves and checks it again.
+        # A named target that did not resolve is looked up again on every run.
+        retry = unsettled | set(unresolved)
         self._complete(
-            "dns", stats, {key: digest for key, digest in pending.items() if key not in unsettled}
+            "dns", stats, {key: digest for key, digest in pending.items() if key not in retry}
         )
+
+    def _named_hosts(self) -> set[str]:
+        """Hosts the operator named outright: exact scope entries and seed-URL hosts."""
+        return {
+            *self.scope.seeds().hosts,
+            *(host_of(url) for url in self.scope.limits.seed_urls),
+        }
 
     # Where the random wildcard-probe labels come from; a seeded
     # ``random.Random`` in tests.
@@ -779,10 +805,7 @@ class Pipeline:
             if record.asset in resolved and record.attrs.get("rtype") in ADDRESS_RTYPES:
                 resolved[record.asset].add(str(record.attrs["data"]))
         # Hosts the operator named outright are kept whatever they resolve to.
-        explicit = {
-            *self.scope.seeds().hosts,
-            *(host_of(url) for url in self.scope.limits.seed_urls),
-        }
+        explicit = self._named_hosts()
         entry = stats.tools.setdefault(self._dnsx.name, {})
         dropped: set[str] = set()
         unsettled: set[str] = set()
