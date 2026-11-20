@@ -1,5 +1,5 @@
 {
- "updated": "2026-11-20 16:36 UTC",
+ "updated": "2026-11-20 16:40 UTC",
  "columns": [
   "backlog",
   "ready",
@@ -278,12 +278,12 @@
    "depends": [
     "A2"
    ],
-   "status": "in_progress",
+   "status": "done",
    "agent": "",
    "branch": "",
-   "commit": "",
-   "tests": "",
-   "note": "",
+   "commit": "6585e96",
+   "tests": "35 passed (agent run)",
+   "note": "Dashboard run page merged (scope, recon stages, approvals with Allow/Deny, findings). Lint, type-check, build and 35 tests passed in the agent's tree",
    "order": 5
   },
   {
@@ -356,12 +356,12 @@
    "depends": [
     "B4"
    ],
-   "status": "in_progress",
+   "status": "done",
    "agent": "",
    "branch": "",
-   "commit": "",
-   "tests": "",
-   "note": "",
+   "commit": "6585e96",
+   "tests": "55 passed",
+   "note": "Recon store projected into the knowledge graph; idempotent, never overwrites agent nodes",
    "order": 10
   },
   {
@@ -372,7 +372,7 @@
    "depends": [
     "B5"
    ],
-   "status": "backlog",
+   "status": "in_progress",
    "agent": "",
    "branch": "",
    "commit": "",
@@ -528,12 +528,12 @@
    "depends": [
     "D4"
    ],
-   "status": "in_progress",
+   "status": "done",
    "agent": "",
    "branch": "",
-   "commit": "",
-   "tests": "",
-   "note": "",
+   "commit": "772 passed:6585e96",
+   "tests": " ordered operator rules over every decoded argument, incl. base64; fails closed",
+   "note": "Tool-call guard merged\\",
    "order": 21
   },
   {
@@ -590,12 +590,12 @@
    "depends": [
     "E3"
    ],
-   "status": "in_progress",
+   "status": "done",
    "agent": "",
    "branch": "",
-   "commit": "",
-   "tests": "",
-   "note": "",
+   "commit": "6585e96",
+   "tests": "336 passed",
+   "note": "Report in Markdown, self-contained HTML and JSON; unproven items kept out of the findings list",
    "order": 25
   },
   {
@@ -606,7 +606,7 @@
    "depends": [
     "E4"
    ],
-   "status": "backlog",
+   "status": "in_progress",
    "agent": "",
    "branch": "",
    "commit": "",
