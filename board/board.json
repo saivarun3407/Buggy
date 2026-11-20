@@ -1,5 +1,5 @@
 {
- "updated": "2026-11-20 00:52 UTC",
+ "updated": "2026-11-20 01:02 UTC",
  "columns": [
   "backlog",
   "ready",
@@ -229,12 +229,12 @@
    "lane": "A",
    "title": "Lite stack: recon and report with two services",
    "depends": [],
-   "status": "in_progress",
+   "status": "done",
    "agent": "",
    "branch": "",
-   "commit": "",
-   "tests": "",
-   "note": "",
+   "commit": "9881a02",
+   "tests": "694 passed",
+   "note": "Lite stack merged; dispatcher made slim-safe. 694 tests pass",
    "order": 2
   },
   {
@@ -246,7 +246,7 @@
     "A1",
     "A3"
    ],
-   "status": "backlog",
+   "status": "in_progress",
    "agent": "",
    "branch": "",
    "commit": "",
