@@ -101,10 +101,11 @@ binaries: 86 found, 4 missing, 1 not probed
 
 What the numbers mean, and what they do not:
 
-- **86 of 90 declared binaries are on PATH.** Missing: `sliver` (ships in the
-  `c2-sliver` profile's own service), `ncat`, `certipy`, and `python` (the
-  image has `python3`). `ncat` and `certipy` are declared in the capability
-  registry but not installed by the image: a real gap.
+- **86 of 90 declared binary names are on PATH.** The four absent names are
+  `sliver` (it ships in the `c2-sliver` profile's own service) and three
+  alternate names of tools that are present under another name: `ncat` (`nc`
+  is installed), `certipy` (`certipy-ad` is installed) and `python`
+  (`python3` is installed). No declared capability is missing its tool.
 - **48 answered `--version` or `-V`.** 37 are present but answer neither flag
   (they use `-v`, `version` or print usage), and `msfconsole` did not answer
   within 5 seconds. "Present" is all this check proves for those; it does not
