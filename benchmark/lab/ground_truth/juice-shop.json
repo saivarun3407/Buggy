@@ -15,7 +15,7 @@
         "login",
         "sql"
       ],
-      "verified_by": null
+      "verified_by": "packages/buggy/tests/lab/test_probes_injection.py::test_sqli_probe_finds_login_injection"
     },
     {
       "id": "js-sqli-search",
@@ -28,7 +28,7 @@
         "search",
         "sql"
       ],
-      "verified_by": null
+      "verified_by": "packages/buggy/tests/lab/test_probes_injection.py::test_sqli_probe_finds_product_search_injection"
     },
     {
       "id": "js-nosqli-reviews",
@@ -296,7 +296,7 @@
       "keywords": [
         "redirect"
       ],
-      "verified_by": null
+      "verified_by": "packages/buggy/tests/lab/test_probes_injection.py::test_open_redirect_probe_finds_the_juice_shop_allowlist_bypass"
     },
     {
       "id": "js-md5-passwords",

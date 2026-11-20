@@ -120,7 +120,7 @@
         "importpaste",
         "command"
       ],
-      "verified_by": null
+      "verified_by": "packages/buggy/tests/lab/test_probes_injection.py::test_command_injection_probe_finds_import_paste"
     },
     {
       "id": "dvga-cmd-injection-diagnostics",
@@ -133,7 +133,7 @@
         "systemdiagnostics",
         "command"
       ],
-      "verified_by": null
+      "verified_by": "packages/buggy/tests/lab/test_probes_injection.py::test_command_injection_probe_finds_system_diagnostics"
     },
     {
       "id": "dvga-sqli-pastes-filter",
@@ -147,7 +147,7 @@
         "sql",
         "pastes"
       ],
-      "verified_by": null
+      "verified_by": "packages/buggy/tests/lab/test_probes_injection.py::test_sqli_probe_finds_graphql_filter_injection"
     },
     {
       "id": "dvga-stored-xss-paste",
@@ -187,7 +187,8 @@
         "batch"
       ],
       "verified_by": null,
-      "prohibited": true
+      "prohibited": true,
+      "prohibited_reason": "denial of service: unbounded batching can only be shown by overloading the server"
     },
     {
       "id": "dvga-deep-recursion-dos",
@@ -201,7 +202,8 @@
         "recursion"
       ],
       "verified_by": null,
-      "prohibited": true
+      "prohibited": true,
+      "prohibited_reason": "denial of service: unbounded depth can only be shown by exhausting the server"
     }
   ]
 }
