@@ -1,5 +1,5 @@
 {
- "updated": "2026-11-20 01:08 UTC",
+ "updated": "2026-11-20 01:13 UTC",
  "columns": [
   "backlog",
   "ready",
@@ -386,12 +386,12 @@
    "lane": "C",
    "title": "SQL injection probe (boolean, error and time based, with controls)",
    "depends": [],
-   "status": "in_progress",
+   "status": "done",
    "agent": "",
    "branch": "",
-   "commit": "",
-   "tests": "",
-   "note": "",
+   "commit": "3b3c997",
+   "tests": "308 unit, 24 lab passed",
+   "note": "sqli probe merged. Finds Juice Shop search+login and DVGA pastes filter; 308 unit + 24 lab pass",
    "order": 12
   },
   {
@@ -402,7 +402,7 @@
    "depends": [
     "C1"
    ],
-   "status": "backlog",
+   "status": "in_progress",
    "agent": "",
    "branch": "",
    "commit": "",
