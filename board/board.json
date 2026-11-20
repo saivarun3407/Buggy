@@ -1,5 +1,5 @@
 {
- "updated": "2026-11-20 16:46 UTC",
+ "updated": "2026-11-20 16:58 UTC",
  "columns": [
   "backlog",
   "ready",
@@ -372,12 +372,12 @@
    "depends": [
     "B5"
    ],
-   "status": "in_progress",
+   "status": "done",
    "agent": "",
    "branch": "",
-   "commit": "",
-   "tests": "",
-   "note": "",
+   "commit": "502 passed:f39064f",
+   "tests": " source maps (scope-checked), DOM sinks, dependency names",
+   "note": "JavaScript analysis merged\\",
    "order": 11
   },
   {
@@ -450,12 +450,12 @@
    "depends": [
     "C4"
    ],
-   "status": "in_progress",
+   "status": "done",
    "agent": "",
    "branch": "",
-   "commit": "",
-   "tests": "",
-   "note": "",
+   "commit": "47 passed:f39064f",
+   "tests": " 14 of 42 known bugs in the two lab apps run are proven by probes (14 of 71 over all four listed apps); the rest is listed as backlog",
+   "note": "Coverage audit merged\\",
    "order": 16
   },
   {
@@ -606,12 +606,12 @@
    "depends": [
     "E4"
    ],
-   "status": "in_progress",
+   "status": "done",
    "agent": "",
    "branch": "",
-   "commit": "",
-   "tests": "",
-   "note": "",
+   "commit": "f39064f",
+   "tests": "918 passed (agent run), 117 re-run",
+   "note": "SARIF 2.1.0, ci-gate command and a GitHub Action merged; only verified findings become results",
    "order": 26
   },
   {
@@ -716,12 +716,12 @@
    "depends": [
     "F5"
    ],
-   "status": "in_progress",
+   "status": "done",
    "agent": "",
    "branch": "",
-   "commit": "",
-   "tests": "",
-   "note": "",
+   "commit": "f39064f",
+   "tests": "41 passed, middleware suite 1265 (agent run)",
+   "note": "Loop guard and run telemetry merged; wiring into the agent middleware is part of I1",
    "order": 33
   },
   {
@@ -736,7 +736,7 @@
     "B6",
     "C5"
    ],
-   "status": "backlog",
+   "status": "in_progress",
    "agent": "",
    "branch": "",
    "commit": "",
