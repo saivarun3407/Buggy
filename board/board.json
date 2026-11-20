@@ -1,5 +1,5 @@
 {
- "updated": "2026-11-20 13:55 UTC",
+ "updated": "2026-11-20 16:17 UTC",
  "columns": [
   "backlog",
   "ready",
@@ -262,12 +262,12 @@
    "depends": [
     "A2"
    ],
-   "status": "in_progress",
+   "status": "done",
    "agent": "",
    "branch": "",
-   "commit": "",
-   "tests": "",
-   "note": "",
+   "commit": "ef74f87",
+   "tests": "784 passed, go test ok",
+   "note": "hunt resume, hunt-result.json and gate exit codes merged; launcher passes them through. 784 CLI/pipeline tests + launcher tests pass",
    "order": 4
   },
   {
@@ -278,7 +278,7 @@
    "depends": [
     "A2"
    ],
-   "status": "backlog",
+   "status": "in_progress",
    "agent": "",
    "branch": "",
    "commit": "",
