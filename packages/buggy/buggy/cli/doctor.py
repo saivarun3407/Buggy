@@ -80,7 +80,8 @@ FULL_PORTS = (
 )
 
 DEFAULT_HOME = "~/.buggy"
-HOME_DIRS = ("workspace", "control", "audit")
+# "secrets" holds operator-declared test accounts; only the capture service mounts it.
+HOME_DIRS = ("workspace", "control", "audit", "secrets")
 
 #: Decimal gigabyte, so a machine sold as "8 GB" (about 7.7 GiB) meets 8 GB.
 GB = 10**9

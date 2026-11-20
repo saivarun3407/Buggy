@@ -181,7 +181,7 @@ class TestEverythingPasses:
             assert name in home.detail
 
     def test_existing_home_directories_are_left_alone(self, world: World) -> None:
-        for name in ("workspace", "control", "audit"):
+        for name in doctor.HOME_DIRS:
             (world.home / name).mkdir(parents=True)
         (world.home / "control" / "keep.txt").write_text("operator data")
         made: list[str] = []
@@ -193,6 +193,7 @@ class TestEverythingPasses:
         assert sorted(path.name for path in world.home.iterdir()) == [
             "audit",
             "control",
+            "secrets",
             "workspace",
         ]
 

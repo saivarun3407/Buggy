@@ -712,10 +712,21 @@ services:
       - BUGGY_CANARY_BASE_URL=${BUGGY_CANARY_BASE_URL:-}
       - BUGGY_CANARY_BIND=${BUGGY_CANARY_BIND:-0.0.0.0:9470}
       - BUGGY_AUDIT_HMAC_KEY=${BUGGY_AUDIT_HMAC_KEY:-}
+      # Test accounts the operator declares (<BUGGY_HOME>/secrets/<engagement>/
+      # identities.json). The gateway logs in and holds the sessions; this is
+      # the only service that mounts the folder, and it mounts it read-only.
+      - BUGGY_SECRETS_ROOT=/secrets
+      # Operator notifications (approval waiting, finding verified). Webhook
+      # URLs are credentials: they are set here and on the operator only.
+      - BUGGY_NOTIFY_WEBHOOK_URL=${BUGGY_NOTIFY_WEBHOOK_URL:-}
+      - BUGGY_NOTIFY_SLACK_WEBHOOK_URL=${BUGGY_NOTIFY_SLACK_WEBHOOK_URL:-}
+      - BUGGY_NOTIFY_DISCORD_WEBHOOK_URL=${BUGGY_NOTIFY_DISCORD_WEBHOOK_URL:-}
+      - BUGGY_NOTIFY_EVENTS=${BUGGY_NOTIFY_EVENTS:-}
     volumes:
       - capture_data:/data/capture
       - ${BUGGY_HOME:-~/.buggy}/control:/control:ro
       - ${BUGGY_HOME:-~/.buggy}/audit:/audit
+      - ${BUGGY_HOME:-~/.buggy}/secrets:/secrets:ro
     healthcheck:
       test: ["CMD", "python", "-c", "import socket; socket.create_connection(('127.0.0.1', 9461), 2).close()"]
       interval: 5s
@@ -835,10 +846,16 @@ services:
       # `buggy-cli hunt` watches the recon pipeline and builds its report
       # through the read-only recon server (token comes from .env).
       - BUGGY_MCP_RECON_URL=http://pipeline-mcp:9460/mcp
+      # ... queues recon leads and builds the findings report through the
+      # capture server ...
+      - BUGGY_MCP_CAPTURE_URL=http://capture-mcp:9461/mcp
+      # ... and projects the recon store into the knowledge graph.
+      - BUGGY_PIPELINE_DATA=/data/pipeline
     volumes:
       - ${BUGGY_HOME:-~/.buggy}/workspace:/workspace
       - ${BUGGY_HOME:-~/.buggy}/control:/control
       - ${BUGGY_HOME:-~/.buggy}/audit:/audit:ro
+      - pipeline_data:/data/pipeline:ro
     networks:
       - buggy-net
     profiles:
@@ -867,6 +884,10 @@ services:
       - WORKSPACE_PATH=/workspace
       - CONTROL_PATH=/control
       - AUDIT_PATH=/audit
+      # The run page reads live recon state and findings from the stack's
+      # read-only servers (token from .env).
+      - BUGGY_MCP_RECON_URL=http://pipeline-mcp:9460/mcp
+      - BUGGY_MCP_CAPTURE_URL=http://capture-mcp:9461/mcp
     volumes:
       - ${BUGGY_HOME:-~/.buggy}/workspace:/workspace
       # The dashboard is the operator's tool: it records approval decisions

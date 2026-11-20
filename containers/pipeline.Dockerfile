@@ -84,6 +84,12 @@ COPY packages/buggy-core/buggy_core /opt/buggy_core
 # through buggy/pipeline/mcp_client.py, with no agent framework installed.
 COPY packages/buggy/buggy/cli /opt/buggy/cli
 COPY packages/buggy/buggy/program /opt/buggy/program
+# The capture server's findings layer: findings store and verifier, lessons,
+# the coordination board, and operator notifications. Standard library only.
+COPY packages/buggy/buggy/findings /opt/buggy/findings
+COPY packages/buggy/buggy/memory /opt/buggy/memory
+COPY packages/buggy/buggy/coordination /opt/buggy/coordination
+COPY packages/buggy/buggy/notify.py /opt/buggy/notify.py
 
 # Fails the build if any pinned tool is missing or reports another version.
 RUN python -m buggy.pipeline.versions --write-manifest /opt/buggy/pipeline-tools.json

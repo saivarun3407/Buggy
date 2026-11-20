@@ -696,3 +696,38 @@ def test_langgraph_is_pointed_at_every_stack_mcp_server():
     assert env["BUGGY_MCP_CAPTURE_URL"] == "http://capture-mcp:9461/mcp"
     assert env["BUGGY_MCP_SCOPE_URL"] == "http://scope-mcp:9462/mcp"
     assert env["BUGGY_MCP_BROWSER_URL"] == "http://browser-mcp:9463/mcp"
+
+
+def test_test_account_secrets_reach_the_evidence_gateway_only_and_read_only():
+    """Operator-declared test accounts: the gateway logs in; no agent-facing service sees them."""
+    services = _rendered_compose()["services"]
+    holders = {name for name, svc in services.items() if "/secrets" in _mounts(svc)}
+    assert holders == {"capture-mcp"}
+    assert _mounts(services["capture-mcp"])["/secrets"].get("read_only") is True
+    assert _environment(services["capture-mcp"])["BUGGY_SECRETS_ROOT"] == "/secrets"
+    for name in ("sandbox", "langgraph", "pipeline", "pipeline-mcp", "browser-mcp", "scope-mcp"):
+        assert "BUGGY_SECRETS_ROOT" not in _environment(services[name]), name
+
+
+def test_notification_webhooks_are_not_given_to_agent_facing_services():
+    """Webhook URLs are credentials: the gateway and the operator only."""
+    services = _rendered_compose()["services"]
+    for name, svc in services.items():
+        keys = {k for k in _environment(svc) if k.startswith("BUGGY_NOTIFY_")}
+        if name in ("capture-mcp", "operator", "web", "langgraph", "litellm"):
+            continue  # these read .env (operator-side) or set it explicitly
+        assert not keys, f"{name} is given notification settings: {sorted(keys)}"
+    assert "BUGGY_NOTIFY_WEBHOOK_URL" not in _environment(services["sandbox"])
+
+
+def test_the_operator_can_queue_leads_and_project_the_graph_but_not_write_recon_data():
+    services = _rendered_compose()["services"]
+    operator = services["operator"]
+    env = _environment(operator)
+    assert env["BUGGY_MCP_CAPTURE_URL"] == "http://capture-mcp:9461/mcp"
+    assert _mounts(operator)["/data/pipeline"].get("read_only") is True
+    # The dashboard (profile-gated, so read from the file) reads live state from
+    # the two read-only servers.
+    web = yaml.safe_load(COMPOSE.read_text())["services"]["web"]["environment"]
+    assert "BUGGY_MCP_RECON_URL=http://pipeline-mcp:9460/mcp" in web
+    assert "BUGGY_MCP_CAPTURE_URL=http://capture-mcp:9461/mcp" in web

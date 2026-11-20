@@ -280,6 +280,9 @@ func prepareStackFor(cmd *cobra.Command, skipModelAuth bool) (string, map[string
 	// creates them first, which breaks the host-side CLI write).
 	_ = os.MkdirAll(filepath.Join(home, "workspace"), 0o755)
 	_ = os.MkdirAll(filepath.Join(home, "telemetry"), 0o755)
+	// Operator-declared test accounts (identities.json per engagement). Only
+	// the capture service mounts it, read-only; keep it private on the host.
+	_ = os.MkdirAll(filepath.Join(home, "secrets"), 0o700)
 
 	// Ensure BUGGY_HOME is set in .env (Docker Compose needs absolute path)
 	if config.Get(env, "BUGGY_HOME", "") == "" {
