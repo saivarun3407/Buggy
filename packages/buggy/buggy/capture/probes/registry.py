@@ -9,6 +9,7 @@ from buggy.capture.gateway import CaptureGateway, GatewayRefusal
 from buggy.capture.probes import checks
 from buggy.capture.probes.base import Context, ProbeInputError, ProbeSpec
 from buggy.capture.probes.injection import sqli
+from buggy.capture.probes.xss import xss_reflected
 
 REGISTRY: dict[str, ProbeSpec] = {
     spec.name: spec
@@ -102,6 +103,26 @@ REGISTRY: dict[str, ProbeSpec] = {
                 "allow_time": "also try 3-second delay payloads (default false)",
             },
             False, sqli,
+        ),
+        ProbeSpec(
+            "xss_reflected", "xss", "CWE-79",
+            "Is one named parameter reflected into HTML where its markup characters break out "
+            "of their context? Names the context; marker-only strings, nothing that runs. At "
+            "most 6 requests, no browser.",
+            {
+                "url": "endpoint (the query string may already carry the parameter; for "
+                "location path it carries a {parameter} placeholder)",
+                "parameter": "name of the parameter to test (dotted path for json)",
+                "method": "HTTP method (default GET); any other method counts as "
+                "state-changing and goes through the approval gate",
+                "location": "where the parameter lives: query | json | form | path "
+                "(default query)",
+                "value": "optional text sent in front of the marker (default: none, the "
+                "marker replaces the parameter's value)",
+                "body": "request body for json/form (object or string)",
+                "headers": "optional headers, e.g. auth or Accept: text/html",
+            },
+            False, xss_reflected,
         ),
     )
 }  # fmt: skip
