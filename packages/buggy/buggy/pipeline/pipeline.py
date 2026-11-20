@@ -23,6 +23,7 @@ from __future__ import annotations
 import hashlib
 import json
 import logging
+import secrets
 import shutil
 import subprocess
 import time
@@ -32,7 +33,7 @@ from pathlib import Path
 from typing import Any
 from urllib.parse import urlsplit
 
-from buggy.pipeline import versions
+from buggy.pipeline import versions, wildcard
 from buggy.pipeline.http import OutOfScopeRequest, RateLimiter, ScopedHTTP, fetch_passive
 from buggy.pipeline.runner import RunResult, run_tool
 from buggy.pipeline.schema import (
@@ -81,6 +82,11 @@ STAGE_DISABLED = "disabled by program rules"
 # Stages whose records are retired when a re-processed input stops reporting
 # them. Discovery stages (subdomains, URLs) only accumulate.
 RETIRING_STAGES = frozenset({"dns", "live", "fingerprint", "apispec", "issues"})
+
+# Stage-cache namespace of the DNS stage's wildcard check: one row per
+# enumeration root (the verdict), next to the stage's own per-host rows.
+WILDCARD_STAGE = "dns:wildcard"
+ADDRESS_RTYPES = ("A", "AAAA")
 
 DEFAULT_MAX_AGE = 24 * 3600.0
 MAX_JS_FILES = 200
@@ -728,20 +734,237 @@ class Pipeline:
             if self.scope.admit([host], stage="dns", tool="dnsx", direction="input")
         }
         pending = self._pending("dns", stats, hosts)
+        self._retire_wildcard_roots(stats)
         if not pending:
             return
         raw, ref, version = self._run_binary("dns", stats, self._dnsx, list(pending))
         if not ref:
             return  # tool unavailable: leave the cache untouched so the next run retries
+        records = list(self._dnsx.parse(raw))
+        # Names that resolve only because their zone answers for everything are
+        # dropped here, before anything is stored: no later stage sees them.
+        dropped, unsettled = self._wildcard_drops(stats, list(pending), records)
         self._store(
             "dns",
             stats,
             self._dnsx.name,
-            ((r, r.asset) for r in self._dnsx.parse(raw)),
+            ((r, r.asset) for r in records if r.asset not in dropped),
             version=version,
             raw_ref=ref,
         )
-        self._complete("dns", stats, pending)
+        # A name whose wildcard check failed stays out of the cache, so the
+        # next run resolves and checks it again.
+        self._complete(
+            "dns", stats, {key: digest for key, digest in pending.items() if key not in unsettled}
+        )
+
+    # Where the random wildcard-probe labels come from; a seeded
+    # ``random.Random`` in tests.
+    _wildcard_rng: Any = secrets
+
+    def _wildcard_drops(
+        self, stats: StageStats, names: list[str], records: list[Record]
+    ) -> tuple[set[str], set[str]]:
+        """``(dropped, unsettled)`` among the names this run resolved.
+
+        ``dropped`` are the names only a wildcard record answers for. Each is
+        logged as a scope drop (``wildcard_dns``) and loses its DNS coverage
+        stamp: a made-up name is not an asset, so it is not a gap in what was
+        checked either. ``unsettled`` are the names a failed wildcard check
+        left undecided; they are stamped ``partial``, never read as clean.
+        """
+        roots = self._enumeration_roots()
+        resolved: dict[str, set[str]] = {name: set() for name in names}
+        for record in records:
+            if record.asset in resolved and record.attrs.get("rtype") in ADDRESS_RTYPES:
+                resolved[record.asset].add(str(record.attrs["data"]))
+        # Hosts the operator named outright are kept whatever they resolve to.
+        explicit = {
+            *self.scope.seeds().hosts,
+            *(host_of(url) for url in self.scope.limits.seed_urls),
+        }
+        entry = stats.tools.setdefault(self._dnsx.name, {})
+        dropped: set[str] = set()
+        unsettled: set[str] = set()
+        for root in roots:
+            group = [name for name in names if self._root_of(name, roots) == root]
+            if not group:
+                continue
+            info, problem = self._wildcard_info(stats, root, group, resolved, explicit)
+            if problem:
+                # Only names the filter could have dropped are in doubt.
+                doubtful = [n for n in group if n != root and n not in explicit and resolved[n]]
+                unsettled.update(doubtful)
+                self._note(
+                    self._dnsx.name, "partial", f"wildcard check failed ({problem})", doubtful
+                )
+            if info is None or not info.is_wildcard:
+                continue
+            entry.setdefault("wildcard_roots", []).append(root)
+            dropped.update(wildcard.filter_names(group, info, resolved, explicit)[1])
+        if not dropped:
+            return dropped, unsettled
+        stamped = {row["asset"] for row in self.store.coverage(self.engagement, stage="dns")}
+        for name in names:
+            if name not in dropped:
+                continue
+            self._log_drop("dns", self._dnsx.name, "output", name, wildcard.REASON)
+            if name in stamped:
+                self.store.clear_coverage(self.engagement, name, "dns")
+        self._handled = [key for key in self._handled if key not in dropped]
+        entry["wildcard_dropped"] = len(dropped)
+        return dropped, unsettled
+
+    def _wildcard_info(
+        self,
+        stats: StageStats,
+        root: str,
+        names: list[str],
+        resolved: dict[str, set[str]],
+        explicit: set[str],
+    ) -> tuple[wildcard.WildcardInfo | None, str]:
+        """``(verdict, problem)`` for ``root``; the verdict is cached, fresh or ``None``.
+
+        One row per root in the stage cache holds the last verdict; it is
+        reused like any cached input (same resolvers, younger than
+        ``max_age``, not forced). Otherwise the root is probed when this
+        batch's answers look like a wildcard's, or when it was one last time.
+        No verdict means nothing is dropped. ``problem`` is set when the
+        probes could not be resolved.
+        """
+        input_hash = _hash(root, self._resolvers)
+        cached = self.store.cached_input(self.engagement, WILDCARD_STAGE, root)
+        known = _cached_wildcard(root, cached)
+        if (
+            known is not None
+            and cached is not None
+            and not self.force
+            and cached["input_hash"] == input_hash
+            and time.time() - float(cached["completed_at"]) < self.max_age
+        ):
+            return known, ""
+        was_wildcard = known is not None and known.is_wildcard
+        if not was_wildcard and not wildcard.suspected(names, root, resolved, explicit):
+            return None, ""
+        info, ref, version, problem = self._probe_wildcard(root)
+        entry = stats.tools.setdefault(self._dnsx.name, {})
+        if info is None:
+            # Unknown is not "no wildcard". Nothing is cached, so the next run
+            # probes again; until then the last verdict (if any) stands.
+            entry.setdefault("wildcard_errors", {})[root] = problem
+            log.warning("pipeline: wildcard check for %s failed: %s", root, problem)
+            return known, problem
+        if info.is_wildcard and self.scope.admit(
+            [root], stage="dns", tool=self._dnsx.name, direction="output"
+        ):
+            record = Record(
+                RecordType.DNS_RECORD,
+                root,
+                f"WILDCARD *.{root}",
+                self._dnsx.name,
+                attrs={
+                    "rtype": "WILDCARD",
+                    "data": f"*.{root}",
+                    "wildcard": True,
+                    "addresses": sorted(info.addresses),
+                },
+            )
+            written = self.store.write_records(
+                self.run_id,
+                self.engagement,
+                WILDCARD_STAGE,
+                [(record, root)],
+                tool_version=version,
+                raw_ref=ref,
+            )
+            stats.records += written
+            entry["records"] = entry.get("records", 0) + written
+        # Caches the verdict, and retires the root's wildcard record when this
+        # probe no longer reports one.
+        stats.retired += self.store.complete_inputs(
+            self.run_id,
+            self.engagement,
+            WILDCARD_STAGE,
+            {root: input_hash},
+            tool_versions=json.dumps(
+                {
+                    "dnsx": version,
+                    "wildcard": info.is_wildcard,
+                    "addresses": sorted(info.addresses),
+                },
+                sort_keys=True,
+            ),
+        )
+        return info, ""
+
+    def _probe_wildcard(self, root: str) -> tuple[wildcard.WildcardInfo | None, str, str, str]:
+        """Probe ``root`` through the stage's own resolver path.
+
+        Returns ``(info, raw_ref, version, problem)``; ``info`` is ``None``
+        when the probes could not be resolved (``problem`` says why). The
+        probes use the same dnsx wrapper as the stage, so the same resolvers
+        and rate limit, and they pass the scope filter like any other input.
+        Their raw output is kept under its own reference.
+        """
+        tool = self._dnsx.name
+        run = {"ref": "", "version": "", "problem": ""}
+
+        def resolve(names: list[str]) -> dict[str, set[str]]:
+            answers: dict[str, set[str]] = {name: set() for name in names}
+            if self.scope.admit(names, stage="dns", tool=tool, direction="input") != names:
+                run["problem"] = "probe names are not in scope"
+                return answers
+            try:
+                binary, run["version"] = self._resolver(tool)
+            except versions.ToolVersionError as exc:
+                run["problem"] = str(exc)[:200]
+                return answers
+            invocation = self._dnsx.invocation(binary, names, self.scope.limits, self._workdir())
+            raw_path, run["ref"] = self._raw_path("dns", f"{tool}-wildcard-{root}")
+            result = self._executor(tool, invocation, raw_path)
+            self.store.register_raw_output(
+                run["ref"],
+                run_id=self.run_id,
+                engagement=self.engagement,
+                stage="dns",
+                tool=tool,
+                tool_version=run["version"],
+                argv=list(result.argv),
+                sha256=result.sha256,
+                bytes=result.size,
+                exit_code=result.exit_code,
+                started_at=result.started_at,
+                finished_at=result.finished_at,
+            )
+            if result.timed_out:
+                run["problem"] = "timed out"
+            elif result.exit_code not in (0, None):
+                run["problem"] = f"exit {result.exit_code}"
+            if run["problem"]:
+                return answers
+            try:
+                raw = raw_path.read_text(encoding="utf-8", errors="replace")
+            except OSError:
+                run["problem"] = "no output"
+                return answers
+            for record in self._dnsx.parse(raw):
+                if record.asset in answers and record.attrs.get("rtype") in ADDRESS_RTYPES:
+                    answers[record.asset].add(str(record.attrs["data"]))
+            return answers
+
+        info = wildcard.detect(root, resolve, rng=self._wildcard_rng)
+        return (None if run["problem"] else info), run["ref"], run["version"], run["problem"]
+
+    def _retire_wildcard_roots(self, stats: StageStats) -> None:
+        """Forget the verdict (and wildcard record) of a root the scope no longer names."""
+        if self.only_asset:
+            return  # an --asset run only speaks for that asset
+        roots = set(self._enumeration_roots())
+        for root in self.store.cached_keys(self.engagement, WILDCARD_STAGE):
+            if root not in roots:
+                stats.retired += self.store.retire_input(
+                    self.run_id, self.engagement, WILDCARD_STAGE, root
+                )
 
     # ── stage 3: live hosts and ports ───────────────────────────────
 
@@ -1196,6 +1419,19 @@ def _with_line(record: Record, line: int) -> Record:
         attrs=record.attrs,
         raw_line=line,
     )
+
+
+def _cached_wildcard(root: str, cached: dict[str, Any] | None) -> wildcard.WildcardInfo | None:
+    """The verdict held in a wildcard stage-cache row, or ``None`` if there is none."""
+    if cached is None:
+        return None
+    try:
+        payload = json.loads(cached["tool_versions"])
+        return wildcard.WildcardInfo(
+            root, bool(payload["wildcard"]), frozenset(map(str, payload["addresses"]))
+        )
+    except (KeyError, TypeError, ValueError):
+        return None
 
 
 def _is_address(value: str) -> bool:
