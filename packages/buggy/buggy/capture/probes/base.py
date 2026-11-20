@@ -5,6 +5,7 @@ from __future__ import annotations
 import base64
 import difflib
 import json
+from collections import Counter
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from typing import Any
@@ -103,14 +104,62 @@ def json_of(capture: Capture) -> Any:
         return None
 
 
+def _leaves(document: Any, path: str = "") -> list[tuple[str, str]]:
+    """Every (path, value) leaf of a decoded JSON document."""
+    if isinstance(document, dict):
+        if not document:
+            return [(path, "{}")]
+        return [leaf for k, v in document.items() for leaf in _leaves(v, f"{path}/{k}")]
+    if isinstance(document, list):
+        if not document:
+            return [(path, "[]")]
+        return [leaf for n, v in enumerate(document) for leaf in _leaves(v, f"{path}/{n}")]
+    return [(path, json.dumps(document, sort_keys=True))]
+
+
+def _json_similarity(left: str, right: str) -> float | None:
+    """Share of equal (path, value) leaves, or None when either body is not a JSON container."""
+    try:
+        a, b = json.loads(left), json.loads(right)
+    except ValueError:
+        return None
+    if not isinstance(a, (dict, list)) or not isinstance(b, (dict, list)):
+        return None
+    first, second = Counter(_leaves(a)), Counter(_leaves(b))
+    total = max(sum(first.values()), sum(second.values()))
+    return sum((first & second).values()) / total if total else 1.0
+
+
 def similarity(a: Capture, b: Capture) -> float:
-    """0..1 similarity of two response bodies (1.0 when identical)."""
+    """0..1 similarity of two response bodies (1.0 when identical).
+
+    Two JSON bodies are compared by value: the share of leaves that are equal
+    at the same path. Text similarity would call two users' own records "the
+    same" because they have the same shape; here they differ in every field
+    that differs. Anything else is compared as text, in order.
+    """
     if a.response_sha256 == b.response_sha256:
         return 1.0
     left, right = text(a)[:20000], text(b)[:20000]
     if not left and not right:
         return 1.0
-    return round(difflib.SequenceMatcher(None, left, right).quick_ratio(), 3)
+    structured = _json_similarity(left, right)
+    if structured is not None:
+        return round(structured, 3)
+    matcher = difflib.SequenceMatcher(None, left, right, autojunk=False)
+    # quick_ratio ignores order and is an upper bound: a low value is final.
+    upper = matcher.quick_ratio()
+    if upper < 0.5:
+        return round(upper, 3)
+    if len(left) > 4000 or len(right) > 4000:
+        # Character matching is quadratic. A long body is compared line by line,
+        # or on its first part when it has too few lines for that to mean much.
+        left_lines, right_lines = left.splitlines(), right.splitlines()
+        if min(len(left_lines), len(right_lines)) >= 30:
+            matcher = difflib.SequenceMatcher(None, left_lines, right_lines, autojunk=False)
+        else:
+            matcher = difflib.SequenceMatcher(None, left[:4000], right[:4000], autojunk=False)
+    return round(matcher.ratio(), 3)
 
 
 def contains_value(document: Any, key: str, value: Any) -> bool:
