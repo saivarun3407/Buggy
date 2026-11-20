@@ -14,6 +14,30 @@ curl -fsSL https://buggy.red/install | bash
 irm https://buggy.red/install.ps1 | iex
 ```
 
+## 1b. Try it without a model key
+
+Two commands that need no configuration and no LLM:
+
+```bash
+buggy doctor --profile lite     # checks Docker, images, secrets, folders; prints a fix per failure
+buggy demo                      # starts a bundled practice target and runs recon against it
+```
+
+`buggy demo` brings up OWASP Juice Shop on an internal network, runs the
+deterministic recon pipeline and writes
+`~/.buggy/control/demo/recon-report.md`. `buggy demo --down` removes it.
+
+For your own target, recon and report only:
+
+```bash
+buggy hunt https://example.com --lite
+```
+
+`--lite` starts two containers (the scanners and their read-only query
+server) instead of the full stack, needs no model key and implies
+`--no-agent`. Measured on the lab target here: stack up in about 10 seconds,
+report in about 5 minutes.
+
 ## 2. Configure once
 
 ```bash
@@ -128,6 +152,23 @@ Verify the audit ledger anytime:
 ```bash
 buggy-cli audit verify --engagement <engagement>
 ```
+
+## 4b. Watch, resume, gate
+
+```bash
+buggy-cli status <engagement>            # scope, recon stage, approvals waiting, findings
+buggy hunt --resume <engagement>         # continue with the stored targets and options
+buggy hunt example.com --fail-on high    # exit 10 when a verified finding is high or above
+```
+
+`hunt` exits 0 (complete, nothing at or above `--fail-on`), 10 (complete, at
+or above it), 3 (incomplete: recon or the agent stage did not finish) or 2
+(usage). Re-running with the same `--engagement-name` and an unchanged scope
+resumes; a changed scope is shown as a diff and needs `--yes`. Every run
+writes `~/.buggy/control/<engagement>/hunt-result.json`, and with the full
+stack `report.md`, `report.html`, `report.json` and `findings.sarif`. How a
+lead becomes a proven finding: [findings.md](findings.md). The dashboard's
+**Run status** page shows the same and has Allow / Deny for approvals.
 
 ## 5. Stop
 

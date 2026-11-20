@@ -59,10 +59,61 @@ The exit code is 0 unless `--require DOMAIN` is given and that domain is not rea
 
 ## Matrix for this repo's Kali sandbox image
 
-<!-- PLACEHOLDER: to be filled by the integrator from a real run of
-     `buggy-cli tools check` against the built sandbox image. Nothing below has
-     been measured yet; do not read it as a result. -->
+Measured on 2026-11-20 by running the generated probe script inside the
+locally built `buggy-sandbox:stable` image (Kali rolling, the pinned digest in
+`containers/sandbox.Dockerfile`), with no network and with the capability set
+the sandbox has at run time (`NET_RAW`, `NET_BIND_SERVICE`, `SYS_PTRACE`,
+`SETUID`, `SETGID`; `NET_ADMIN` dropped). Only the `sandbox` service was
+counted as running, so domains that need another profile show that.
 
-**Not yet measured.** This section is a placeholder. The integrator replaces it with
-the output of a real `buggy-cli tools check` run against the built sandbox image,
-stating the image tag, the date and the profiles that were running.
+```
+buggy-cli tools script > probe.sh
+docker run --rm -i --network none --cap-drop ALL --cap-add NET_RAW --cap-add NET_BIND_SERVICE \
+    --cap-add SYS_PTRACE --cap-add SETUID --cap-add SETGID --entrypoint sh buggy-sandbox:stable \
+    < probe.sh > probe.jsonl
+buggy-cli tools check --probe-output probe.jsonl --services sandbox --compose docker-compose.yml
+```
+
+```
+buggy                  ready
+recon                  ready
+soundwave              ready
+exploit                ready
+postexploit            degraded (missing: sliver (needs profile c2-sliver))
+analyst                ready
+asvs_assessor          ready
+reverser               degraded (missing: ghidra (needs profile reversing))
+contract_auditor       ready
+cloud_hunter           ready
+ad_operator            not available in this stack (needs profile ad)
+blue_cell              ready
+phisher                ready
+mobile_operator        degraded (missing: ghidra (needs profile reversing))
+wireless_operator      ready
+osint_operator         ready
+iot_operator           degraded (missing: ghidra (needs profile reversing))
+ics_operator           ready
+forensicator           ready
+supply_chain_operator  ready
+
+binaries: 86 found, 4 missing, 1 not probed
+```
+
+What the numbers mean, and what they do not:
+
+- **86 of 90 declared binaries are on PATH.** Missing: `sliver` (ships in the
+  `c2-sliver` profile's own service), `ncat`, `certipy`, and `python` (the
+  image has `python3`). `ncat` and `certipy` are declared in the capability
+  registry but not installed by the image: a real gap.
+- **48 answered `--version` or `-V`.** 37 are present but answer neither flag
+  (they use `-v`, `version` or print usage), and `msfconsole` did not answer
+  within 5 seconds. "Present" is all this check proves for those; it does not
+  run any tool against a target.
+- **"ready" means every tool the role needs is present and its services are
+  running.** It says nothing about how well that role performs. Only the web
+  and API path has lab tests and a coverage audit
+  (`benchmark/lab/results/coverage.md`); the other domains are inherited
+  breadth that has been checked for presence, not for results.
+- This run found one real fault, since fixed: `nmap` could not start at all in
+  the hardened sandbox, because its file capabilities include `cap_net_admin`,
+  which the sandbox drops. `tests/test_sandbox_tools_start.py` now pins it.

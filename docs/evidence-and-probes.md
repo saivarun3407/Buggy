@@ -7,13 +7,15 @@ model chooses.
 
 | Service | Port | Code | Agent tools |
 |---|---|---|---|
-| `pipeline-mcp` | 9460 | `buggy/pipeline/mcp_server.py` | `recon_summary`, `recon_assets`, `recon_query`, `recon_record`, `recon_diff`, `recon_scope_drops`, `recon_raw`, `recon_request_rerun`, `recon_rerun_status` |
-| `capture-mcp` | 9461 | `buggy/capture/mcp_server.py` | `http_send`, `http_replay`, `http_capture`, `http_captures`, `capture_verify`, `probe_list`, `probe_run` |
+| `pipeline-mcp` | 9460 | `buggy/pipeline/mcp_server.py` | `recon_summary`, `recon_assets`, `recon_query`, `recon_record`, `recon_diff`, `recon_scope_drops`, `recon_coverage`, `recon_raw`, `recon_request_rerun`, `recon_rerun_status` |
+| `capture-mcp` | 9461 | `buggy/capture/mcp_server.py`, `buggy/capture/workbench.py` | `http_send`, `http_replay`, `http_capture`, `http_captures`, `capture_verify`, `probe_list`, `probe_run`, and the findings layer: `candidates_next`, `finding_submit`, `finding_verify`, `finding_get`, `findings_list`, `finding_grade`, `report_build`, `evidence_export`, `identities_list`, `authz_matrix_run`, `memory_search`, `memory_save`, `facts_list`, `fact_add`, `intent_open`, `intent_claim`, `intent_conclude`, `hints_list`, `hint_add` (see [findings.md](findings.md)) |
 | `scope-mcp` | 9462 | `buggy/capture/scope_server.py` | `scope_show`, `scope_check`, `program_info` |
 | `browser-mcp` | 9463 | `buggy/scoped_browser/mcp_server.py` | `browser_open`, `browser_click`, `browser_fill`, `browser_eval`, `browser_text`, `browser_html`, `browser_screenshot`, `browser_cookies`, `browser_requests`, `browser_close` |
 
-Agent-side wrappers: `buggy/tools/stack_mcp.py`. Read-only roles get recon and
-scope; testing roles get all four.
+Agent-side wrappers: `buggy/tools/stack_mcp.py`. Read-only roles get recon,
+scope and the read-only findings, board and lessons tools; testing roles get
+all four servers. The engagement and the acting agent's name are filled in
+from the run: no tool lets the model choose either.
 
 ## Evidence gateway (`capture-mcp`)
 
@@ -26,8 +28,10 @@ Every `http_send` goes through, in order:
    address is itself in scope or the engagement sets
    `network.allow_private_targets` (labs, internal assessments).
 3. **Approval** — any method other than GET/HEAD/OPTIONS is held until the
-   operator allows that exact request (`APPROVAL_REQUIRED`), unless the
-   engagement sets `approvals.state_changing: "not_required"` (labs only).
+   operator allows that exact request as that identity (`APPROVAL_REQUIRED`),
+   unless the engagement sets `approvals.state_changing: "not_required"`
+   (labs only). The only exception is a login request the operator declared
+   for a test account, which the gateway sends itself.
 4. **Rate limit** — the engagement's `pipeline.rate_limit_rps`.
 5. **Send** — redirects are returned, never followed.
 6. **Record** — full request and response in the capture store, plus a
@@ -51,10 +55,22 @@ remediation. `null` means "could not tell" and is never reported as a pass.
 | `numeric_boundary` | business logic | `test_boundary_probe_finds_negative_quantity` |
 | `mass_assignment` | API | `test_mass_assignment_probe_finds_admin_registration` |
 | `graphql_checks` | GraphQL | `test_graphql_probe_finds_introspection_suggestions_and_private_data` |
+| `sqli` | injection (CWE-89) | `test_sqli_probe_finds_product_search_injection`, `..._login_injection`, `..._graphql_filter_injection` |
+| `command_injection` | injection (CWE-78) | `test_command_injection_probe_finds_import_paste`, `..._system_diagnostics` |
+| `open_redirect` | open redirect (CWE-601) | `test_open_redirect_probe_finds_the_juice_shop_allowlist_bypass` |
+| `xss_reflected` | XSS (CWE-79) | none: the lab apps have no server-side reflected sink (unit fixtures only) |
+| `ssti` | injection (CWE-1336) | none in the lab (unit fixtures only) |
+| `path_traversal` | file handling (CWE-22) | none in the lab (unit fixtures only) |
+| `cors` | misconfiguration (CWE-942) | none in the lab (unit fixtures only) |
 
-Tests live in `packages/buggy/tests/lab/test_probes_find_known_bugs.py` and
-run against real Juice Shop and DVGA containers (`BUGGY_LAB=1`). Each probe
-also has a negative control.
+Tests live in `packages/buggy/tests/lab/` and run against real Juice Shop and
+DVGA containers (`BUGGY_LAB=1`). Each probe also has a negative control. The
+access-control matrix (`authz_matrix_run`) is proven by
+`test_authz_matrix_lab.py`. What is and is not covered is audited in
+`benchmark/lab/results/coverage.md`.
+
+A positive probe result is queued as a candidate finding and is later
+verified by running the same probe again (see [findings.md](findings.md)).
 
 The SSRF probe needs a callback listener the target can reach:
 `BUGGY_CANARY_BASE_URL` (a hostname you control that forwards to port 9470 of
