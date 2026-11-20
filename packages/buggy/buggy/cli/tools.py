@@ -33,6 +33,7 @@ from typing import TextIO
 from buggy import readiness
 
 EXIT_OK = 0
+EXIT_PROBE_FAILED = 3
 EXIT_USAGE = 2
 EXIT_NOT_READY = 4
 
@@ -151,7 +152,18 @@ def main(
             execute = _local_execute(args.timeout)
         else:
             execute = _sandbox_execute(args.timeout)
-    tools = readiness.check(execute, specs)
+    try:
+        tools = readiness.check(execute, specs)
+    except Exception as exc:  # noqa: BLE001 - any failure to reach the sandbox ends the same way
+        print(
+            f"error: the probe could not be run ({type(exc).__name__}: {str(exc)[:200]}).\n"
+            "The sandbox is reachable from the agent runtime only. Run this there:\n"
+            "  docker compose exec langgraph buggy-cli tools check\n"
+            "or probe the image directly and pass the result with --probe-output "
+            "(see docs/readiness.md).",
+            file=sys.stderr,
+        )
+        return EXIT_PROBE_FAILED
 
     if args.services is not None:
         services: list[str] | None = [s.strip() for s in args.services.split(",") if s.strip()]

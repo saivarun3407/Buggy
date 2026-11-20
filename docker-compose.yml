@@ -851,6 +851,9 @@ services:
       - BUGGY_MCP_CAPTURE_URL=http://capture-mcp:9461/mcp
       # ... and projects the recon store into the knowledge graph.
       - BUGGY_PIPELINE_DATA=/data/pipeline
+      - BUGGY_NEO4J_URI=bolt://neo4j:7687
+      - BUGGY_NEO4J_USER=neo4j
+      - BUGGY_NEO4J_PASSWORD=${NEO4J_PASSWORD:-buggy-graph}
     volumes:
       - ${BUGGY_HOME:-~/.buggy}/workspace:/workspace
       - ${BUGGY_HOME:-~/.buggy}/control:/control

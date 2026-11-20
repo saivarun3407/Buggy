@@ -726,6 +726,8 @@ def test_the_operator_can_queue_leads_and_project_the_graph_but_not_write_recon_
     env = _environment(operator)
     assert env["BUGGY_MCP_CAPTURE_URL"] == "http://capture-mcp:9461/mcp"
     assert _mounts(operator)["/data/pipeline"].get("read_only") is True
+    assert env["BUGGY_NEO4J_URI"] == "bolt://neo4j:7687" and env["BUGGY_NEO4J_PASSWORD"]
+    assert set(operator["networks"]) & set(services["neo4j"]["networks"])
     # The dashboard (profile-gated, so read from the file) reads live state from
     # the two read-only servers.
     web = yaml.safe_load(COMPOSE.read_text())["services"]["web"]["environment"]

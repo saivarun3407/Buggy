@@ -441,3 +441,16 @@ def test_planned_capability_is_probed_but_not_required():
         _statuses({"certipy", "certipy-ad"}), ALL_SERVICES, profile_services=AD_PROFILE
     )
     assert _domain(rows, "ad_operator")["ready"] is True
+
+
+def test_an_unreachable_sandbox_is_a_clear_error_not_a_traceback(capsys) -> None:
+    from buggy.cli import tools as tools_cli
+
+    def refuse(_script: str) -> str:
+        raise ConnectionError("[Errno 111] Connection refused")
+
+    code = tools_cli.main(["check", "--services", "sandbox"], execute=refuse)
+    err = capsys.readouterr().err
+    assert code == tools_cli.EXIT_PROBE_FAILED == 3
+    assert "could not be run" in err and "docker compose exec langgraph" in err
+    assert "Traceback" not in err
