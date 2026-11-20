@@ -40,6 +40,7 @@ class RecordType(StrEnum):
     API_SPEC = "api_spec"
     API_OPERATION = "api_operation"
     GRAPHQL = "graphql"
+    PARAMETER = "parameter"
     VULNERABILITY = "vulnerability"
     SECRET = "secret"
 

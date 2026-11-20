@@ -16,6 +16,8 @@ import re
 import time
 from typing import Any
 
+from buggy.pipeline.tools import params
+
 SEVERITY_ORDER = ("critical", "high", "medium", "low", "info", "unknown")
 
 #: Advice per issue family, keyed by a substring of the nuclei template id.
@@ -53,15 +55,14 @@ COVERAGE_STAGE_LABELS: tuple[tuple[str, str], ...] = (
 )
 MAX_GAPS_PER_STAGE = 50
 
-#: An identifier that follows a named collection: /orders/123, /users/{userId}.
-#: A bare number such as "/10" is not an object reference.
-_ID_SEGMENT = re.compile(
-    r"/[a-z][\w-]*/(\d+|[0-9a-f]{8}-[0-9a-f-]{27,}|\{[^}/]*\}|:[a-z_]+)(?=/|$|\?)",
-    re.IGNORECASE,
-)
-_URL_PARAM = re.compile(
-    r"\b(url|uri|callback|webhook|redirect|next|dest|image_?url|fetch|proxy)\b", re.IGNORECASE
-)
+#: What a parameter hint (``pipeline/tools/params.py``) suggests testing:
+#: hint -> (class, what the parameter is, probe).
+_HINT_ROWS: dict[str, tuple[str, str, str]] = {
+    "id-like": ("access_control", "object identifier", "idor"),
+    "url-like": ("ssrf", "takes a URL", "ssrf_canary"),
+    "file-like": ("file_handling", "names a file or path", "path_traversal"),
+}
+MAX_NAMED_PARAMETERS = 3
 _AUTH_PATH = re.compile(
     r"/(login|signin|logout|register|signup|reset|forgot|token|oauth|sso|session|mfa|2fa)\b",
     re.IGNORECASE,
@@ -123,7 +124,13 @@ def group_issues(vulnerabilities: list[dict[str, Any]]) -> list[dict[str, Any]]:
 def rank_candidates(
     records: dict[str, list[dict[str, Any]]], *, limit: int = 40
 ) -> list[dict[str, str]]:
-    """Places worth testing first, each with the reason and the probe that fits."""
+    """Places worth testing first, each with the reason and the probe that fits.
+
+    The access-control, SSRF and file-handling rows come from parameter hints:
+    those of the stored ``parameter`` records, and, for a URL, endpoint or API
+    operation whose parameters are not among them, the same extraction run on
+    that record. No URL is pattern-matched here.
+    """
     out: list[dict[str, str]] = []
     seen: set[tuple[str, str]] = set()
 
@@ -132,6 +139,26 @@ def rank_candidates(
         if where and key not in seen and len(out) < limit:
             seen.add(key)
             out.append({"class": kind, "where": where, "why": why, "probe": probe})
+
+    def add_inputs(where: str, parameters: list[dict[str, Any]]) -> None:
+        """One row per hint that the parameters found at ``where`` carry."""
+        for hint, (kind, what, probe) in _HINT_ROWS.items():
+            names = [
+                f"{attrs.get('location')} parameter {attrs.get('name')}"
+                for attrs in parameters
+                if hint in (attrs.get("hints") or [])
+                # A value that is a number (page=2) is not a file name.
+                and not (hint == "file-like" and "numeric" in attrs["hints"])
+            ]
+            if names:
+                shown = ", ".join(names[:MAX_NAMED_PARAMETERS])
+                more = len(names) - MAX_NAMED_PARAMETERS
+                add(
+                    kind,
+                    where,
+                    f"{what}: {shown}" + (f" and {more} more" if more > 0 else ""),
+                    probe,
+                )
 
     for record in records.get("graphql", []):
         attrs = _attrs(record)
@@ -142,18 +169,27 @@ def rank_candidates(
             why += f", {len(attrs['mutations'])} mutation(s)"
         add("graphql", str(record.get("value")), why, "graphql_checks")
 
+    stored: dict[str, list[dict[str, Any]]] = {}
+    covered: set[str] = set()
+    for record in records.get("parameter", []):
+        attrs = _attrs(record)
+        covered.add(str(record.get("value") or ""))
+        where = f"{attrs.get('method') or ''} {attrs.get('url') or ''}".strip()
+        stored.setdefault(where, []).append(attrs)
+    for where, group in stored.items():
+        add_inputs(where, group)
+
+    def inputs_of(kind: str, record: dict[str, Any]) -> list[dict[str, Any]]:
+        """Parameters of one record that no stored parameter record already names."""
+        found = params.extract([{**record, "type": kind}])
+        return [parameter.attrs for parameter in found if parameter.value not in covered]
+
     for record in records.get("api_operation", []):
         attrs = _attrs(record)
         url = str(attrs.get("url") or record.get("value") or "")
         method = str(attrs.get("method") or "").upper()
         label = f"{method} {url}".strip()
-        params = " ".join(
-            str(p.get("name") if isinstance(p, dict) else p) for p in attrs.get("parameters") or []
-        )
-        if _ID_SEGMENT.search(url) or re.search(r"\bid\b", params, re.IGNORECASE):
-            add("access_control", label, "object identifier in the path or parameters", "idor")
-        if _URL_PARAM.search(params):
-            add("ssrf", label, "parameter that takes a URL", "ssrf_canary")
+        add_inputs(label, inputs_of("api_operation", record))
         if method in ("POST", "PUT", "PATCH") and attrs.get("request_body_types"):
             add(
                 "api",
@@ -173,11 +209,7 @@ def rank_candidates(
         for record in records.get(kind, []):
             url = str(record.get("value") or "")
             path = url.split("?", 1)[0]
-            query = url.split("?", 1)[1] if "?" in url else ""
-            if _ID_SEGMENT.search(path):
-                add("access_control", url, "object identifier in the path", "idor")
-            if query and _URL_PARAM.search(query):
-                add("ssrf", url, "query parameter that takes a URL", "ssrf_canary")
+            add_inputs(url, inputs_of(kind, record))
             if _AUTH_PATH.search(path):
                 add(
                     "auth_session",
@@ -192,7 +224,14 @@ def rank_candidates(
                     "administrative or internal path: request it without and with a low-privilege account",
                     MANUAL,
                 )
-    order = {"access_control": 0, "auth_session": 1, "ssrf": 2, "api": 3, "graphql": 4}
+    order = {
+        "access_control": 0,
+        "auth_session": 1,
+        "ssrf": 2,
+        "file_handling": 3,
+        "api": 4,
+        "graphql": 5,
+    }
     return sorted(out, key=lambda c: (order.get(c["class"], 9), c["where"]))
 
 
