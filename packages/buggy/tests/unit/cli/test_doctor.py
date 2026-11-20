@@ -53,7 +53,7 @@ LITE_ORDER = [
     "docker",
     "docker compose",
     "docker daemon",
-    *(f"secret {name}" for name in SECRETS),
+    "secret BUGGY_STACK_MCP_TOKEN",
     "image buggy-pipeline:stable",
     "BUGGY_HOME",
     "disk",
@@ -507,10 +507,17 @@ class TestLiteProfile:
         assert _not_ok(checks) == ["image buggy-pipeline:stable"]
         assert world.main("--profile", "lite") == 2
 
-    @pytest.mark.parametrize("secret", SECRETS)
-    def test_lite_still_requires_the_secrets(self, world: World, secret: str) -> None:
-        del world.env[secret]
-        assert _not_ok(world.checks("lite")) == [f"secret {secret}"]
+    def test_lite_requires_only_the_secret_its_stack_uses(self, world: World) -> None:
+        # docker-compose.lite.yml has no sandbox and no egress guard.
+        del world.env["SANDBOX_TOKEN"]
+        del world.env["EGRESS_GUARD_TOKEN"]
+        assert _not_ok(world.checks("lite")) == []
+        assert _not_ok(world.checks("full")) == [
+            "secret SANDBOX_TOKEN",
+            "secret EGRESS_GUARD_TOKEN",
+        ]
+        del world.env["BUGGY_STACK_MCP_TOKEN"]
+        assert _not_ok(world.checks("lite")) == ["secret BUGGY_STACK_MCP_TOKEN"]
 
     def test_an_unknown_profile_is_rejected(self, world: World) -> None:
         with pytest.raises(ValueError, match="unknown profile"):
@@ -755,3 +762,51 @@ class TestRealSideEffects:
     def test_total_ram_is_a_positive_number_or_unknown(self) -> None:
         ram = doctor._total_ram()
         assert ram is None or ram > 0
+
+
+class TestInContainer:
+    """The operator container cannot see docker; it checks its own half only."""
+
+    def _mounted(self, world: World, tmp_path: Path) -> None:
+        for label in ("workspace", "control", "audit"):
+            (tmp_path / label).mkdir()
+            world.env[f"BUGGY_{label.upper()}_ROOT"] = str(tmp_path / label)
+
+    def test_only_secrets_mounts_and_model_are_checked_and_docker_is_never_run(
+        self, world: World, tmp_path: Path
+    ) -> None:
+        self._mounted(world, tmp_path)
+        world.docker_path = None  # running docker here raises in the fake
+        checks = world.checks("lite", in_container=True)
+        assert [c.name for c in checks] == ["secret BUGGY_STACK_MCP_TOKEN", "mounts", "model"]
+        assert _not_ok(checks) == [] and world.commands == [] and world.port_probes == []
+        full = [c.name for c in world.checks("full", in_container=True)]
+        assert full == [*(f"secret {name}" for name in SECRETS), "mounts", "model"]
+
+    def test_a_missing_mount_fails_and_names_the_root(self, world: World, tmp_path: Path) -> None:
+        self._mounted(world, tmp_path)
+        world.env["BUGGY_CONTROL_ROOT"] = str(tmp_path / "not-mounted")
+        mounts = _by_name(world.checks("lite", in_container=True))["mounts"]
+        assert mounts.status == doctor.FAIL and "control root" in mounts.detail
+        assert world.main("--profile", "lite", "--in-container") == 2
+
+    def test_a_read_only_mount_fails(self, world: World, tmp_path: Path) -> None:
+        self._mounted(world, tmp_path)
+        audit = str(tmp_path / "audit")
+        mounts = _by_name(
+            world.checks("lite", in_container=True, writable=lambda path: path != audit)
+        )["mounts"]
+        assert mounts.status == doctor.FAIL and "audit root" in mounts.detail
+
+    def test_the_flag_reaches_main(
+        self, world: World, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        self._mounted(world, tmp_path)
+        world.docker_path = None
+        assert world.main("--profile", "lite", "--in-container", "--json") == 0
+        payload = json.loads(capsys.readouterr().out)
+        assert [c["name"] for c in payload["checks"]] == [
+            "secret BUGGY_STACK_MCP_TOKEN",
+            "mounts",
+            "model",
+        ]

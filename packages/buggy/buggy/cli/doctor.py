@@ -46,6 +46,14 @@ PROFILES = ("lite", "full")
 DEFAULT_PROFILE = "full"
 
 REQUIRED_SECRETS = ("SANDBOX_TOKEN", "EGRESS_GUARD_TOKEN", "BUGGY_STACK_MCP_TOKEN")
+# The lite stack has no sandbox and no egress guard: it needs the MCP token only.
+LITE_SECRETS = ("BUGGY_STACK_MCP_TOKEN",)
+# Inside the operator container the host's BUGGY_HOME is seen as these mounts.
+CONTAINER_ROOTS = (
+    ("workspace", "BUGGY_WORKSPACE_ROOT", "/workspace"),
+    ("control", "BUGGY_CONTROL_ROOT", "/control"),
+    ("audit", "BUGGY_AUDIT_ROOT", "/audit"),
+)
 SECRETS_FIX = (
     "run scripts/ensure-stack-secrets.sh (generates the missing secrets in ./.env; "
     "existing values are kept)"
@@ -417,9 +425,29 @@ def _not_checked(name: str, why: str) -> Check:
     return Check(name, FAIL, f"not checked: {why}", RERUN_FIX)
 
 
+def required_secrets(profile: str) -> tuple[str, ...]:
+    return REQUIRED_SECRETS if profile == "full" else LITE_SECRETS
+
+
+def check_mounts(env: Mapping[str, str], *, exists: Exists, writable: Writable) -> Check:
+    """In the operator container: the three roots must be mounted and writable."""
+    fix = (
+        "start the operator through `buggy` or docker compose so BUGGY_HOME is mounted, "
+        "and make BUGGY_HOME writable for the container user"
+    )
+    for label, variable, default in CONTAINER_ROOTS:
+        path = _value(env, variable) or default
+        if not exists(path):
+            return Check("mounts", FAIL, f"the {label} root {path} is not mounted", fix)
+        if not writable(path):
+            return Check("mounts", FAIL, f"the {label} root {path} is not writable", fix)
+    return Check("mounts", OK, "workspace, control and audit roots are mounted and writable")
+
+
 def run_checks(
     env: Mapping[str, str],
     *,
+    in_container: bool = False,
     which: Which | None = None,
     run: Run | None = None,
     exists: Exists | None = None,
@@ -449,6 +477,14 @@ def run_checks(
 
     checks: list[Check] = []
 
+    if in_container:
+        # The host half (docker, images, ports, disk) is checked by the
+        # launcher, which is the only side that can see it.
+        checks.extend(check_secret(env, name) for name in required_secrets(profile))
+        checks.append(check_mounts(env, exists=exists, writable=writable))
+        checks.append(check_model(env))
+        return checks
+
     docker = check_docker(which)
     checks.append(docker)
     if docker.status == OK:
@@ -461,7 +497,7 @@ def run_checks(
         checks.append(_not_checked("docker compose", blocked))
         checks.append(_not_checked("docker daemon", blocked))
 
-    checks.extend(check_secret(env, name) for name in REQUIRED_SECRETS)
+    checks.extend(check_secret(env, name) for name in required_secrets(profile))
 
     for image in required_images(profile, env):
         checks.append(
@@ -540,6 +576,14 @@ def _build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--json", action="store_true", help='print {"ok": bool, "checks": [...]} instead of a table'
     )
+    parser.add_argument(
+        "--in-container",
+        action="store_true",
+        help=(
+            "run only the checks that make sense inside the operator container (secrets, "
+            "mounted roots, model); the launcher checks docker, images, ports and disk on the host"
+        ),
+    )
     return parser
 
 
@@ -571,6 +615,7 @@ def main(
         exists=exists,
         free_port=free_port,
         profile=args.profile,
+        in_container=args.in_container,
         make_dir=make_dir,
         writable=writable,
         disk_free=disk_free,
