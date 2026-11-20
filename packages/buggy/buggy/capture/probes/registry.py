@@ -8,6 +8,7 @@ from buggy.capture.canary import Canary
 from buggy.capture.gateway import CaptureGateway, GatewayRefusal
 from buggy.capture.probes import checks
 from buggy.capture.probes.base import Context, ProbeInputError, ProbeSpec
+from buggy.capture.probes.injection import sqli
 
 REGISTRY: dict[str, ProbeSpec] = {
     spec.name: spec
@@ -84,6 +85,23 @@ REGISTRY: dict[str, ProbeSpec] = {
                 "markers": "optional strings that identify sensitive data in the result",
             },
             False, checks.graphql_checks,
+        ),
+        ProbeSpec(
+            "sqli", "injection", "CWE-89",
+            "Is one named parameter injectable into SQL? Boolean, error and (opt-in) time "
+            "signals, each confirmed by a control. At most 9 requests, no data extraction.",
+            {
+                "url": "endpoint (the query string may already carry the parameter)",
+                "parameter": "name of the parameter to test (dotted path for json)",
+                "method": "HTTP method (default GET); any other method counts as "
+                "state-changing and goes through the approval gate",
+                "location": "where the parameter lives: query | json | form (default query)",
+                "value": "a valid baseline value (default: the value already in the request)",
+                "body": "request body for json/form (object or string)",
+                "headers": "optional headers, e.g. auth",
+                "allow_time": "also try 3-second delay payloads (default false)",
+            },
+            False, sqli,
         ),
     )
 }  # fmt: skip
