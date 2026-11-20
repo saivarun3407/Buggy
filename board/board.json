@@ -1,5 +1,5 @@
 {
- "updated": "2026-11-20 01:13 UTC",
+ "updated": "2026-11-20 01:17 UTC",
  "columns": [
   "backlog",
   "ready",
@@ -308,12 +308,12 @@
    "depends": [
     "B1"
    ],
-   "status": "in_progress",
+   "status": "done",
    "agent": "",
    "branch": "",
-   "commit": "",
-   "tests": "",
-   "note": "",
+   "commit": "cabc475",
+   "tests": "264 passed",
+   "note": "Wildcard DNS filter merged. 264 pipeline tests pass",
    "order": 7
   },
   {
@@ -324,7 +324,7 @@
    "depends": [
     "B2"
    ],
-   "status": "backlog",
+   "status": "in_progress",
    "agent": "",
    "branch": "",
    "commit": "",
@@ -480,12 +480,12 @@
    "depends": [
     "D1"
    ],
-   "status": "in_progress",
+   "status": "done",
    "agent": "",
    "branch": "",
-   "commit": "",
-   "tests": "",
-   "note": "",
+   "commit": "cabc475",
+   "tests": "345 unit, 28 lab passed",
+   "note": "Authz matrix merged; similarity now compares JSON by value. 345 unit + 28 lab pass",
    "order": 18
   },
   {
@@ -496,7 +496,7 @@
    "depends": [
     "D2"
    ],
-   "status": "backlog",
+   "status": "in_progress",
    "agent": "",
    "branch": "",
    "commit": "",
