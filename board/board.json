@@ -1,5 +1,5 @@
 {
- "updated": "2026-11-20 16:25 UTC",
+ "updated": "2026-11-20 16:36 UTC",
  "columns": [
   "backlog",
   "ready",
@@ -668,12 +668,12 @@
    "depends": [
     "F2"
    ],
-   "status": "in_progress",
+   "status": "done",
    "agent": "",
    "branch": "",
-   "commit": "",
-   "tests": "",
-   "note": "",
+   "commit": "227 benchmark tests passed (agent run), 71 new re-run:3365cec",
+   "tests": " flag commitment before the attempt, per-target records, a verifier and a scorecard built only from records. No benchmark was run and no number is claimed",
+   "note": "Benchmark evidence contract merged\\",
    "order": 30
   },
   {
@@ -684,7 +684,7 @@
    "depends": [
     "F3"
    ],
-   "status": "backlog",
+   "status": "in_progress",
    "agent": "",
    "branch": "",
    "commit": "",
