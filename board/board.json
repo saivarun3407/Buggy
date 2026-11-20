@@ -1,5 +1,5 @@
 {
- "updated": "2026-11-20 17:05 UTC",
+ "updated": "2026-11-20 17:25 UTC",
  "columns": [
   "backlog",
   "ready",
@@ -736,12 +736,12 @@
     "B6",
     "C5"
    ],
-   "status": "in_progress",
+   "status": "done",
    "agent": "",
    "branch": "",
-   "commit": "",
-   "tests": "",
-   "note": "",
+   "commit": "5e57bdb",
+   "tests": "10954 unit tests passed, 0 failed",
+   "note": "All new tools reachable by agents with engagement and actor bound from the run; probe-sourced findings verified by re-running the probe; hunt queues leads and writes findings reports; loop guard on every role. 14 round-trip tests over real MCP servers",
    "order": 34
   },
   {
@@ -752,12 +752,12 @@
    "depends": [
     "I1"
    ],
-   "status": "backlog",
+   "status": "done",
    "agent": "",
    "branch": "",
-   "commit": "",
-   "tests": "",
-   "note": "",
+   "commit": "5e57bdb",
+   "tests": "186 compose/doctor tests, launcher go test ok, dashboard lint+tsc+35 tests",
+   "note": "Pipeline image ships the findings layer; secrets folder mounted read-only on the evidence gateway only; compose invariants added; docs for findings, lite stack, doctor, demo, resume, CI and the measured readiness matrix",
    "order": 35
   },
   {
@@ -768,7 +768,7 @@
    "depends": [
     "I2"
    ],
-   "status": "backlog",
+   "status": "in_progress",
    "agent": "",
    "branch": "",
    "commit": "",
