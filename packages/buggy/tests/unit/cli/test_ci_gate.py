@@ -23,7 +23,7 @@ from buggy.findings.model import finding_id
 from buggy.findings.report import build, to_json
 
 REPO = Path(__file__).resolve().parents[5]
-ACTION = REPO / ".github" / "actions" / "buggy-scan" / "action.yml"
+ACTION = REPO / ".github" / "actions" / "buggy-gate" / "action.yml"
 DOC = REPO / "docs" / "ci.md"
 ENG = "acme"
 BASE = "https://app.acme.test"
@@ -428,7 +428,7 @@ def test_ci_doc_example_workflow_parses_and_uses_the_action() -> None:
     steps = [step for job in workflow["jobs"].values() for step in job["steps"]]
     runs = " ".join(step.get("run", "") for step in steps)
     assert "buggy hunt" in runs and "--lite" in runs and "--fail-on high" in runs
-    action_steps = [s for s in steps if s.get("uses") == "./.github/actions/buggy-scan"]
+    action_steps = [s for s in steps if s.get("uses") == "./.github/actions/buggy-gate"]
     assert len(action_steps) == 1
     assert set(action_steps[0]["with"]) <= {"report", "hunt-result", "fail-on", "upload-sarif"}
     assert expressions_in_run_blocks(workflow) == []

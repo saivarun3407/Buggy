@@ -1,0 +1,89 @@
+name: "Buggy CI gate"
+description: >
+  Gate a job on the exploit-verified findings of a Buggy hunt and upload them
+  to GitHub code scanning as SARIF 2.1.0. Reads the findings report JSON (and
+  optionally hunt-result.json) that `buggy hunt` wrote; it does not scan
+  anything itself. Only exploit-verified findings become alerts or fail the
+  job. Uploading needs the workflow permission `security-events: write`.
+author: "PurpleAILAB"
+branding:
+  icon: "shield"
+  color: "purple"
+
+inputs:
+  report:
+    description: "Path to the findings report JSON written by the hunt."
+    required: true
+  hunt-result:
+    description: >
+      Path to hunt-result.json of the same run. Optional; when given, an
+      incomplete run (complete: false) exits 3 unless a finding already fails
+      the gate.
+    required: false
+    default: ""
+  fail-on:
+    description: >
+      Fail the job (exit 10) on an exploit-verified finding at or above this
+      severity: critical | high | medium | low | info.
+    required: false
+    default: "high"
+  upload-sarif:
+    description: >
+      'true' uploads the SARIF to GitHub code scanning with
+      github/codeql-action/upload-sarif. The calling job needs
+      `permissions: security-events: write`.
+    required: false
+    default: "true"
+
+outputs:
+  exit-code:
+    description: "Exit code of buggy-cli ci-gate: 0 pass, 10 at/above fail-on, 3 incomplete, 2 bad input."
+    value: ${{ steps.gate.outputs.exit-code }}
+  sarif-path:
+    description: "Path of the SARIF file, empty when none was written."
+    value: ${{ steps.gate.outputs.sarif-path }}
+
+runs:
+  using: "composite"
+  steps:
+    - name: Install buggy-cli
+      shell: bash
+      run: |
+        set -euo pipefail
+        if command -v buggy-cli >/dev/null 2>&1; then
+          echo "buggy-cli is already installed"
+        elif [ -d packages/buggy ] && [ -d packages/buggy-core ]; then
+          python3 -m pip install ./packages/buggy-core ./packages/buggy
+        else
+          python3 -m pip install buggy buggy-core
+        fi
+
+    - name: Run buggy-cli ci-gate
+      id: gate
+      shell: bash
+      env:
+        BUGGY_REPORT: ${{ inputs.report }}
+        BUGGY_HUNT_RESULT: ${{ inputs.hunt-result }}
+        BUGGY_FAIL_ON: ${{ inputs.fail-on }}
+        BUGGY_SARIF: ${{ runner.temp }}/buggy-results.sarif
+      run: |
+        set -uo pipefail
+        args=(--report "${BUGGY_REPORT}" --fail-on "${BUGGY_FAIL_ON}" --sarif "${BUGGY_SARIF}")
+        if [ -n "${BUGGY_HUNT_RESULT}" ]; then
+          args+=(--hunt-result "${BUGGY_HUNT_RESULT}")
+        fi
+        rm -f -- "${BUGGY_SARIF}"
+        buggy-cli ci-gate "${args[@]}"
+        code=$?
+        echo "exit-code=${code}" >> "${GITHUB_OUTPUT}"
+        if [ -f "${BUGGY_SARIF}" ]; then
+          echo "sarif-path=${BUGGY_SARIF}" >> "${GITHUB_OUTPUT}"
+        fi
+        exit "${code}"
+
+    - name: Upload SARIF to GitHub code scanning
+      if: ${{ always() && inputs.upload-sarif == 'true' && steps.gate.outputs.sarif-path != '' }}
+      uses: github/codeql-action/upload-sarif@dd903d2e4f5405488e5ef1422510ee31c8b32357 # v3.36.2
+      with:
+        sarif_file: ${{ steps.gate.outputs.sarif-path }}
+        category: buggy

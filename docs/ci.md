@@ -8,7 +8,7 @@ scanning. Three pieces do this:
 |---|---|
 | `buggy hunt ... --fail-on high` | Runs the hunt and writes `hunt-result.json` and the findings report JSON into the control directory (`~/.buggy/control/<engagement>/`). |
 | `buggy-cli ci-gate` | Reads the report (and optionally `hunt-result.json`), prints one summary line and the gating findings, writes SARIF 2.1.0, exits with a gate code. |
-| `.github/actions/buggy-scan` | Composite action: runs `buggy-cli ci-gate`, then `github/codeql-action/upload-sarif`. |
+| `.github/actions/buggy-gate` | Composite action: runs `buggy-cli ci-gate`, then `github/codeql-action/upload-sarif`. |
 
 ## What counts
 
@@ -132,7 +132,7 @@ jobs:
 
       - name: Gate and upload
         if: always()
-        uses: ./.github/actions/buggy-scan
+        uses: ./.github/actions/buggy-gate
         with:
           report: buggy-out/report.json
           hunt-result: buggy-out/hunt-result.json
@@ -141,7 +141,7 @@ jobs:
 ```
 
 Outside this repository, use the action as
-`PurpleAILAB/Buggy/.github/actions/buggy-scan@<commit sha>`. Pin third-party
+`PurpleAILAB/Buggy/.github/actions/buggy-gate@<commit sha>`. Pin third-party
 actions to a commit SHA in your own workflows.
 
 Run the gate by hand on the same files:
