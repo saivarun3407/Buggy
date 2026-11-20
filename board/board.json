@@ -1,5 +1,5 @@
 {
- "updated": "2026-11-20 16:45 UTC",
+ "updated": "2026-11-20 16:46 UTC",
  "columns": [
   "backlog",
   "ready",
@@ -622,7 +622,7 @@
    "depends": [
     "E5"
    ],
-   "status": "backlog",
+   "status": "in_progress",
    "agent": "",
    "branch": "",
    "commit": "",
@@ -716,7 +716,7 @@
    "depends": [
     "F5"
    ],
-   "status": "backlog",
+   "status": "in_progress",
    "agent": "",
    "branch": "",
    "commit": "",
