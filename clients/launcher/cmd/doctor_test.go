@@ -238,32 +238,123 @@ func TestDoctorOperatorArgv(t *testing.T) {
 	home := stackHome(t)
 	cases := []struct {
 		profile string
-		asJSON  bool
 		file    string
 		image   string
 		command []string
 	}{
-		{"lite", false, "docker-compose.lite.yml", "buggy-pipeline:1.2.3", []string{"python", "-m", "buggy.cli", "doctor", "--profile", "lite"}},
-		{"lite", true, "docker-compose.lite.yml", "buggy-pipeline:1.2.3", []string{"python", "-m", "buggy.cli", "doctor", "--profile", "lite", "--json"}},
-		{"full", false, "docker-compose.yml", "buggy-langgraph:1.2.3", []string{"buggy-cli", "doctor", "--profile", "full"}},
-		{"full", true, "docker-compose.yml", "buggy-langgraph:1.2.3", []string{"buggy-cli", "doctor", "--profile", "full", "--json"}},
+		{"lite", "docker-compose.lite.yml", "buggy-pipeline:1.2.3", []string{"python", "-m", "buggy.cli", "doctor", "--profile", "lite", "--in-container", "--json"}},
+		{"full", "docker-compose.yml", "buggy-langgraph:1.2.3", []string{"buggy-cli", "doctor", "--profile", "full", "--in-container", "--json"}},
 	}
 	for _, tc := range cases {
+		// -T: the report is captured, so no terminal is attached.
 		want := append([]string{
 			"compose", "-p", "buggy",
 			"-f", filepath.Join(home, tc.file),
 			"--env-file", filepath.Join(home, ".env"),
-			"--profile", "operator", "run", "--rm", "operator",
+			"--profile", "operator", "run", "--rm", "-T", "operator",
 		}, tc.command...)
-		got := dockerShaped(doctorCompose(tc.profile)).RunArgs(
+		got := dockerShaped(doctorCompose(tc.profile)).RunCapturedArgs(
 			[]string{compose.Profiles.Operator}, "operator", nil,
-			doctorOperatorCommand(tc.profile, tc.asJSON)...)
+			doctorOperatorCommand(tc.profile)...)
 		if !reflect.DeepEqual(got, want) {
-			t.Errorf("%s json=%v argv:\n got %v\nwant %v", tc.profile, tc.asJSON, got, want)
+			t.Errorf("%s argv:\n got %v\nwant %v", tc.profile, got, want)
 		}
 		if got := doctorOperatorImage(tc.profile, "1.2.3"); got != tc.image {
 			t.Errorf("%s image = %q, want %q", tc.profile, got, tc.image)
 		}
+	}
+}
+
+// containerSays makes the container half answer with stdout and an exit code.
+func containerSays(t *testing.T, stdout string, code int, err error) *int {
+	t.Helper()
+	prev := doctorContainerFn
+	t.Cleanup(func() { doctorContainerFn = prev })
+	calls := 0
+	doctorContainerFn = func(*compose.Compose, string) (string, int, error) {
+		calls++
+		return stdout, code, err
+	}
+	return &calls
+}
+
+const containerReport = `{"ok": true, "checks": [
+  {"name": "secret BUGGY_STACK_MCP_TOKEN", "status": "ok", "detail": "set", "fix": ""},
+  {"name": "mounts", "status": "ok", "detail": "mounted", "fix": ""},
+  {"name": "model", "status": "warn", "detail": "no model configured", "fix": "set a key"}]}`
+
+// On a healthy host the report is the host's checks followed by the
+// container's, and a warning does not fail it.
+func TestRunDoctor_HealthyHostMergesTheContainerChecks(t *testing.T) {
+	stackHome(t)
+	calls := containerSays(t, containerReport, 0, nil)
+	out, code, err := runDoctorOn(t, healthyHost(), "lite", true)
+	if err != nil || code != -1 {
+		t.Fatalf("err=%v exit=%d, want nil and no exit", err, code)
+	}
+	var report struct {
+		OK     bool          `json:"ok"`
+		Checks []doctorCheck `json:"checks"`
+	}
+	if jsonErr := json.Unmarshal([]byte(out), &report); jsonErr != nil {
+		t.Fatalf("stdout is not one JSON document: %v\n%s", jsonErr, out)
+	}
+	var names []string
+	for _, check := range report.Checks {
+		names = append(names, check.Name)
+	}
+	want := []string{"docker", "docker compose", "docker daemon", "image buggy-pipeline:stable", "stack files",
+		"secret BUGGY_STACK_MCP_TOKEN", "mounts", "model"}
+	if !report.OK || !reflect.DeepEqual(names, want) || *calls != 1 {
+		t.Errorf("ok=%v calls=%d names=%v", report.OK, *calls, names)
+	}
+
+	table, code, err := runDoctorOn(t, healthyHost(), "lite", false)
+	if err != nil || code != -1 || !strings.Contains(table, "ready: 7 ok, 1 warn, 0 failed") ||
+		!strings.Contains(table, "warn  model") {
+		t.Errorf("table run: err=%v exit=%d\n%s", err, code, table)
+	}
+}
+
+// A failed check inside the container fails the whole preflight.
+func TestRunDoctor_AContainerFailureExitsTwo(t *testing.T) {
+	stackHome(t)
+	containerSays(t, strings.Replace(containerReport, `"mounts", "status": "ok"`, `"mounts", "status": "fail"`, 1), 2, nil)
+	out, code, err := runDoctorOn(t, healthyHost(), "lite", false)
+	if err != nil || code != 2 || !strings.Contains(out, "FAIL  mounts") {
+		t.Errorf("err=%v exit=%d\n%s", err, code, out)
+	}
+}
+
+// A container that prints no report is a failure, never a pass.
+func TestRunDoctor_NoReportFromTheContainerIsAFailure(t *testing.T) {
+	stackHome(t)
+	for _, tc := range []struct {
+		stdout string
+		err    error
+		want   string
+	}{
+		{"Traceback (most recent call last):", nil, "no report from the container (exit 1): Traceback"},
+		{"", nil, "no report from the container (exit 1)"},
+		{`{"ok": true, "checks": []}`, nil, "no report from the container"},
+		{"", errors.New("exec: docker not found"), "could not be started: exec: docker not found"},
+	} {
+		containerSays(t, tc.stdout, 1, tc.err)
+		out, code, err := runDoctorOn(t, healthyHost(), "lite", false)
+		if err != nil || code != 2 || !strings.Contains(out, "FAIL  operator container") || !strings.Contains(out, tc.want) {
+			t.Errorf("%q: err=%v exit=%d\n%s", tc.stdout, err, code, out)
+		}
+	}
+}
+
+// The container is not started when the host half already failed.
+func TestRunDoctor_ContainerIsNotRunOnABrokenHost(t *testing.T) {
+	stackHome(t)
+	calls := containerSays(t, containerReport, 0, nil)
+	fake := healthyHost()
+	fake.dockerPath = ""
+	if _, code, _ := runDoctorOn(t, fake, "lite", false); code != 2 || *calls != 0 {
+		t.Errorf("exit=%d container calls=%d, want 2 and 0", code, *calls)
 	}
 }
 

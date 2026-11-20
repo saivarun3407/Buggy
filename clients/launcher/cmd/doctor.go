@@ -25,10 +25,10 @@ var (
 var doctorCmd = &cobra.Command{
 	Use:   "doctor",
 	Short: "Check the prerequisites of `buggy hunt` and print a fix for each one that fails",
-	Long: "Checks Docker on this machine (the docker command, Compose v2, the " +
-		"daemon). When they pass and the stack's image is present, the full " +
-		"preflight (`buggy-cli doctor`) runs in the operator container; " +
-		"otherwise the Docker checks are printed with the fix for each.\n\n" +
+	Long: "Checks this machine (the docker command, Compose v2, the daemon, " +
+		"the stack's image and files) and, when those pass, the operator " +
+		"container's side (secrets, mounted directories, model). One line per " +
+		"check with its fix; exit code 2 when a required check fails.\n\n" +
 		"  buggy doctor\n" +
 		"  buggy doctor --profile lite\n" +
 		"  buggy doctor --json",
@@ -47,6 +47,7 @@ const (
 	doctorProfileFull = "full"
 
 	doctorOK   = "ok"
+	doctorWarn = "warn"
 	doctorFail = "fail"
 
 	// The three fixes below are the wording of `buggy-cli doctor`
@@ -255,16 +256,19 @@ func renderDoctorJSON(checks []doctorCheck) string {
 // renderDoctorTable matches the table of `buggy-cli doctor`: one line per
 // check (status, name, detail, then the fix when there is one) and a verdict.
 func renderDoctorTable(checks []doctorCheck) string {
-	labels := map[string]string{doctorOK: "ok", doctorFail: "FAIL"}
+	labels := map[string]string{doctorOK: "ok", doctorWarn: "warn", doctorFail: "FAIL"}
 	nameWidth := 0
 	for _, check := range checks {
 		nameWidth = max(nameWidth, len(check.Name))
 	}
 	var lines []string
-	failed := 0
+	failed, warned := 0, 0
 	for _, check := range checks {
-		if check.Status == doctorFail {
+		switch check.Status {
+		case doctorFail:
 			failed++
+		case doctorWarn:
+			warned++
 		}
 		line := fmt.Sprintf("%-4s  %-*s  %s", labels[check.Status], nameWidth, check.Name, check.Detail)
 		if check.Fix != "" {
@@ -276,7 +280,7 @@ func renderDoctorTable(checks []doctorCheck) string {
 	if failed > 0 {
 		verdict = "not ready"
 	}
-	lines = append(lines, "", fmt.Sprintf("%s: %d ok, 0 warn, %d failed", verdict, len(checks)-failed, failed))
+	lines = append(lines, "", fmt.Sprintf("%s: %d ok, %d warn, %d failed", verdict, len(checks)-failed-warned, warned, failed))
 	return strings.Join(lines, "\n")
 }
 
@@ -295,19 +299,46 @@ func doctorOperatorImage(profile, tag string) string {
 	return "buggy-langgraph:" + tag
 }
 
-// doctorOperatorCommand is the preflight command for the operator container.
-// The lite operator is the slim pipeline image, which has no `buggy-cli`
-// script, so there the command runs as a module.
-func doctorOperatorCommand(profile string, asJSON bool) []string {
+// doctorOperatorCommand is the container half of the preflight: secrets,
+// mounted roots and the model, as JSON. Docker, images and files are checked
+// here on the host, the only side that can see them. The lite operator is the
+// slim pipeline image, which has no `buggy-cli` script, so there the command
+// runs as a module.
+func doctorOperatorCommand(profile string) []string {
 	command := []string{"buggy-cli", "doctor"}
 	if profile == doctorProfileLite {
 		command = []string{"python", "-m", "buggy.cli", "doctor"}
 	}
-	command = append(command, "--profile", profile)
-	if asJSON {
-		command = append(command, "--json")
+	return append(command, "--profile", profile, "--in-container", "--json")
+}
+
+// doctorContainerFn runs the container half and returns its stdout and exit
+// code. It is a variable so tests can describe the container's answer.
+var doctorContainerFn = func(c *compose.Compose, profile string) (string, int, error) {
+	return c.RunCaptured([]string{compose.Profiles.Operator}, "operator", nil, doctorOperatorCommand(profile)...)
+}
+
+const doctorContainerFix = "run `buggy doctor` again; if it repeats, check `docker compose run --rm operator` by hand"
+
+// doctorContainerChecks turns the container's report into checks. Output that
+// is not the expected JSON is itself a failed check, never a silent pass.
+func doctorContainerChecks(stdout string, code int, err error) []doctorCheck {
+	const name = "operator container"
+	if err != nil {
+		return []doctorCheck{{name, doctorFail, "could not be started: " + err.Error(), doctorContainerFix}}
 	}
-	return command
+	var report struct {
+		Checks []doctorCheck `json:"checks"`
+	}
+	start := strings.Index(stdout, "{")
+	if start < 0 || json.Unmarshal([]byte(stdout[start:]), &report) != nil || len(report.Checks) == 0 {
+		detail := "no report from the container (exit " + strconv.Itoa(code) + ")"
+		if line := doctorFirstLine(stdout); line != "" {
+			detail += ": " + line
+		}
+		return []doctorCheck{{name, doctorFail, detail, doctorContainerFix}}
+	}
+	return report.Checks
 }
 
 func runDoctor(cmd *cobra.Command, args []string) error {
@@ -322,20 +353,14 @@ func runDoctor(cmd *cobra.Command, args []string) error {
 	files := append(c.Files(), c.EnvFile)
 	checks, inContainer := doctorPreflight(doctorHostFn(), image, files)
 	if inContainer {
-		err := c.RunInteractive([]string{compose.Profiles.Operator}, "operator", nil,
-			doctorOperatorCommand(doctorProfile, doctorJSON)...)
-		// The preflight printed its own report. Pass its verdict on as the
-		// exit code; an error line on stdout would break --json.
-		var exit *exec.ExitError
-		if errors.As(err, &exit) {
-			doctorExit(exit.ExitCode())
-			return nil
-		}
-		return err
+		checks = append(checks, doctorContainerChecks(doctorContainerFn(c, doctorProfile))...)
 	}
 
 	fmt.Println(renderDoctorReport(checks, doctorJSON))
-	doctorExit(doctorExitFailed)
+	if !doctorPassed(checks) {
+		// No error line: with --json stdout must stay one JSON document.
+		doctorExit(doctorExitFailed)
+	}
 	return nil
 }
 

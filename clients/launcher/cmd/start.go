@@ -159,15 +159,72 @@ func checkModelAuth(env map[string]string, skip bool) error {
 	return validateAuthFn(env)
 }
 
+// reconOnlyKey marks a .env written by a recon-only first run (hunt --lite,
+// demo) instead of the setup wizard.
+const (
+	reconOnlyKey   = "BUGGY_SETUP"
+	reconOnlyValue = "recon-only"
+)
+
+// runOnboardFn is indirected so tests can see whether the wizard ran.
+var runOnboardFn = runOnboard
+
+// writeReconOnlyEnv creates the Buggy home and a minimal, marked .env.
+func writeReconOnlyEnv() error {
+	home := config.BuggyHome()
+	if err := os.MkdirAll(home, 0o700); err != nil {
+		return fmt.Errorf("create %s: %w", home, err)
+	}
+	body := "BUGGY_HOME=" + home + "\n" + reconOnlyKey + "=" + reconOnlyValue + "\n"
+	if err := os.WriteFile(config.EnvPath(), []byte(body), 0o600); err != nil {
+		return fmt.Errorf("write config: %w", err)
+	}
+	return nil
+}
+
+// isReconOnlyEnv reports whether the .env still carries the recon-only mark.
+func isReconOnlyEnv() bool {
+	env, err := config.LoadEnv(config.EnvPath())
+	return err == nil && env[reconOnlyKey] == reconOnlyValue
+}
+
+// runOnboardWithReset runs the wizard over an existing .env; the values
+// already in it (BUGGY_HOME, generated secrets) are kept by the wizard.
+func runOnboardWithReset(cmd *cobra.Command) error {
+	prev := resetFlag
+	resetFlag = true
+	defer func() { resetFlag = prev }()
+	return runOnboardFn(cmd, nil)
+}
+
 // prepareStackFor is prepareStack with the model-auth gate optional. Every
 // other step is the same for both.
 func prepareStackFor(cmd *cobra.Command, skipModelAuth bool) (string, map[string]string, error) {
 	// 1. Check .env exists
-	if !config.EnvExists() {
+	switch {
+	case !config.EnvExists() && skipModelAuth:
+		// A recon-only run needs no model, so it must not stop at the model
+		// wizard. A marked, minimal .env is written; the wizard runs the
+		// first time a command needs a model.
+		if err := writeReconOnlyEnv(); err != nil {
+			return "", nil, err
+		}
+		ui.Info("Recon-only setup: no model is configured. `buggy start` or `buggy hunt` without --lite will run the setup wizard.")
+	case !config.EnvExists():
 		ui.Warning("No configuration found. Running setup wizard...")
 		fmt.Println()
-		if err := runOnboard(cmd, nil); err != nil {
+		if err := runOnboardFn(cmd, nil); err != nil {
 			return "", nil, err
+		}
+		fmt.Println()
+	case !skipModelAuth && isReconOnlyEnv():
+		ui.Warning("This install was set up for recon only. Running setup wizard...")
+		fmt.Println()
+		if err := runOnboardWithReset(cmd); err != nil {
+			return "", nil, err
+		}
+		if err := config.SetEnvKey(config.EnvPath(), reconOnlyKey, "done"); err != nil {
+			return "", nil, fmt.Errorf("update config: %w", err)
 		}
 		fmt.Println()
 	}

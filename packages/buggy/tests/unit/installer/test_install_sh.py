@@ -100,3 +100,18 @@ download_files "{install_dir}"
     urls = url_log.read_text(encoding="utf-8").splitlines()
     assert "https://raw.example/repo/vX/docker-compose.tun.yml" in urls
     assert (install_dir / "docker-compose.tun.yml").is_file()
+
+    # Every compose file in the release manifest must be downloaded: the
+    # installer refuses to finish when the manifest lists a file that is not
+    # on disk, so a file added to one list and not the other breaks installs.
+    release = (INSTALL_SCRIPT.parent.parent / ".github/workflows/release.yml").read_text(
+        encoding="utf-8"
+    )
+    line = next(ln for ln in release.splitlines() if "sha256sum docker-compose.yml" in ln)
+    listed = [word for word in line.split() if word.startswith("docker-compose")]
+    assert {"docker-compose.lite.yml", "docker-compose.lab.yml", "docker-compose.demo.yml"} <= set(
+        listed
+    )
+    for name in listed:
+        assert f"https://raw.example/repo/vX/{name}" in urls, name
+        assert (install_dir / name).is_file(), name

@@ -1,6 +1,7 @@
 package compose
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
@@ -426,6 +427,40 @@ func (c *Compose) RunInteractive(profiles []string, service string, env map[stri
 		return fmt.Errorf("%s compose run %s: %w", c.Runtime.Name, service, err)
 	}
 	return nil
+}
+
+// RunCaptured runs a one-off container without a terminal and returns what it
+// wrote to stdout and its exit code. Stderr (image pulls, container
+// lifecycle lines) goes to the launcher's stderr, so stdout stays exactly the
+// command's own output. A command that could not be started returns an error.
+func (c *Compose) RunCaptured(profiles []string, service string, env map[string]string, command ...string) (string, int, error) {
+	cmd := exec.Command(c.Runtime.Bin, c.RunCapturedArgs(profiles, service, env, command...)...)
+	cmd.Env = c.composeEnv()
+	var stdout strings.Builder
+	cmd.Stdout = &stdout
+	cmd.Stderr = os.Stderr
+	err := cmd.Run()
+	if err == nil {
+		return stdout.String(), 0, nil
+	}
+	var exit *exec.ExitError
+	if errors.As(err, &exit) {
+		return stdout.String(), exit.ExitCode(), nil
+	}
+	return stdout.String(), -1, fmt.Errorf("%s compose run %s: %w", c.Runtime.Name, service, err)
+}
+
+// RunCapturedArgs is RunArgs with -T (no terminal) after `run --rm`.
+func (c *Compose) RunCapturedArgs(profiles []string, service string, env map[string]string, command ...string) []string {
+	args := c.RunArgs(profiles, service, env, command...)
+	out := make([]string, 0, len(args)+1)
+	for i, arg := range args {
+		out = append(out, arg)
+		if arg == "--rm" && i > 0 && args[i-1] == "run" {
+			out = append(out, "-T")
+		}
+	}
+	return out
 }
 
 // RunArgs returns the full argv (after the runtime binary) that

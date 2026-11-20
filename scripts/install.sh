@@ -237,6 +237,14 @@ download_files() {
     # release/updated installs can opt into TUN.
     curl -fsSL "$RAW_BASE/docker-compose.tun.yml" -o "$install_dir/docker-compose.tun.yml"
 
+    # Lite stack (recon and report, no model), the bundled demo overlay and
+    # the lab file the demo extends. `buggy hunt --lite` and `buggy demo` use
+    # them, and the release manifest lists them, so all three must be on disk.
+    local extra
+    for extra in docker-compose.lite.yml docker-compose.lab.yml docker-compose.demo.yml; do
+        curl -fsSL "$RAW_BASE/$extra" -o "$install_dir/$extra"
+    done
+
     # .env.example — reference template only. Do NOT auto-create .env: the
     # onboard wizard checks for the file's presence to decide whether to run,
     # so a pre-seeded template would silently skip first-time configuration.

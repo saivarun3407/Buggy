@@ -10,8 +10,10 @@ import (
 	"testing"
 
 	"github.com/saivarun3407/buggy/clients/launcher/internal/compose"
+	"github.com/saivarun3407/buggy/clients/launcher/internal/config"
 	"github.com/saivarun3407/buggy/clients/launcher/internal/runtime"
 	"github.com/saivarun3407/buggy/clients/launcher/internal/updater"
+	"github.com/spf13/cobra"
 )
 
 // stackHome points the launcher at an empty Buggy home and neutralises every
@@ -341,5 +343,74 @@ func TestStopCommand_NamesTheLiteFile(t *testing.T) {
 	if !strings.HasPrefix(got, "docker compose -p buggy -f "+filepath.Join(home, "docker-compose.lite.yml")) ||
 		!strings.HasSuffix(got, " down") {
 		t.Errorf("stopCommand = %q", got)
+	}
+}
+
+// stubWizard replaces the setup wizard and counts its runs. A run writes a
+// configured .env, as the real wizard does, keeping what was there.
+func stubWizard(t *testing.T) *int {
+	t.Helper()
+	prev := runOnboardFn
+	t.Cleanup(func() { runOnboardFn = prev })
+	calls := 0
+	runOnboardFn = func(*cobra.Command, []string) error {
+		calls++
+		return config.AppendEnvLine(config.EnvPath(), "WIZARD_RAN", "1")
+	}
+	return &calls
+}
+
+// A first recon-only run on a fresh install does not open the model wizard;
+// the first run that needs a model does, exactly once.
+func TestPrepareStack_FirstLiteRunSkipsTheWizardAndTheNextFullRunOpensIt(t *testing.T) {
+	home := filepath.Join(t.TempDir(), "fresh-home")
+	t.Setenv("BUGGY_HOME", home)
+	t.Setenv("PATH", t.TempDir()) // stop at the Docker check, after the gates
+	t.Setenv("DO_NOT_TRACK", "1")
+	wizard := stubWizard(t)
+	authCalls, _ := stubAuth(t)
+
+	_, _, err := prepareStackFor(huntCmd, huntFlags{mode: "enforce", lite: true}.skipsModelAuth())
+	if err == nil || !strings.Contains(err.Error(), "Docker is not installed") {
+		t.Fatalf("lite first run: err = %v, want it to reach the Docker check", err)
+	}
+	if *wizard != 0 || *authCalls != 0 {
+		t.Fatalf("lite first run: wizard ran %d times, auth %d times; want 0 and 0", *wizard, *authCalls)
+	}
+	env, loadErr := config.LoadEnv(filepath.Join(home, ".env"))
+	if loadErr != nil || env["BUGGY_HOME"] != home || env[reconOnlyKey] != reconOnlyValue {
+		t.Fatalf("lite first run: .env = %v (err %v), want BUGGY_HOME and the recon-only mark", env, loadErr)
+	}
+
+	// A second lite run changes nothing and still opens no wizard.
+	_, _, _ = prepareStackFor(huntCmd, huntFlags{mode: "enforce", lite: true}.skipsModelAuth())
+	if *wizard != 0 {
+		t.Fatalf("second lite run opened the wizard")
+	}
+
+	// The first run that needs a model opens it once and clears the mark.
+	_, _, _ = prepareStack(huntCmd)
+	if *wizard != 1 {
+		t.Fatalf("full run after a recon-only setup: wizard ran %d times, want 1", *wizard)
+	}
+	if isReconOnlyEnv() {
+		t.Fatalf("the recon-only mark is still set after the wizard")
+	}
+	_, _, _ = prepareStack(huntCmd)
+	if *wizard != 1 {
+		t.Fatalf("the wizard ran again on the next full run (%d times)", *wizard)
+	}
+}
+
+// Control: a fresh install with a command that needs a model opens the wizard.
+func TestPrepareStack_FreshFullRunOpensTheWizard(t *testing.T) {
+	t.Setenv("BUGGY_HOME", filepath.Join(t.TempDir(), "fresh-home"))
+	t.Setenv("PATH", t.TempDir())
+	t.Setenv("DO_NOT_TRACK", "1")
+	wizard := stubWizard(t)
+	stubAuth(t)
+	_, _, _ = prepareStack(huntCmd)
+	if *wizard != 1 {
+		t.Fatalf("fresh full run: wizard ran %d times, want 1", *wizard)
 	}
 }
