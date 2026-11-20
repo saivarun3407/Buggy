@@ -735,11 +735,26 @@ class TestSameRulesAsTheProgramGate:
         assert {technique for technique, _words, _pattern in BANNED_TECHNIQUES} <= baseline
         assert {t for t, _w, _p in BANNED_TECHNIQUES} == set(gate._BANNED_CLASS_MARKERS)
 
-    def test_every_marker_the_gate_refuses_is_refused_here(self) -> None:
-        for technique, markers in gate._BANNED_CLASS_MARKERS.items():
-            for marker in markers:
-                found = grader.banned_matches(_finding(title=f"Report about {marker} on login"))
-                assert [hit[0] for hit in found] == [technique], marker
+    def test_the_gate_and_the_grader_refuse_the_same_words(self) -> None:
+        # Both match whole words with the same patterns, so they cannot disagree.
+        patterns = {technique: pattern.pattern for technique, _w, pattern in BANNED_TECHNIQUES}
+        assert patterns == {t: p.pattern for t, p in gate._BANNED_CLASS_MARKERS.items()}
+        samples = {
+            "denial_of_service": [
+                "dos",
+                "ddos",
+                "redos",
+                "denial of service",
+                "resource exhaustion",
+            ],
+            "social_engineering": ["phishing", "vishing", "social engineering"],
+            "physical": ["physical access", "physical security"],
+        }
+        for technique, words in samples.items():
+            for word in words:
+                found = grader.banned_matches(_finding(title=f"Report about {word} on login"))
+                assert [hit[0] for hit in found] == [technique], word
+                assert gate._BANNED_CLASS_MARKERS[technique].search(f"report about {word} on login")
 
 
 # ── the service ─────────────────────────────────────────────────────

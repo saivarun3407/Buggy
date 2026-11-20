@@ -35,7 +35,7 @@ _BANNED_CLASS_MARKERS: dict[str, re.Pattern[str]] = {
         r"\b(?:(?:d|re)?dos|denial[- _]of[- _]service|resource exhaustion)\b"
     ),
     "social_engineering": re.compile(r"\b(?:phishing|vishing|social[- _]engineering)\b"),
-    "physical": re.compile(r"\bphysical (?:access|security)\b"),
+    "physical": re.compile(r"\bphysical[- _](?:access|security)\b"),
 }
 
 
