@@ -5,6 +5,7 @@ pipeline-baseline --engagement lab [--apps ...]               score the recon st
 agent-run         --engagement lab-a --arm with-pipeline      run one agent arm
 report            [--results DIR]                             build the table
 ground-truth                                                   list known entries
+coverage          [--apps ...] [--write]                      one verdict per known bug
 """
 
 from __future__ import annotations
@@ -61,6 +62,11 @@ def _parser() -> argparse.ArgumentParser:
     report.add_argument("--results", type=Path, default=RESULTS)
     report.add_argument("--apps", default="juice-shop,dvga")
     sub.add_parser("ground-truth")
+    coverage_cmd = sub.add_parser("coverage")
+    coverage_cmd.add_argument(
+        "--apps", default=None, help="Comma-separated; default: every app with ground truth."
+    )
+    coverage_cmd.add_argument("--write", action="store_true", help="Also save results/coverage.md.")
     return p
 
 
@@ -82,6 +88,31 @@ def main(argv: list[str] | None = None) -> int:
                 mark = "x" if entry.verified_by else " "
                 flag = " (prohibited)" if entry.prohibited else ""
                 print(f"  [{mark}] {entry.cls:16} {entry.id:34} {entry.title}{flag}")
+        return 0
+
+    if args.command == "coverage":
+        from benchmark.lab import coverage
+
+        known = scorer.available_apps()
+        names = (
+            known if args.apps is None else [a.strip() for a in args.apps.split(",") if a.strip()]
+        )
+        unknown = [n for n in names if n not in known]
+        if unknown or not names:
+            raise SystemExit(f"unknown lab app(s): {unknown or names}; available: {known}")
+        try:
+            result = coverage.audit(names)
+        except coverage.AuditError as exc:
+            print(f"coverage audit failed: {exc}", file=sys.stderr)
+            return 2
+        text = coverage.render(
+            result, date=time.strftime("%Y-%m-%d"), revision=coverage.git_revision()
+        )
+        print(text, end="")
+        if args.write:
+            coverage.COVERAGE_MD.parent.mkdir(parents=True, exist_ok=True)
+            coverage.COVERAGE_MD.write_text(text, encoding="utf-8")
+            print(f"\nwrote {coverage.COVERAGE_MD}")
         return 0
 
     if args.command == "report":

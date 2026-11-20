@@ -197,7 +197,8 @@
         "repeat_request"
       ],
       "verified_by": null,
-      "prohibited": true
+      "prohibited": true,
+      "prohibited_reason": "denial of service: showing it means making the server repeat requests without limit"
     }
   ]
 }
