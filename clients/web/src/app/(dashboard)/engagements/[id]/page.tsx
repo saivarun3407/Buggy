@@ -189,6 +189,9 @@ export default function EngagementOverviewPage() {
 
       {/* Quick actions */}
       <div className="flex gap-2">
+        <Link href={`/engagements/${id}/run`} className="flex items-center gap-1.5 rounded-lg border border-border px-3 py-1.5 text-xs transition-colors hover:bg-accent">
+          <Play className="h-3 w-3" /> Run status
+        </Link>
         <Link href={`/engagements/${id}/timeline`} className="flex items-center gap-1.5 rounded-lg border border-border px-3 py-1.5 text-xs transition-colors hover:bg-accent">
           <Clock className="h-3 w-3" /> Timeline
         </Link>
