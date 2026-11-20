@@ -301,13 +301,15 @@ def _describe(scope: dict[str, Any], mode: str) -> list[str]:
 
 
 def _recon(tool: str, engagement: str, **arguments: Any) -> dict[str, Any]:
-    from buggy.tools.stack_mcp import call_mcp_sync  # noqa: PLC0415
+    # The framework-free client: this command also runs from the slim pipeline
+    # image (lite stack), where the agent-side ``buggy.tools`` does not exist.
+    from buggy.pipeline.mcp_client import call_mcp_sync  # noqa: PLC0415
 
     return call_mcp_sync("recon", tool, {"engagement": engagement, **arguments})
 
 
 def recon_available() -> bool:
-    from buggy.tools.stack_mcp import server_configured  # noqa: PLC0415
+    from buggy.pipeline.mcp_client import server_configured  # noqa: PLC0415
 
     return server_configured("recon")
 

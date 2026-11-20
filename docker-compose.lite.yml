@@ -1,0 +1,176 @@
+# Lite stack: deterministic recon and the recon report, with no LLM.
+#
+# Exactly what `hunt --no-agent` needs: the pipeline worker, its read-only
+# query server, and a one-off operator container. No model gateway, no agent
+# runtime, no sandbox, no database. This file stands alone; it does not
+# extend or require docker-compose.yml.
+#
+#   docker compose -f docker-compose.lite.yml up -d
+#   docker compose -f docker-compose.lite.yml --profile operator run --rm operator \
+#       python -m buggy.cli.hunt https://app.example.com --no-agent --yes
+#
+# The operator runs from the slim pipeline image, which has no agent
+# framework and no `buggy-cli` script: run the command's module, as above
+# (`python -m buggy.pipeline status <engagement>` shows the worker's view).
+#
+# The isolation rules are the ones the full stack applies to these services
+# (tests/test_compose_lite.py pins them):
+#   * the scanners have their own network and no path to the query server's;
+#   * the recon store is writable by the worker only;
+#   * the enforced scope (control root) is read-only for both servers and
+#     writable by the operator container only;
+#   * the query server needs BUGGY_STACK_MCP_TOKEN, and the scanners never
+#     hold it;
+#   * nothing is published to the host, and no model credential is passed in.
+#
+# Service, container, volume and network names match docker-compose.yml on
+# purpose: the lite stack is the same pipeline, so recon data carries over to
+# the full stack, and the two cannot run side by side on one store.
+
+x-logging: &default-logging
+  driver: "json-file"
+  options:
+    max-size: "10m"
+    max-file: "3"
+
+services:
+  # Deterministic recon worker. Runs the pinned scanners as plain
+  # subprocesses when it sees a new or changed scope under /control.
+  pipeline:
+    image: buggy-pipeline:${BUGGY_VERSION:-stable}
+    build:
+      context: .
+      dockerfile: containers/pipeline.Dockerfile
+    container_name: buggy${BUGGY_STACK_NAME:+-${BUGGY_STACK_NAME}}-pipeline
+    command: ["worker"]
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    read_only: true
+    tmpfs:
+      - /tmp
+      # The scanners write their config and caches under $HOME; the image
+      # runs as uid 10001, so the tmpfs must be owned by it.
+      - /home/pipeline:uid=10001,gid=10001,mode=0700
+    mem_limit: 2g
+    pids_limit: 1024
+    environment:
+      - BUGGY_PIPELINE_DATA=/data/pipeline
+      - BUGGY_PIPELINE_QUEUE=/data/queue
+      - BUGGY_CONTROL_ROOT=/control
+      # 0 = run only when a scope is new/changed or a re-run is requested.
+      - BUGGY_PIPELINE_REFRESH_SECONDS=${BUGGY_PIPELINE_REFRESH_SECONDS:-0}
+    volumes:
+      - pipeline_data:/data/pipeline
+      - pipeline_queue:/data/queue
+      # The enforced scope of every engagement, by slug. Read-only.
+      - ${BUGGY_HOME:-~/.buggy}/control:/control:ro
+    networks:
+      - pipeline-net
+    restart: unless-stopped
+    logging: *default-logging
+
+  # Read-only MCP server over the recon store. The store volume is mounted
+  # read-only; the one thing a caller can write is a re-run request naming an
+  # asset (queue volume), which the worker re-checks against the enforced
+  # scope before doing anything.
+  pipeline-mcp:
+    image: buggy-pipeline:${BUGGY_VERSION:-stable}
+    container_name: buggy${BUGGY_STACK_NAME:+-${BUGGY_STACK_NAME}}-pipeline-mcp
+    entrypoint: ["python", "-m", "buggy.pipeline.mcp_server"]
+    command: []
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    read_only: true
+    tmpfs:
+      - /tmp
+    mem_limit: 512m
+    pids_limit: 128
+    environment:
+      - BUGGY_PIPELINE_DATA=/data/pipeline
+      - BUGGY_PIPELINE_QUEUE=/data/queue
+      - BUGGY_CONTROL_ROOT=/control
+      - BUGGY_PIPELINE_MCP_PORT=9460
+      - BUGGY_STACK_MCP_TOKEN=${BUGGY_STACK_MCP_TOKEN:?BUGGY_STACK_MCP_TOKEN must be set - run scripts/ensure-stack-secrets.sh or `buggy onboard`}
+    volumes:
+      - pipeline_data:/data/pipeline:ro
+      - pipeline_queue:/data/queue
+      - ${BUGGY_HOME:-~/.buggy}/control:/control:ro
+    depends_on:
+      pipeline:
+        condition: service_started
+    healthcheck:
+      test: ["CMD", "python", "-c", "import socket; socket.create_connection(('127.0.0.1', 9460), 2).close()"]
+      interval: 5s
+      timeout: 3s
+      retries: 12
+      start_period: 10s
+    networks:
+      - lite-net
+    restart: unless-stopped
+    logging: *default-logging
+
+  # Operator shell: the only container that can WRITE the control root.
+  #
+  # Scope (roe.json) and approval decisions are operator-authored, so the
+  # commands that write them run here, as one-off containers. Neither server
+  # above can start this service: none of them has the Docker socket.
+  #
+  # The image's own user (uid 10001) cannot write the host's ~/.buggy trees,
+  # so this runs as root with every capability dropped except the one that
+  # allows writing those bind mounts (the same arrangement as capture-mcp in
+  # docker-compose.yml).
+  operator:
+    image: buggy-pipeline:${BUGGY_VERSION:-stable}
+    container_name: buggy${BUGGY_STACK_NAME:+-${BUGGY_STACK_NAME}}-operator
+    entrypoint: []
+    command: ["python", "-m", "buggy.cli", "--help"]
+    # A one-off command, not a server: there is nothing to probe.
+    healthcheck:
+      disable: true
+    user: "0:0"
+    cap_drop:
+      - ALL
+    cap_add:
+      - DAC_OVERRIDE  # write the bind-mounted control, audit and workspace trees
+    security_opt:
+      - no-new-privileges:true
+    read_only: true
+    tmpfs:
+      - /tmp
+    mem_limit: 512m
+    pids_limit: 128
+    environment:
+      - BUGGY_ENGAGEMENT_WORKSPACE=/workspace
+      - BUGGY_ENGAGEMENT_CONTROL=/control
+      - BUGGY_ENGAGEMENT_AUDIT=/audit
+      # `hunt` watches the recon pipeline and builds its report through the
+      # read-only recon server.
+      - BUGGY_MCP_RECON_URL=http://pipeline-mcp:9460/mcp
+      - BUGGY_STACK_MCP_TOKEN=${BUGGY_STACK_MCP_TOKEN:?BUGGY_STACK_MCP_TOKEN must be set - run scripts/ensure-stack-secrets.sh or `buggy onboard`}
+    volumes:
+      - ${BUGGY_HOME:-~/.buggy}/workspace:/workspace
+      - ${BUGGY_HOME:-~/.buggy}/control:/control
+      - ${BUGGY_HOME:-~/.buggy}/audit:/audit
+    networks:
+      - lite-net
+    profiles:
+      - operator
+
+volumes:
+  # Recon store (written by `pipeline`, read-only everywhere else) and the
+  # queue of re-run requests.
+  pipeline_data:
+  pipeline_queue:
+
+networks:
+  # The operator's path to the query server. The scanners are not on it.
+  lite-net:
+    driver: bridge
+  # The pipeline's own way out. Not shared with the query server or the
+  # operator.
+  pipeline-net:
+    driver: bridge

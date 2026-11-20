@@ -79,6 +79,11 @@ COPY packages/buggy/buggy/pipeline /opt/buggy/pipeline
 COPY packages/buggy/buggy/capture /opt/buggy/capture
 COPY packages/buggy/buggy/egress_guard /opt/buggy/egress_guard
 COPY packages/buggy-core/buggy_core /opt/buggy_core
+# Operator commands for the lite stack (docker-compose.lite.yml), which runs
+# `buggy.cli.hunt --no-agent` from this image: it reaches the recon server
+# through buggy/pipeline/mcp_client.py, with no agent framework installed.
+COPY packages/buggy/buggy/cli /opt/buggy/cli
+COPY packages/buggy/buggy/program /opt/buggy/program
 
 # Fails the build if any pinned tool is missing or reports another version.
 RUN python -m buggy.pipeline.versions --write-manifest /opt/buggy/pipeline-tools.json

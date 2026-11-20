@@ -245,11 +245,14 @@ def _validate_scope_entries(in_scope: list[str], out_of_scope: list[str]) -> lis
     """Run each scope pattern through the guardrail's own entry validator.
 
     Returns the list of validation errors (empty = the written roe.json is
-    guaranteed to load in the middleware). Reuses
-    ``buggy.middleware.roe._validate_target_entry`` so the CLI cannot
-    emit a document the guardrail itself would refuse to parse.
+    guaranteed to load in the middleware). Reuses the validator the
+    guardrail itself uses (``buggy.middleware.roe`` re-exports this very
+    function), so the CLI cannot emit a document the guardrail would
+    refuse to parse. It is imported from ``buggy_core``, where it is
+    defined, because the middleware module needs the agent framework and
+    this command also runs from the slim pipeline image.
     """
-    from buggy.middleware.roe import (  # noqa: PLC0415
+    from buggy_core.types.roe_document import (  # noqa: PLC0415
         InvalidRoEError,
         _validate_target_entry,
     )
