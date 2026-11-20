@@ -15,18 +15,20 @@ import json
 from dataclasses import replace
 from typing import Any
 
-from buggy.capture.gateway import CaptureGateway
+from buggy.capture.gateway import CaptureGateway, GatewayRefusal
 from buggy.findings import verifier
+from buggy.findings.grade import grade as grade_finding
 from buggy.findings.model import (
     MAX_ASSERTIONS,
     Assertion,
+    Finding,
     Status,
     ValidationError,
     empty_verification,
     severity_rank,
     validate,
 )
-from buggy.findings.store import FindingStore
+from buggy.findings.store import FindingStore, IllegalTransition
 
 # Decided by the service, never taken from a submission.
 _SERVICE_OWNED = ("id", "status", "verification", "grade", "grade_reasons", "created_at")
@@ -210,6 +212,66 @@ class FindingService:
             detail={"reasons": outcome.reasons},
         )
         return {"ok": True, "finding": stored.to_dict(), "verification": outcome.detail()}
+
+    # ── grade ───────────────────────────────────────────────────────
+
+    def grade(
+        self,
+        engagement: str,
+        finding_id: str,
+        *,
+        program: dict[str, Any] | None = None,
+        known_issues: list[dict[str, Any]] | None = None,
+        prior: list[Finding] | None = None,
+        scope: Any = None,
+        actor: str = "grader",
+    ) -> dict[str, Any]:
+        """Grade a stored finding (submit, hold or discard) and record the decision.
+
+        ``program`` is the engagement's program record, ``known_issues`` the
+        pipeline's ``vulnerability`` records and ``prior`` earlier findings;
+        the caller supplies them. The scope is the engagement's enforced scope
+        unless one is passed. Without a usable scope nothing is graded or stored.
+        """
+        if not isinstance(actor, str) or not actor.strip():
+            return _error("BAD_ACTOR", "actor is required: a grade names who gave it")
+        finding = self.store.get(engagement, finding_id)
+        if finding is None:
+            return _error("UNKNOWN_FINDING", f"no finding {finding_id!r} in this engagement")
+        if scope is None:
+            try:
+                scope, _document = self.gateway.scope_for(engagement)
+            except GatewayRefusal as exc:
+                return _error(exc.code, exc.detail)
+        try:
+            outcome = grade_finding(
+                finding,
+                program=program,
+                scope=scope,
+                known_issues=list(known_issues or []),
+                prior=list(prior or []),
+            )
+        except ValueError as exc:
+            return _error("BAD_SCOPE", str(exc))
+        try:
+            stored = self.store.upsert(
+                replace(finding, grade=outcome.decision, grade_reasons=tuple(outcome.reasons)),
+                actor,
+                event="graded",
+                detail={
+                    "grade": outcome.decision,
+                    "previous_grade": finding.grade,
+                    "reasons": outcome.reasons,
+                    "blocking": outcome.blocking,
+                    "capped_severity": outcome.capped_severity,
+                    "program": bool(program),
+                    "known_issues": len(known_issues or []),
+                    "prior": len(prior or []),
+                },
+            )
+        except IllegalTransition as exc:
+            return _error("CONFLICT", f"the finding changed while it was being graded: {exc}")
+        return {"ok": True, "finding": stored.to_dict(), "grade": outcome.to_dict()}
 
     # ── read ────────────────────────────────────────────────────────
 
