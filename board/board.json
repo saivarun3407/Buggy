@@ -1,5 +1,5 @@
 {
- "updated": "2026-11-20 16:59 UTC",
+ "updated": "2026-11-20 17:05 UTC",
  "columns": [
   "backlog",
   "ready",
@@ -622,12 +622,12 @@
    "depends": [
     "E5"
    ],
-   "status": "in_progress",
+   "status": "done",
    "agent": "",
    "branch": "",
-   "commit": "",
-   "tests": "",
-   "note": "",
+   "commit": "886 passed (agent run), 447 re-run:284bc9e",
+   "tests": " re-runs a finding's proof and records fixed, still vulnerable or inconclusive; 'fixed' needs two consistent attempts and a passing control",
+   "note": "Retest merged\\",
    "order": 27
   },
   {
