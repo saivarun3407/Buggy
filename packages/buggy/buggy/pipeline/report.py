@@ -205,6 +205,25 @@ def rank_candidates(
                 "jwt_alg_none",
             )
 
+    # DOM sinks the JS analysis found (``js_finding`` records), one row per script.
+    sinks: dict[str, list[str]] = {}
+    named_sinks = 6
+    for record in records.get("js_finding", []):
+        attrs = _attrs(record)
+        if attrs.get("kind") != "dom_sink":
+            continue
+        script = str(attrs.get("found_in") or str(record.get("value") or "").rsplit("#", 1)[0])
+        sinks.setdefault(script, []).append(f"{attrs.get('sink')} (line {attrs.get('line')})")
+    for script, found in sinks.items():
+        shown = ", ".join(found[:named_sinks])
+        more = len(found) - named_sinks
+        add(
+            "xss",
+            script,
+            f"DOM sinks: {shown}" + (f" and {more} more" if more > 0 else ""),
+            "xss_reflected",
+        )
+
     for kind in ("endpoint", "url"):
         for record in records.get(kind, []):
             url = str(record.get("value") or "")
@@ -231,6 +250,7 @@ def rank_candidates(
         "file_handling": 3,
         "api": 4,
         "graphql": 5,
+        "xss": 6,
     }
     return sorted(out, key=lambda c: (order.get(c["class"], 9), c["where"]))
 

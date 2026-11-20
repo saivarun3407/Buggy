@@ -43,6 +43,7 @@ class RecordType(StrEnum):
     PARAMETER = "parameter"
     VULNERABILITY = "vulnerability"
     SECRET = "secret"
+    JS_FINDING = "js_finding"
 
 
 _HOST_RE = re.compile(

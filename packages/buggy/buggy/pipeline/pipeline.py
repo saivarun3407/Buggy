@@ -1126,7 +1126,11 @@ class Pipeline:
             entry["skipped"] = "passive_only"
             self._note(jsparse.NAME, "skipped", "passive_only")
             return
-        js_files = [r for r in self._records(RecordType.JS_FILE) if r.asset in hosts][:MAX_JS_FILES]
+        js_files = [
+            r
+            for r in self._records(RecordType.JS_FILE)
+            if r.asset in hosts and r.attrs.get("kind") != "source_map"
+        ][:MAX_JS_FILES]
         tally: dict[str, list[int]] = {host: [0, 0] for host in hosts}
         if not js_files:
             self._note_requests(jsparse.NAME, tally)
@@ -1137,6 +1141,8 @@ class Pipeline:
         fetched = 0
         lines: list[str] = []
         pairs: list[tuple[Record, str]] = []
+        source_maps: dict[str, str] = {}  # map URL -> the script that names it
+        limited: dict[str, dict[str, int]] = {}  # asset -> {limit hit: files}
         for record in js_files:
             try:
                 response = client.get(record.value)
@@ -1177,13 +1183,67 @@ class Pipeline:
                         endpoint.asset,
                     )
                 )
+            # Source maps, DOM sinks, dependency names. A file too large to
+            # analyse leaves its host's stamp partial, not "nothing found".
+            size = MAX_JS_BYTES + 1 if response.truncated else len(response.body)
+            analysis = jsparse.analyze(script, js_url=record.value, size=size)
+            if analysis.partial:
+                limited.setdefault(record.asset, {}).setdefault(analysis.partial, 0)
+                limited[record.asset][analysis.partial] += 1
+            for finding in analysis.findings:
+                lines.append(json.dumps({"js": record.value, **finding.attrs}, sort_keys=True))
+                pairs.append((_with_line(finding, len(lines)), finding.asset))
+            for map_url in analysis.source_maps:
+                source_maps.setdefault(map_url, record.value)
         entry["fetched"] = fetched
+        entry["source_maps"] = self._fetch_source_maps(client, source_maps, tally, lines, pairs)
         self._note_requests(jsparse.NAME, tally)
+        for asset, reasons in limited.items():
+            detail = "; ".join(f"{count} {reason}" for reason, count in reasons.items())
+            self._note(jsparse.NAME, "partial", detail, assets=[asset])
         if pairs:
             ref = self._save_raw("urls", jsparse.NAME, "\n".join(lines) + "\n")
             self._store(
                 "urls", stats, jsparse.NAME, pairs, version=versions.BUILTIN_VERSION, raw_ref=ref
             )
+
+    def _fetch_source_maps(
+        self,
+        client: ScopedHTTP,
+        maps: dict[str, str],
+        tally: dict[str, list[int]],
+        lines: list[str],
+        pairs: list[tuple[Record, str]],
+    ) -> int:
+        """Request each source map the scripts name, once, through the scoped
+        client: an out-of-scope map URL is refused before anything is sent.
+        Returns how many maps were recorded. Their source content is not kept."""
+        found = 0
+        for map_url, js_url in maps.items():
+            try:
+                response = client.get(map_url)
+            except OutOfScopeRequest:
+                continue
+            counts = tally.get(host_of(map_url))
+            if counts is not None:
+                counts[0] += 1
+            if response is None:
+                if counts is not None:
+                    counts[1] += 1
+                continue
+            if response.status != 200 or response.truncated or not response.body:
+                continue
+            try:
+                document = response.json()
+            except (ValueError, RecursionError):
+                continue
+            record = jsparse.source_map_record(map_url, document, js_url=js_url)
+            if record is None:
+                continue
+            found += 1
+            lines.append(json.dumps({"js": js_url, "map": record.value, **record.attrs}))
+            pairs.append((_with_line(record, len(lines)), record.asset))
+        return found
 
     # ── stage 6: API specifications ─────────────────────────────────
 

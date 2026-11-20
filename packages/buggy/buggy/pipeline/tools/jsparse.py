@@ -1,17 +1,36 @@
-"""Endpoint extraction from JavaScript (built in; no binary).
+"""Endpoint extraction and static analysis of JavaScript (built in; no binary).
 
 Pulls quoted paths and URLs out of a script's text. It is a string scan, not
 an interpreter: it finds routes that appear as literals (which is most of
 what a bundled SPA contains) and nothing that is assembled at run time.
+
+Three more extractions read the same text, also without executing or fully
+parsing it:
+
+* :func:`source_maps`: the ``sourceMappingURL`` targets the file names;
+* :func:`dom_sinks`: a fixed list of DOM-XSS sinks, found in code only
+  (comments and string contents are masked first);
+* :func:`package_names`: npm package names from ``node_modules/<name>/``
+  paths, which is where webpack's module comments and module ids put them.
+
+Every scan is a bounded set of linear regular-expression passes over text no
+longer than :data:`MAX_ANALYSIS_BYTES` (the caller skips larger files), under
+a wall-clock budget. A snippet that looks like it carries a credential is
+stored redacted.
 """
 
 from __future__ import annotations
 
 import re
+import time
+from bisect import bisect_right
 from collections.abc import Iterator
+from dataclasses import dataclass, field
+from typing import Any
 from urllib.parse import urljoin, urlsplit
 
 from buggy.pipeline.schema import Record, RecordType, host_of, normalize_url
+from buggy.pipeline.tools.params import REDACTED
 
 NAME = "jsparse"
 
@@ -68,3 +87,352 @@ def parse(script: str, *, js_url: str) -> Iterator[Record]:
             source_tool=NAME,
             attrs={"found_in": js_url, "literal": literal[:300]},
         )
+
+
+# ── deeper analysis: source maps, DOM sinks, dependency names ─────────
+
+#: Files larger than this are not analysed (the pipeline stamps them partial).
+MAX_ANALYSIS_BYTES = 2 * 1024 * 1024
+#: Wall-clock budget of one :func:`analyze` call.
+TIME_BUDGET_S = 5.0
+MAX_SOURCE_MAPS = 5
+MAX_SINKS = 200
+MAX_PACKAGES = 200
+MAX_SNIPPET = 160
+#: Source-map ``sources`` names kept on the record.
+MAX_SOURCES_SAMPLE = 20
+#: How far after ``addEventListener("message"`` an origin check is looked for.
+ORIGIN_CHECK_WINDOW = 300
+#: How far a call's argument list is followed (``postMessage``).
+MAX_ARGS_SPAN = 500
+
+_SOURCE_MAP = re.compile(
+    r"(?:^[ \t]*//[#@][ \t]*sourceMappingURL[ \t]*=[ \t]*(?P<line>[^\s*]{1,2048})"
+    r"|/\*[#@][ \t]*sourceMappingURL[ \t]*=[ \t]*(?P<block>[^\s*]{1,2048})[ \t]*\*/)",
+    re.MULTILINE,
+)
+
+# One token of the masking pass. Comments and strings always match once they
+# start (an unterminated one runs to the end of the file or line), and a regex
+# literal is at most 200 characters, so the scan never re-reads the file.
+_TOKEN = re.compile(
+    r"""(?P<comment>//[^\n]*|/\*.*?(?:\*/|\Z))
+      | (?P<string>"(?:\\.|[^"\\\n])*"?|'(?:\\.|[^'\\\n])*'?|`(?:\\.|[^`\\])*`?)
+      | (?P<regex>(?<=[(,=:\[!&|?{};])[ \t]*/(?![/*])
+            (?:\\.|\[(?:\\.|[^\]\\\n]){0,100}\]|[^/\\\n\[]){1,200}/[a-z]{0,6})""",
+    re.VERBOSE | re.DOTALL,
+)
+_NOT_NEWLINE = re.compile(r"[^\n]")
+
+# (sink name, pattern). Matched on the comment-masked text; a match that
+# starts inside a string literal is ignored.
+_SINKS: tuple[tuple[str, re.Pattern[str]], ...] = (
+    ("innerHTML", re.compile(r"\.\s*innerHTML\s*\+?=(?!=)")),
+    ("outerHTML", re.compile(r"\.\s*outerHTML\s*\+?=(?!=)")),
+    ("document.write", re.compile(r"(?<![\w$.])document\s*\.\s*write(?:ln)?\s*\(")),
+    ("insertAdjacentHTML", re.compile(r"\.\s*insertAdjacentHTML\s*\(")),
+    ("eval", re.compile(r"(?<![\w$])eval\s*\(")),
+    ("new-Function", re.compile(r"(?<![\w$.])new\s+Function\s*\(")),
+    ("setTimeout-string", re.compile(r"(?<![\w$])setTimeout\s*\(\s*[\"'`]")),
+    (
+        "location-assign",
+        re.compile(
+            r"(?:(?<![\w$.])(?:window|document|self|top|parent)\s*\.\s*|(?<![\w$.]))"
+            r"location(?:\s*\.\s*href)?\s*=(?!=)"
+        ),
+    ),
+    ("postMessage-wildcard", re.compile(r"\.\s*postMessage\s*\(")),
+    (
+        "message-listener-no-origin-check",
+        re.compile(r"(?<![\w$])addEventListener\s*\(\s*([\"'`])message\1"),
+    ),
+)
+_STAR_ARG = re.compile(r"([\"'`])\*\1")
+_ORIGIN_CHECK = re.compile(r"\.\s*origin\b|\[\s*[\"']origin[\"']\s*\]")
+_LITERAL_END = frozenset(";,)}\n")
+
+_PACKAGE = re.compile(
+    r"node_modules[/\\]+(?P<name>(?:@[A-Za-z0-9][\w.~-]{0,100}[/\\]+)?[A-Za-z0-9][\w.~-]{0,213})"
+    r"(?=[/\\\"'`\s*!:)]|$)"
+)
+_FILE_NAME = re.compile(r"\.(?:[cm]?js|jsx|tsx?|json|css|map)$", re.IGNORECASE)
+#: Scopes of widely used public packages. A scoped name outside this list may
+#: be an internal package: a dependency-confusion candidate to check by hand
+#: against the public registry (the pipeline never queries it).
+PUBLIC_SCOPES = frozenset(
+    {
+        "@algolia", "@amplitude", "@angular", "@ant-design", "@apollo", "@auth0", "@aws-amplify",
+        "@aws-sdk", "@azure", "@babel", "@capacitor", "@codemirror", "@datadog", "@emotion",
+        "@firebase", "@floating-ui", "@formatjs", "@fortawesome", "@google-cloud", "@grpc",
+        "@headlessui", "@heroicons", "@hookform", "@ionic", "@jridgewell", "@lit", "@mapbox",
+        "@material", "@material-ui", "@microsoft", "@mui", "@nestjs", "@next", "@ngrx",
+        "@ngx-translate", "@nuxt", "@octokit", "@okta", "@opentelemetry", "@popperjs",
+        "@protobufjs", "@radix-ui", "@react-aria", "@react-native", "@react-spring",
+        "@reduxjs", "@remix-run", "@segment", "@sentry", "@stripe", "@supabase", "@sveltejs",
+        "@swc", "@tanstack", "@tiptap", "@types", "@vercel", "@vue", "@vueuse", "@webcomponents",
+        "@zxing",
+    }
+)  # fmt: skip
+
+# What a credential looks like inside a snippet. Same intent as the parameter
+# rule in ``params.py``: losing a snippet's detail costs nothing, storing a
+# credential does.
+_SECRET_ASSIGN = re.compile(
+    r"""(?P<name>[\w$-]*(?:token|jwt|secret|passw|pwd|api_?key|sessid|session|signature|credential|auth)
+            [\w$-]*["']?\s*[:=]\s*)
+        (?P<q>["'`])[^"'`\n]{1,500}(?P=q)""",
+    re.IGNORECASE | re.VERBOSE,
+)
+_SECRET_JWT = re.compile(r"eyJ[\w-]{4,}\.[\w-]{4,}\.[\w-]*")
+#: A long run of key characters, wherever it stands (quoted or inside a
+#: longer string). Path segments are not runs: ``/`` and ``.`` end one.
+_SECRET_RUN = re.compile(r"(?<![\w+=/.-])[A-Za-z0-9_+=-]{20,500}(?![\w+=-])")
+_DIGIT = re.compile(r"[0-9]")
+_LETTER = re.compile(r"[A-Za-z]")
+
+
+def _secret_run(match: re.Match[str]) -> str:
+    """A long run that mixes letters and digits is treated as a credential."""
+    value = match.group(0)
+    if len(_DIGIT.findall(value)) >= 2 and len(_LETTER.findall(value)) >= 2:
+        return REDACTED
+    return value
+
+
+def redact(text: str) -> str:
+    """``text`` with anything credential-shaped replaced by ``<redacted>``."""
+    text = _SECRET_JWT.sub(REDACTED, text)
+    text = _SECRET_ASSIGN.sub(
+        lambda m: f"{m.group('name')}{m.group('q')}{REDACTED}{m.group('q')}", text
+    )
+    return _SECRET_RUN.sub(_secret_run, text)
+
+
+def source_maps(text: str, js_url: str) -> list[str]:
+    """``sourceMappingURL`` targets of ``text`` resolved against ``js_url``.
+
+    ``data:`` URIs (inline maps) and anything that is not http(s) are ignored.
+    """
+    found: dict[str, None] = {}
+    for match in _SOURCE_MAP.finditer(text):
+        target = (match.group("line") or match.group("block") or "").strip()
+        if not target or target.lower().startswith("data:"):
+            continue
+        resolved = urljoin(js_url, target)
+        if urlsplit(resolved).scheme not in ("http", "https") or not host_of(resolved):
+            continue
+        found.setdefault(normalize_url(resolved), None)
+        if len(found) >= MAX_SOURCE_MAPS:
+            break
+    return list(found)
+
+
+def _masks(text: str) -> tuple[str, str]:
+    """``(code, bare)``: ``text`` with comments blanked, and with string and
+    regex-literal contents blanked too. Both keep every offset and newline."""
+    code: list[str] = []
+    bare: list[str] = []
+    last = 0
+    for match in _TOKEN.finditer(text):
+        start, end = match.span()
+        between = text[last:start]
+        code.append(between)
+        bare.append(between)
+        token = match.group(0)
+        if match.group("comment") is not None:
+            blank = _NOT_NEWLINE.sub(" ", token)
+            code.append(blank)
+            bare.append(blank)
+        elif match.group("string") is not None:
+            code.append(token)
+            closed = len(token) >= 2 and token[-1] == token[0]
+            inner = token[1:-1] if closed else token[1:]
+            bare.append(token[0] + _NOT_NEWLINE.sub(" ", inner) + (token[-1] if closed else ""))
+        else:
+            code.append(token)
+            bare.append(_NOT_NEWLINE.sub(" ", token))
+        last = end
+    code.append(text[last:])
+    bare.append(text[last:])
+    return "".join(code), "".join(bare)
+
+
+def _args_end(bare: str, open_paren: int) -> int:
+    """Offset of the ``)`` closing the call whose ``(`` is at ``open_paren``."""
+    depth = 0
+    stop = min(len(bare), open_paren + MAX_ARGS_SPAN)
+    for index in range(open_paren, stop):
+        char = bare[index]
+        if char in "([{":
+            depth += 1
+        elif char in ")]}":
+            depth -= 1
+            if depth == 0:
+                return index
+    return stop
+
+
+def _assigns_literal(bare: str, pos: int) -> bool:
+    """Whether the right-hand side starting at ``pos`` is one plain string literal."""
+    while pos < len(bare) and bare[pos] in " \t":
+        pos += 1
+    if pos >= len(bare) or bare[pos] not in "\"'`":
+        return False
+    close = bare.find(bare[pos], pos + 1)
+    if close < 0:
+        return False
+    after = close + 1
+    while after < len(bare) and bare[after] in " \t":
+        after += 1
+    return after >= len(bare) or bare[after] in _LITERAL_END
+
+
+def _snippet(text: str, start: int, end: int, line_starts: list[int]) -> str:
+    """The source line of a hit, cut to a window around it when it is long."""
+    line_start = line_starts[bisect_right(line_starts, start) - 1]
+    line_end = text.find("\n", start)
+    line_end = len(text) if line_end < 0 else line_end
+    if line_end - line_start <= MAX_SNIPPET:
+        piece = text[line_start:line_end]
+    else:
+        lead = max(line_start, start - 60)
+        piece = text[lead : min(line_end, max(end, lead + MAX_SNIPPET))]
+    return redact(piece.strip())[:MAX_SNIPPET]
+
+
+def dom_sinks(text: str, *, deadline: float | None = None) -> list[dict[str, Any]]:
+    """DOM-XSS sinks in the code of ``text``: ``{sink, line, snippet}``, one per
+    sink and line, in source order. Nothing in a comment or a string counts."""
+    code, bare = _masks(text)
+    line_starts = [0] + [m.end() for m in re.finditer("\n", text)]
+    hits: dict[tuple[str, int], dict[str, Any]] = {}
+    for sink, pattern in _SINKS:
+        if len(hits) >= MAX_SINKS or (deadline is not None and time.monotonic() > deadline):
+            break
+        for match in pattern.finditer(code):
+            start, end = match.span()
+            if bare[start] == " ":  # starts inside a string literal
+                continue
+            if sink == "location-assign" and _assigns_literal(bare, end):
+                continue
+            if sink == "postMessage-wildcard" and not _STAR_ARG.search(
+                code, end, _args_end(bare, end - 1) + 1
+            ):
+                continue
+            if sink == "message-listener-no-origin-check" and _ORIGIN_CHECK.search(
+                code, end, end + ORIGIN_CHECK_WINDOW
+            ):
+                continue
+            line = bisect_right(line_starts, start)
+            if (sink, line) not in hits:
+                hits[(sink, line)] = {
+                    "sink": sink,
+                    "line": line,
+                    "snippet": _snippet(text, start, end, line_starts),
+                    "_at": start,
+                }
+                if len(hits) >= MAX_SINKS:
+                    break
+    ordered = sorted(hits.values(), key=lambda hit: (hit["_at"], hit["sink"]))
+    return [{"sink": h["sink"], "line": h["line"], "snippet": h["snippet"]} for h in ordered]
+
+
+def package_names(text: str) -> list[str]:
+    """npm package names (``name`` or ``@scope/name``) from ``node_modules/`` paths."""
+    found: dict[str, None] = {}
+    for match in _PACKAGE.finditer(text):
+        name = re.sub(r"[/\\]+", "/", match.group("name"))
+        if _FILE_NAME.search(name):  # a file directly under node_modules, not a package
+            continue
+        found.setdefault(name, None)
+        if len(found) >= MAX_PACKAGES:
+            break
+    return list(found)
+
+
+def looks_private(name: str) -> bool:
+    """A scoped package whose scope is not a well-known public one."""
+    if not name.startswith("@") or "/" not in name:
+        return False
+    return name.split("/", 1)[0].lower() not in PUBLIC_SCOPES
+
+
+@dataclass(slots=True)
+class Analysis:
+    """What :func:`analyze` found in one file; ``partial`` names a limit it hit."""
+
+    source_maps: list[str] = field(default_factory=list)
+    findings: list[Record] = field(default_factory=list)
+    partial: str = ""
+
+
+def analyze(
+    text: str, *, js_url: str, size: int | None = None, budget_s: float = TIME_BUDGET_S
+) -> Analysis:
+    """Source maps, DOM sinks and dependency names of one script.
+
+    ``size`` is the file's size in bytes (defaults to the encoded text's). A
+    file over :data:`MAX_ANALYSIS_BYTES` is not read at all.
+    """
+    size = len(text.encode("utf-8", "replace")) if size is None else size
+    if size > MAX_ANALYSIS_BYTES:
+        return Analysis(
+            partial=f"script over {MAX_ANALYSIS_BYTES // (1024 * 1024)} MB not analysed"
+        )
+    asset = host_of(js_url)
+    out = Analysis(source_maps=source_maps(text, js_url))
+    if not asset:
+        return out
+    deadline = time.monotonic() + budget_s
+    for hit in dom_sinks(text, deadline=deadline):
+        out.findings.append(
+            Record(
+                type=RecordType.JS_FINDING,
+                asset=asset,
+                value=f"{js_url}#{hit['sink']}@{hit['line']}",
+                source_tool=NAME,
+                attrs={"kind": "dom_sink", "found_in": js_url, **hit},
+            )
+        )
+    if time.monotonic() > deadline:
+        out.partial = f"script analysis stopped after {budget_s:g} s"
+        return out
+    for name in package_names(text):
+        attrs: dict[str, Any] = {"kind": "dependency", "found_in": js_url, "name": name}
+        if looks_private(name):
+            attrs["hint"] = "check-public-registry"
+        out.findings.append(
+            Record(
+                type=RecordType.JS_FINDING,
+                asset=asset,
+                value=f"{js_url}#dependency:{name}",
+                source_tool=NAME,
+                attrs=attrs,
+            )
+        )
+    return out
+
+
+def source_map_record(map_url: str, document: Any, *, js_url: str) -> Record | None:
+    """A ``js_file`` record for a fetched source map, or ``None`` if it is not one.
+
+    Only the number of sources and the first names are kept, never their content.
+    """
+    if not isinstance(document, dict) or not isinstance(document.get("sources"), list):
+        return None
+    asset = host_of(map_url)
+    if not asset:
+        return None
+    sources = document["sources"]
+    return Record(
+        type=RecordType.JS_FILE,
+        asset=asset,
+        value=normalize_url(map_url),
+        source_tool=NAME,
+        attrs={
+            "kind": "source_map",
+            "found_in": js_url,
+            "sources_count": len(sources),
+            "sources_sample": [str(name)[:300] for name in sources[:MAX_SOURCES_SAMPLE]],
+        },
+    )
