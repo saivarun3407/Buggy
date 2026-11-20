@@ -95,6 +95,7 @@ from buggy_core.types.roe_document import (
     _validate_target_entry,  # noqa: F401 - re-exported for buggy.cli.engage
     parse_roe_document,
 )
+from buggy_core.types.tool_guard import compile_rules, evaluate_call
 from buggy_core.utils.env import env_flag, env_truthy
 
 log = logging.getLogger(__name__)
@@ -203,6 +204,36 @@ def _sandbox_blocked_decision(targets: list[str]) -> Decision:
             "and read recon with recon_query. State-changing requests are held for the operator there."
         ),
     )
+
+
+TOOL_GUARD_BLOCKED = "TOOL_GUARD_BLOCKED"
+
+
+def _tool_guard_decision(
+    tool_name: str, args: dict[str, Any], rules: MachineEnforcement
+) -> Decision | None:
+    """Refusal from the tool-call guard, or None when no guard rule matches.
+
+    Rules: ``forbidden_command_patterns`` (all tools) followed by
+    ``machine_enforcement.tool_guard``, in order. The refusal names the rule,
+    never its pattern.
+    """
+    legacy, errors = compile_rules(
+        rules.forbidden_command_patterns, source="forbidden_command_patterns"
+    )
+    if errors:  # only reachable when rules bypassed parse_roe_document
+        return Decision.refuse(
+            code=TOOL_GUARD_BLOCKED,
+            detail="tool-guard rules are invalid; the operator must repair roe.json",
+            matched=("forbidden_command_patterns",),
+        )
+    guard = evaluate_call(tool_name, args, (*legacy, *rules.tool_guard))
+    if not guard.blocked:
+        return None
+    detail = f"tool-guard rule {guard.rule!r} matched {guard.where}"
+    if guard.message:
+        detail += f": {guard.message}"
+    return Decision.refuse(code=TOOL_GUARD_BLOCKED, detail=detail[:600], matched=(guard.rule,))
 
 
 def _roe_required() -> bool:
@@ -850,6 +881,9 @@ class RoEGuardrailMiddleware(AgentMiddleware):
                     return target_decision, rules, tool_name
             if hosts and rules.sandbox_blocked and tool_name in SANDBOX_NETWORK_TOOLS:
                 return _sandbox_blocked_decision(sorted(set(hosts))), rules, tool_name
+            guard_decision = _tool_guard_decision(tool_name, _tool_call_args(request), rules)
+            if guard_decision is not None:
+                return guard_decision, rules, tool_name
             return Decision.allow_default(), rules, tool_name
         command = _command_from_tool_call(request)
         cmd_decision = evaluate_command(command, rules)
@@ -862,6 +896,9 @@ class RoEGuardrailMiddleware(AgentMiddleware):
                 return target_decision, rules, tool_name
         if targets and rules.sandbox_blocked:
             return _sandbox_blocked_decision(sorted(targets)), rules, tool_name
+        guard_decision = _tool_guard_decision(tool_name, _tool_call_args(request), rules)
+        if guard_decision is not None:
+            return guard_decision, rules, tool_name
         return Decision.allow_default(), rules, tool_name
 
     def _record(
@@ -888,6 +925,8 @@ class RoEGuardrailMiddleware(AgentMiddleware):
             "mode": mode.value,
             "command_excerpt": _redact_secrets(_command_from_tool_call(request))[:512],
         }
+        if decision.reason_code == TOOL_GUARD_BLOCKED:
+            record["event"] = "tool_guard_blocked"
         return self._append_audit(state, record)
 
     def _pace_wait_seconds(self, rules: MachineEnforcement) -> float:

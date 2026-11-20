@@ -20,6 +20,7 @@ from buggy_core.types.roe import (
     ScopeRule,
     _network_scope_pattern,
 )
+from buggy_core.types.tool_guard import MAX_RULES, compile_rules
 
 
 class InvalidRoEError(ValueError):
@@ -53,6 +54,19 @@ def _validate_target_entry(field: str, entry: Any) -> None:
         raise InvalidRoEError(f"RoE {field} contains an invalid network target") from exc
 
 
+def _validate_tool_guard(block: dict[str, Any]) -> None:
+    """Reject a guard rule set the middleware could not apply exactly as written."""
+    _, errors = compile_rules(block.get("tool_guard", []), source="tool_guard")
+    if errors:
+        shown = "; ".join(errors[:5]) + (f"; and {len(errors) - 5} more" if len(errors) > 5 else "")
+        raise InvalidRoEError(f"RoE tool_guard is invalid: {shown}")
+    total = len(block.get("tool_guard", [])) + len(block.get("forbidden_command_patterns", []))
+    if total > MAX_RULES:
+        raise InvalidRoEError(
+            f"RoE tool_guard plus forbidden_command_patterns must not exceed {MAX_RULES} rules"
+        )
+
+
 def parse_roe_document(document: Any, *, required: bool) -> MachineEnforcement:
     """Validate a decoded RoE document and return its enforcement rules.
 
@@ -81,6 +95,7 @@ def parse_roe_document(document: Any, *, required: bool) -> MachineEnforcement:
         "forbidden_command_patterns",
         "authorized_windows",
         "blackout_windows",
+        "tool_guard",
     ):
         if not isinstance(block.get(field, []), list):
             raise InvalidRoEError(f"RoE {field} must be a JSON array")
@@ -105,6 +120,7 @@ def parse_roe_document(document: Any, *, required: bool) -> MachineEnforcement:
         for entry in block.get("forbidden_command_patterns", [])
     ):
         raise InvalidRoEError("RoE forbidden_command_patterns entries must be nonempty strings")
+    _validate_tool_guard(block)
     try:
         for pattern in block.get("forbidden_command_patterns", []):
             re.compile(pattern)
