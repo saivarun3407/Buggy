@@ -679,7 +679,16 @@ class TestContract:
         spec = REGISTRY["sqli"]
         assert (spec.vuln_class, spec.cwe, spec.state_changing) == ("injection", "CWE-89", False)
         assert spec.run is injection.sqli
-        assert list(REGISTRY)[-1] == "sqli"  # appended, existing order untouched
+        # Appended after the six original probes, whose order is untouched.
+        names = list(REGISTRY)
+        assert names.index("sqli") == 6 and names[:6] == [
+            "jwt_alg_none",
+            "idor",
+            "ssrf_canary",
+            "numeric_boundary",
+            "mass_assignment",
+            "graphql_checks",
+        ]
         (described,) = [d for d in describe() if d["probe"] == "sqli"]
         assert {"url", "method", "parameter", "location", "value", "body", "headers"} <= set(
             described["params"]

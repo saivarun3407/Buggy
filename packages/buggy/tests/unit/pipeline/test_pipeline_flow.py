@@ -352,6 +352,7 @@ class TestFullRun:
             "header": 3,
             "http_service": 3,
             "js_file": 3,
+            "parameter": 2,  # the two archived URLs with an ?id= query
             "port": 3,
             "secret": 1,
             "subdomain": 4,

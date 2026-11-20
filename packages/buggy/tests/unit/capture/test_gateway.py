@@ -196,12 +196,16 @@ class TestScopeAndRecording:
         slept: list[float] = []
         gateway._sleep = slept.append  # noqa: SLF001
         site.routes[("GET", "https://app.acme.test/")] = (200, b"ok")
-        for _ in range(3):
+        gateway.send("acme", "GET", "https://app.acme.test/")
+        # Freeze the limiter's clock at the first request, so the result does
+        # not depend on how long this machine takes between sends.
+        (limiter,) = gateway._limiters.values()  # noqa: SLF001
+        first = limiter._next - limiter._interval  # noqa: SLF001
+        limiter._clock = lambda: first  # noqa: SLF001
+        for _ in range(2):
             gateway.send("acme", "GET", "https://app.acme.test/")
-        # The fake sleep does not advance the clock, so the slots are 0.5 s
-        # apart measured from the first request: waits of ~0.5 s and ~1.0 s.
-        assert len(slept) == 2
-        assert 0.4 < slept[0] <= 0.5 and 0.9 < slept[1] <= 1.0
+        # Slots are 0.5 s apart measured from the first request.
+        assert slept == [pytest.approx(0.5), pytest.approx(1.0)]
 
     def test_replay_resends_from_the_gateway_and_compares(self, env) -> None:
         gateway, site, _roots = env
