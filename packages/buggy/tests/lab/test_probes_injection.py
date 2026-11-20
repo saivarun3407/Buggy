@@ -353,3 +353,234 @@ def test_xss_probe_is_listed(lab: Lab) -> None:  # noqa: F811
     result = lab.probe("xss_reflected", {"url": "http://172.17.0.1/search?q=x", "parameter": "q"})
     assert result["vulnerable"] is None
     assert result["details"]["refusal"]["code"] == "OUT_OF_SCOPE"
+
+
+# ── ssti and command_injection (task C3) ─────────────────────────────
+#
+# DVGA hands two GraphQL arguments to a shell: importPaste builds
+# ``curl <scheme>://<host>:<port><path>``, and systemDiagnostics runs ``cmd``
+# for the administrator. Both are found, by an arithmetic echo, with the
+# probe aimed at the GraphQL variable that carries the argument. The same
+# probe leaves alone an argument that only reaches SQL, and the diagnostics
+# command when the password check stops it before the shell.
+#
+# Neither application evaluates a request value as a template within one
+# request, so ``ssti`` has no lab positive, on purpose: here it gets two real
+# negatives, and its positives are proven in the unit tests, one engine per
+# syntax family.
+
+_IMPORT_PASTE = (
+    "mutation($h: String!, $o: Int, $p: String!, $s: String!) "
+    "{ importPaste(host: $h, port: $o, path: $p, scheme: $s) { result } }"
+)
+_DIAGNOSTICS = (
+    "query($u: String, $w: String, $c: String) "
+    "{ systemDiagnostics(username: $u, password: $w, cmd: $c) }"
+)
+# DVGA's documented default administrator account.
+_DVGA_ADMIN = {"u": "admin", "w": "changeme"}
+
+
+def _check_execution_evidence(lab: Lab, result: dict[str, Any], bound: int) -> None:  # noqa: F811
+    """Every capture id is a real recorded request of this probe, within its bound."""
+    ids = result["evidence_capture_ids"]
+    details = result["details"]
+    assert 2 <= len(ids) == details["requests_sent"] <= bound == details["max_requests"]
+    assert list(details["captures"].values()) == ids
+    assert list(details["captures"])[:2] == ["baseline", "baseline_repeat"]
+    for capture_id in ids:
+        capture = lab.gateway.store.get(ENGAGEMENT, capture_id)
+        assert capture is not None and capture.probe == result["probe"] and not capture.error
+
+
+def _graphql_data(lab: Lab, result: dict[str, Any], role: str) -> Any:  # noqa: F811
+    capture = lab.gateway.store.get(ENGAGEMENT, result["details"]["captures"][role])
+    return json.loads(capture.response_body)["data"]
+
+
+def _assert_only_the_arithmetic_echo_ran(result: dict[str, Any], value: str) -> None:
+    """Found on the first payload, and that payload is the fixed echo of a multiplication."""
+    details = result["details"]
+    assert details["technique"] == "output" and details["separator"] == "semicolon"
+    assert list(details["captures"])[2:] == ["output_semicolon", "output_control"]
+    numbers = details["numbers"]
+    assert 1000 <= numbers["a"] <= 9999 and 1000 <= numbers["b"] <= 9999
+    assert numbers["product"] == numbers["a"] * numbers["b"]
+    assert details["payloads"]["output_semicolon"] == (
+        f"{value};echo $(({numbers['a']}*{numbers['b']}))"
+    )
+    assert details["payloads"]["output_control"] == f"{value}{numbers['control']}"
+    assert "time" not in details  # no delay payload was needed
+
+
+@pytest.mark.parametrize(
+    ("variable", "value"), [("p", "/"), ("h", "127.0.0.1")], ids=["path", "host"]
+)
+def test_command_injection_probe_finds_import_paste(
+    lab: Lab,  # noqa: F811
+    variable: str,
+    value: str,
+) -> None:
+    # The baseline points curl at a closed port on the container's own loopback:
+    # it fails at once and prints nothing, and no other machine is contacted.
+    variables = {"h": "127.0.0.1", "o": 9, "p": "/", "s": "http"}
+    assert variables[variable] == value
+    result = lab.probe(
+        "command_injection",
+        {
+            "url": f"{lab.dvga}/graphql",
+            "method": "POST",
+            "location": "json",
+            "parameter": f"variables.{variable}",
+            "body": {"query": _IMPORT_PASTE, "variables": variables},
+        },
+    )
+    _found(result)
+    assert result["class"] == "injection" and result["cwe"] == "CWE-78"
+    _assert_only_the_arithmetic_echo_ran(result, value)
+    _check_execution_evidence(lab, result, 11)
+    # The shell printed the product; with plain digits in the same place it printed nothing.
+    product = str(result["details"]["numbers"]["product"])
+    assert _graphql_data(lab, result, "baseline")["importPaste"]["result"] == ""
+    proof = _graphql_data(lab, result, "output_semicolon")["importPaste"]["result"]
+    assert proof.startswith(product)
+    assert _graphql_data(lab, result, "output_control")["importPaste"]["result"] == ""
+
+
+def test_command_injection_probe_finds_system_diagnostics(lab: Lab) -> None:  # noqa: F811
+    result = lab.probe(
+        "command_injection",
+        {
+            "url": f"{lab.dvga}/graphql",
+            "method": "POST",
+            "location": "json",
+            "parameter": "variables.c",
+            "body": {"query": _DIAGNOSTICS, "variables": {**_DVGA_ADMIN, "c": "whoami"}},
+        },
+    )
+    _found(result)
+    assert result["class"] == "injection" and result["cwe"] == "CWE-78"
+    _assert_only_the_arithmetic_echo_ran(result, "whoami")
+    _check_execution_evidence(lab, result, 11)
+    # The command's own output, then one more line: the product.
+    product = str(result["details"]["numbers"]["product"])
+    whoami = _graphql_data(lab, result, "baseline")["systemDiagnostics"]
+    assert whoami.strip() and product not in whoami
+    proof = _graphql_data(lab, result, "output_semicolon")["systemDiagnostics"]
+    assert proof == f"{whoami}{product}\n"
+    assert product not in _graphql_data(lab, result, "output_control")["systemDiagnostics"]
+
+
+def _assert_no_command_signal(result: dict[str, Any]) -> None:
+    """All five echoes and all three waits were sent, and none of them did anything."""
+    details = result["details"]
+    assert details["technique"] is None and "separator" not in details
+    assert [t["name"] for t in details["output"]] == [
+        "semicolon",
+        "pipe",
+        "backtick",
+        "subshell",
+        "windows_ampersand",
+    ]
+    assert all(t["outcome"] == "not_evaluated" for t in details["output"])
+    assert [t["name"] for t in details["time"]["tried"]] == [
+        "semicolon",
+        "pipe",
+        "windows_ampersand",
+    ]
+    assert all(t["delay_extra_ms"] < 2500 for t in details["time"]["tried"])
+    assert details["requests_sent"] == 10
+
+
+def test_command_injection_probe_does_not_flag_the_sql_filter(lab: Lab) -> None:  # noqa: F811
+    # pastes(filter:) is concatenated into SQL (the sqli test above finds it), but
+    # it never reaches a shell: an injectable argument is not every kind of injectable.
+    title = _own_paste(lab)
+    result = lab.probe(
+        "command_injection",
+        {
+            "url": f"{lab.dvga}/graphql",
+            "method": "POST",
+            "location": "json",
+            "parameter": "variables.f",
+            "body": {"query": _PASTES_BY_FILTER, "variables": {"f": title}},
+        },
+    )
+    _not_found(result)
+    _assert_no_command_signal(result)
+    _check_execution_evidence(lab, result, 11)
+    # The argument is used: the baseline found this test's paste.
+    assert [p["title"] for p in _graphql_data(lab, result, "baseline")["pastes"]] == [title]
+
+
+def test_command_injection_probe_does_not_flag_a_command_the_login_check_stops(
+    lab: Lab,  # noqa: F811
+) -> None:
+    # The same cmd argument as above, with a wrong password: the resolver answers
+    # before the shell is involved, so nothing is executed and nothing is flagged.
+    result = lab.probe(
+        "command_injection",
+        {
+            "url": f"{lab.dvga}/graphql",
+            "method": "POST",
+            "location": "json",
+            "parameter": "variables.c",
+            "body": {
+                "query": _DIAGNOSTICS,
+                "variables": {"u": "admin", "w": "not-the-password", "c": "whoami"},
+            },
+        },
+    )
+    _not_found(result)
+    _assert_no_command_signal(result)
+    _check_execution_evidence(lab, result, 11)
+    assert _graphql_data(lab, result, "output_semicolon") == _graphql_data(lab, result, "baseline")
+
+
+def test_ssti_probe_does_not_flag_a_reflecting_error_page(lab: Lab) -> None:  # noqa: F811
+    # /redirect?to=<unknown> answers 406 with an HTML page that prints the target.
+    # Every canary comes back as the text that was sent, never as its product.
+    result = lab.probe("ssti", {"url": f"{lab.juice}/redirect?to=x", "parameter": "to"})
+    _not_found(result)
+    assert result["class"] == "injection" and result["cwe"] == "CWE-1336"
+    details = result["details"]
+    assert details["engine_family"] is None and details["baseline"]["status"] == 406
+    assert [c["outcome"] for c in details["canaries"]] == ["reflected_as_text"] * 5
+    assert details["requests_sent"] == 7 and "canary_control" not in details["captures"]
+    _check_execution_evidence(lab, result, 8)
+    numbers = details["numbers"]
+    page = lab.gateway.store.get(ENGAGEMENT, details["captures"]["canary_jinja2_twig"])
+    assert f"x{{{{{numbers['a']}*{numbers['b']}}}}}".encode() in page.response_body
+    assert str(numbers["product"]).encode() not in page.response_body
+
+
+def test_ssti_probe_does_not_flag_a_graphql_argument(lab: Lab) -> None:  # noqa: F811
+    title = _own_paste(lab)
+    result = lab.probe(
+        "ssti",
+        {
+            "url": f"{lab.dvga}/graphql",
+            "method": "POST",
+            "location": "json",
+            "parameter": "variables.f",
+            "body": {"query": _PASTES_BY_FILTER, "variables": {"f": title}},
+        },
+    )
+    _not_found(result)
+    assert [c["outcome"] for c in result["details"]["canaries"]] == ["not_evaluated"] * 5
+    _check_execution_evidence(lab, result, 8)
+
+
+def test_execution_probes_are_listed(lab: Lab) -> None:  # noqa: F811
+    from buggy.capture.probes import describe
+
+    listed = {d["probe"]: d for d in describe()}
+    assert (listed["ssti"]["class"], listed["ssti"]["cwe"]) == ("injection", "CWE-1336")
+    assert listed["ssti"]["state_changing"] is False
+    shell = listed["command_injection"]
+    assert (shell["class"], shell["cwe"], shell["state_changing"]) == ("injection", "CWE-78", True)
+    # And they refuse to leave the lab like every other probe.
+    for name in ("ssti", "command_injection"):
+        result = lab.probe(name, {"url": "http://172.17.0.1/lookup?host=x", "parameter": "host"})
+        assert result["vulnerable"] is None
+        assert result["details"]["refusal"]["code"] == "OUT_OF_SCOPE"

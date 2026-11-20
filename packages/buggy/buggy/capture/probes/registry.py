@@ -8,6 +8,7 @@ from buggy.capture.canary import Canary
 from buggy.capture.gateway import CaptureGateway, GatewayRefusal
 from buggy.capture.probes import checks
 from buggy.capture.probes.base import Context, ProbeInputError, ProbeSpec
+from buggy.capture.probes.execution import command_injection, ssti
 from buggy.capture.probes.injection import sqli
 from buggy.capture.probes.xss import xss_reflected
 
@@ -123,6 +124,41 @@ REGISTRY: dict[str, ProbeSpec] = {
                 "headers": "optional headers, e.g. auth or Accept: text/html",
             },
             False, xss_reflected,
+        ),
+        ProbeSpec(
+            "ssti", "injection", "CWE-1336",
+            "Is one named parameter evaluated as a server-side template expression? One "
+            "arithmetic canary per engine family, confirmed by a plain-digits control; names "
+            "the engine family. At most 8 requests, only a multiplication is evaluated.",
+            {
+                "url": "endpoint (the query string may already carry the parameter)",
+                "parameter": "name of the parameter to test (dotted path for json)",
+                "method": "HTTP method (default GET); any other method counts as "
+                "state-changing and goes through the approval gate",
+                "location": "where the parameter lives: query | json | form (default query)",
+                "value": "a valid baseline value (default: the value already in the request)",
+                "body": "request body for json/form (object or string)",
+                "headers": "optional headers, e.g. auth",
+            },
+            False, ssti,
+        ),
+        ProbeSpec(
+            "command_injection", "injection", "CWE-78",
+            "Does one named parameter reach an OS shell? An arithmetic echo and a 3-second "
+            "wait behind each separator, each confirmed by a control. At most 11 requests; "
+            "only echo, sleep and ping of localhost, nothing is read or written.",
+            {
+                "url": "endpoint (the query string may already carry the parameter)",
+                "parameter": "name of the parameter to test (dotted path for json)",
+                "method": "HTTP method (default GET). The payloads are state-changing "
+                "whatever the method: where the engagement requires approval they are held",
+                "location": "where the parameter lives: query | json | form (default query)",
+                "value": "a valid baseline value (default: the value already in the request)",
+                "body": "request body for json/form (object or string)",
+                "headers": "optional headers, e.g. auth",
+                "allow_time": "also try 3-second delay payloads (default true)",
+            },
+            True, command_injection,
         ),
     )
 }  # fmt: skip
