@@ -29,10 +29,13 @@ Verifier = Callable[[str, str], dict[str, Any]]
 MIN_REMEDIATION_CHARS = 30
 _PLACEHOLDER = re.compile(r"^\W*(?:tbd|todo|n/?a|none|pending|fix it|see above)\W*$", re.IGNORECASE)
 
-_BANNED_CLASS_MARKERS: dict[str, tuple[str, ...]] = {
-    "denial_of_service": ("dos", "denial of service", "denial-of-service", "resource exhaustion"),
-    "social_engineering": ("phishing", "social engineering", "social-engineering", "vishing"),
-    "physical": ("physical access", "physical security"),
+# Whole words only: a finding on ``/api/todos`` is not a "dos" finding.
+_BANNED_CLASS_MARKERS: dict[str, re.Pattern[str]] = {
+    "denial_of_service": re.compile(
+        r"\b(?:(?:d|re)?dos|denial[- _]of[- _]service|resource exhaustion)\b"
+    ),
+    "social_engineering": re.compile(r"\b(?:phishing|vishing|social[- _]engineering)\b"),
+    "physical": re.compile(r"\bphysical (?:access|security)\b"),
 }
 
 
@@ -70,8 +73,8 @@ def finding_errors(finding: dict[str, Any], program: dict[str, Any], verify: Ver
 
     described = _text(finding, "vuln_class", "title")
     banned = set(banned_technique_ids(program))
-    for technique, markers in _BANNED_CLASS_MARKERS.items():
-        if technique in banned and any(marker in described for marker in markers):
+    for technique, pattern in _BANNED_CLASS_MARKERS.items():
+        if technique in banned and pattern.search(described):
             errors.append(f"banned technique for this program: {technique.replace('_', ' ')}")
     for excluded in program.get("excluded_classes") or []:
         name = str(excluded).strip().lower()

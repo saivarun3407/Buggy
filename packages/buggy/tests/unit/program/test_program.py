@@ -451,6 +451,25 @@ class TestFindingRules:
         )
         assert any(expected in e for e in errors), errors
 
+    @pytest.mark.parametrize(
+        "title",
+        [
+            "IDOR on GET /api/todos/{id}",  # "todos" contains "dos"
+            "Stored XSS in the Kudos widget",
+            "Reflected XSS on /physicalaccessories",
+        ],
+    )
+    def test_a_banned_word_inside_another_word_does_not_refuse_a_finding(self, title: str) -> None:
+        errors = finding_errors(_finding(title=title, vuln_class="xss"), self.PROGRAM, _verifier())
+        assert not any("banned technique" in e for e in errors), errors
+
+    @pytest.mark.parametrize("title", ["ReDoS in the search regex", "DDoS amplification"])
+    def test_dos_variants_are_still_refused(self, title: str) -> None:
+        errors = finding_errors(
+            _finding(title=title, vuln_class="other"), self.PROGRAM, _verifier()
+        )
+        assert any("denial of service" in e for e in errors), errors
+
 
 class TestReportRelease:
     def _release(self, roots, text: str, finding: str = "FIND-001") -> dict:
