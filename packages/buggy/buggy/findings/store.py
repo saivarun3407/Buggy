@@ -3,6 +3,10 @@
 Two tables: ``findings`` holds one row per finding id; ``finding_events`` is an
 append-only history (who did what, when). Triggers reject any UPDATE or DELETE
 on the history, so it cannot be rewritten through this connection or another.
+
+A ``candidate`` row can also carry a soft claim (``claimed_by``, ``claimed_at``):
+who is working on it and since when. The claim is not part of the finding and
+:meth:`FindingStore.upsert` never touches it.
 """
 
 from __future__ import annotations
@@ -48,7 +52,9 @@ CREATE TABLE IF NOT EXISTS findings (
     grade TEXT,
     grade_reasons TEXT NOT NULL DEFAULT '[]',
     created_at REAL NOT NULL,
-    updated_at REAL NOT NULL
+    updated_at REAL NOT NULL,
+    claimed_by TEXT NOT NULL DEFAULT '',
+    claimed_at REAL NOT NULL DEFAULT 0
 );
 CREATE INDEX IF NOT EXISTS findings_engagement ON findings (engagement, status);
 CREATE TABLE IF NOT EXISTS finding_events (
@@ -70,6 +76,12 @@ BEGIN
     SELECT RAISE(ABORT, 'finding_events is append-only');
 END;
 """
+
+# Columns added after the first release: a store created before them gains them on open.
+_MIGRATIONS = {
+    "claimed_by": "ALTER TABLE findings ADD COLUMN claimed_by TEXT NOT NULL DEFAULT ''",
+    "claimed_at": "ALTER TABLE findings ADD COLUMN claimed_at REAL NOT NULL DEFAULT 0",
+}
 
 # A decided finding does not go back in the queue.
 _NEVER_BACK_TO_CANDIDATE = frozenset({Status.DISCARDED.value, Status.EXPLOIT_VERIFIED.value})
@@ -118,6 +130,9 @@ class FindingStore:
             self._db = sqlite3.connect(
                 f"file:{self.path}?mode=ro", uri=True, check_same_thread=False, isolation_level=None
             )
+            # A store nobody has opened for writing since the claim columns were added.
+            present = {row[1] for row in self._db.execute("PRAGMA table_info(findings)")}
+            self._has_claims = set(_MIGRATIONS) <= present
         else:
             self.path.parent.mkdir(parents=True, exist_ok=True)
             self._db = sqlite3.connect(
@@ -126,6 +141,12 @@ class FindingStore:
             # Rollback journal (not WAL): one file, readable from a read-only mount.
             self._db.execute("PRAGMA journal_mode=DELETE").fetchone()
             self._db.executescript(_SCHEMA)
+            with self._tx() as cur:
+                present = {row[1] for row in cur.execute("PRAGMA table_info(findings)")}
+                for column, statement in _MIGRATIONS.items():
+                    if column not in present:
+                        cur.execute(statement)
+            self._has_claims = True
         self._db.row_factory = sqlite3.Row
 
     def close(self) -> None:
@@ -369,6 +390,63 @@ class FindingStore:
             if self._select(cur, engagement, finding_id) is None:
                 raise FindingNotFound(f"no finding {finding_id!r} in engagement {engagement!r}")
             self._append_event(cur, engagement, finding_id, self._clock(), who, event, detail)
+
+    # ── soft claims on candidates ───────────────────────────────────
+
+    def claim(
+        self, engagement: str, finding_id: str, claimed_by: str, *, lease_seconds: float
+    ) -> float | None:
+        """Take, or renew, the soft claim on a candidate; the time it was taken, else ``None``.
+
+        ``None`` means nothing was written: somebody else took it less than
+        ``lease_seconds`` ago, it is not a ``candidate`` (any more), or there
+        is no such finding. The check and the write are one statement, so two
+        callers cannot both take the same candidate.
+        """
+        who = self._actor(claimed_by)
+        now = self._clock()
+        with self._tx() as cur:
+            cur.execute(
+                "UPDATE findings SET claimed_by = ?, claimed_at = ? "
+                "WHERE id = ? AND engagement = ? AND status = ? "
+                "AND (claimed_by = '' OR claimed_by = ? OR claimed_at <= ?)",
+                (
+                    who,
+                    now,
+                    finding_id,
+                    engagement,
+                    Status.CANDIDATE.value,
+                    who,
+                    now - float(lease_seconds),
+                ),
+            )
+            return now if cur.rowcount == 1 else None
+
+    def release(self, engagement: str, finding_id: str, claimed_by: str) -> bool:
+        """Give a claim back. Only its holder can; ``False`` when nothing was released."""
+        who = self._actor(claimed_by)
+        with self._tx() as cur:
+            cur.execute(
+                "UPDATE findings SET claimed_by = '', claimed_at = 0 "
+                "WHERE id = ? AND engagement = ? AND claimed_by = ?",
+                (finding_id, engagement, who),
+            )
+            return cur.rowcount == 1
+
+    def claims(self, engagement: str, *, lease_seconds: float) -> dict[str, dict[str, Any]]:
+        """``{finding id: {"claimed_by", "claimed_at"}}`` for every claim younger than the lease."""
+        if not self._has_claims:
+            return {}
+        with self._lock:
+            rows = self._db.execute(
+                "SELECT id, claimed_by, claimed_at FROM findings "
+                "WHERE engagement = ? AND claimed_by != '' AND claimed_at > ?",
+                (engagement, self._clock() - float(lease_seconds)),
+            ).fetchall()
+        return {
+            row["id"]: {"claimed_by": row["claimed_by"], "claimed_at": row["claimed_at"]}
+            for row in rows
+        }
 
     # ── reads ───────────────────────────────────────────────────────
 
