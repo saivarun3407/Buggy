@@ -22,6 +22,7 @@ from __future__ import annotations
 
 import json
 import logging
+import re
 import sqlite3
 import threading
 import time
@@ -101,7 +102,8 @@ def _json(raw: str, name: str, kind: type, default: Any) -> Any:
 
 
 def _actor(actor: str) -> str:
-    name = " ".join(str(actor or "").split())[:120]
+    # One token of letters, digits and _.:@- : the form every store accepts.
+    name = re.sub(r"[^A-Za-z0-9_.:@-]+", "-", str(actor or "").strip()).strip("-")[:120]
     if not name:
         raise _refuse("BAD_ARGUMENT", "actor is required (it is set by the run, not by the model)")
     return name
@@ -504,13 +506,13 @@ class Workbench:
                 proven = stored is not None and stored.status == Status.EXPLOIT_VERIFIED.value
                 if not proven:
                     lesson.pop("finding_id", None)
-            saved = self.lessons.save(
+            lesson_id = self.lessons.save(
                 lesson,
                 _actor(actor),
                 verified_finding=proven,
                 scope_hosts=scope_hosts_from_document(self._scope_document(name)),
             )
-            return {"ok": True, "lesson": saved, "trusted": proven}
+            return {"ok": True, "lesson": self.lessons.get(lesson_id), "trusted": proven}
 
         return self._guard(run)
 
@@ -712,9 +714,9 @@ def register_workbench(mcp: Any, bench: Workbench) -> None:
 
     @mcp.tool()
     def memory_save(engagement: str, lesson_json: str, actor: str) -> dict[str, Any]:
-        """Save a reusable technique. lesson_json: kind, title, body, classes, technologies,
-        finding_id. Secrets and target names are removed. It is trusted only when finding_id
-        names a finding the verifier proved."""
+        """Save a reusable lesson. lesson_json: kind (guide, failure or payload), title, body,
+        classes, technologies, finding_id. Secrets and target names are removed. It is trusted
+        only when finding_id names a finding the verifier proved."""
         return bench.memory_save(engagement, lesson_json, actor)
 
     @mcp.tool()

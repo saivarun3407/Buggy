@@ -121,6 +121,7 @@ GATED_TOOL_NAMES: frozenset[str] = frozenset(
         "http_send",
         "browser_open",
         "probe_run",
+        "authz_matrix_run",
     }
 )
 
@@ -166,6 +167,23 @@ def _hosts_from_probe_run(args: dict[str, Any]) -> list[str]:
     return [h for key in ("url", "readback_url") for h in _host_from_url(params.get(key))]
 
 
+def _hosts_from_matrix(args: dict[str, Any]) -> list[str]:
+    """Every URL an authorization-matrix run would request (``"<url>"``, ``"HEAD <url>"``
+    or ``{"url": ...}`` entries of ``urls_json``)."""
+    raw = args.get("urls_json")
+    try:
+        urls = json.loads(raw) if isinstance(raw, str) else raw
+    except (json.JSONDecodeError, ValueError):
+        return []
+    hosts: list[str] = []
+    for entry in urls if isinstance(urls, list) else []:
+        if isinstance(entry, dict):
+            entry = entry.get("url")
+        if isinstance(entry, str):
+            hosts += _host_from_url(entry.split()[-1] if entry.strip() else "")
+    return hosts
+
+
 def _hosts_from_web_search(_args: dict[str, Any]) -> list[str]:
     """OSINT exemption: web_search hits an allowlisted provider, not a target.
 
@@ -185,6 +203,7 @@ NETWORK_TARGET_EXTRACTORS: dict[str, Callable[[dict[str, Any]], list[str]]] = {
     "http_send": _hosts_from_url_arg,
     "browser_open": _hosts_from_url_arg,
     "probe_run": _hosts_from_probe_run,
+    "authz_matrix_run": _hosts_from_matrix,
 }
 
 

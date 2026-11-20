@@ -570,8 +570,8 @@ async def memory_search(
 
 @tool
 async def memory_save(lesson_json: str) -> str:
-    """Save a reusable technique for future engagements. lesson_json: kind, title, body,
-    classes, technologies, finding_id. Describe the technique, not the target: secrets and
+    """Save a reusable lesson for future engagements. lesson_json: kind (guide, failure or
+    payload), title, body, classes, technologies, finding_id. Describe the technique, not the target: secrets and
     target names are removed. It is trusted only if finding_id is a verified finding."""
     return await _actor_call("memory_save", lesson_json=lesson_json)
 

@@ -115,7 +115,12 @@ def stack(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Iterator[dict]:
         ),
         _Server(
             capture_server.build_server(
-                roots=Roots(control=control, audit=audit, data=data / "capture"),
+                roots=Roots(
+                    control=control,
+                    audit=audit,
+                    data=data / "capture",
+                    secrets=tmp_path / "secrets",
+                ),
                 port=ports["capture"],
             ),
             ports["capture"],
@@ -132,6 +137,7 @@ def stack(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Iterator[dict]:
         "target": f"http://127.0.0.1:{target.server_address[1]}",
         "audit": audit,
         "control": control,
+        "secrets": tmp_path / "secrets",
         "ports": ports,
     }
     for server in servers:
@@ -271,3 +277,194 @@ def test_a_server_will_not_start_without_a_token(monkeypatch) -> None:
     monkeypatch.setenv("BUGGY_STACK_MCP_TOKEN", "")
     monkeypatch.setenv("BUGGY_STACK_MCP_ALLOW_UNAUTHENTICATED", "1")
     assert configured_token() is None
+
+
+# ── findings, queue, report, evidence, identities, lessons, board ────────────────────
+
+
+def _lab_scope(stack, **extra) -> None:
+    """Let the test target be reached: it is on loopback, which is a private address."""
+    doc = {
+        "machine_enforcement": {"mode": "enforce", "in_scope": ["127.0.0.1"]},
+        "network": {"allow_private_targets": True},
+        "approvals": {"state_changing": "not_required"},
+        **extra,
+    }
+    (stack["control"] / "acme" / "roe.json").write_text(json.dumps(doc))
+
+
+def test_every_capture_server_tool_has_an_agent_wrapper_and_no_actor_argument() -> None:
+    wrapped = {t.name: t for t in stack_mcp.ALL_STACK_MCP_TOOLS}
+    # candidates_add is used by the recon stage (operator side), not by agents.
+    for name in set(capture_server.TOOL_NAMES) - {"candidates_add"}:
+        assert name in wrapped, f"{name} has no agent wrapper"
+    for name, tool in wrapped.items():
+        assert not {"engagement", "actor"} & set(tool.args), (
+            f"{name} lets the model choose who or where it is"
+        )
+    assert "recon_coverage" in wrapped
+
+
+def test_a_claim_becomes_a_finding_only_through_the_verifier(stack) -> None:
+    _lab_scope(stack)
+    url = stack["target"] + "/"
+    sent = _call(stack_mcp.http_send, method="GET", url=url)
+    assert sent["status"] == 200 and sent["capture_id"]
+    claim = {
+        "title": "Greeting is readable without a session",
+        "class": "access_control",
+        "severity": "low",
+        "endpoint": url,
+        "method": "GET",
+        "parameter": "",
+        "description": "The endpoint answers anyone.",
+        "remediation": "Require an authenticated session before returning the greeting.",
+        "source": "agent:test",
+        "status": "exploit_verified",  # a submitter cannot grant itself this
+        "assertions": [
+            {
+                "capture_id": sent["capture_id"],
+                "expect": {"status": 200, "body_contains": ["target"]},
+            }
+        ],
+    }
+    submitted = _call(stack_mcp.finding_submit, finding_json=json.dumps(claim))
+    assert submitted["ok"] and submitted["finding"]["status"] == "candidate"
+    finding_id = submitted["finding"]["id"]
+
+    queue = _call(stack_mcp.candidates_next, limit=5)
+    assert [row["id"] for row in queue["candidates"]] == [finding_id]
+    assert queue["candidates"][0]["claimed_by"]  # claimed for the caller, named by the run
+
+    verified = _call(stack_mcp.finding_verify, finding_id=finding_id)
+    assert verified["finding"]["status"] == "exploit_verified"
+    assert verified["verification"]["replay_capture_ids"]
+
+    listed = _call(stack_mcp.findings_list, status="exploit_verified")
+    assert [row["id"] for row in listed["findings"]] == [finding_id]
+    assert _call(stack_mcp.finding_get, finding_id=finding_id)["events"]
+
+    graded = _call(stack_mcp.finding_grade, finding_id=finding_id)
+    assert graded["ok"] and graded["grade"]["decision"] in {"submit", "hold", "discard"}
+    assert graded["grade"]["reasons"]
+
+    # A claim whose evidence is on another endpoint is not verified.
+    other = {**claim, "title": "Admin panel open", "endpoint": stack["target"] + "/admin"}
+    other_id = _call(stack_mcp.finding_submit, finding_json=json.dumps(other))["finding"]["id"]
+    refused = _call(stack_mcp.finding_verify, finding_id=other_id)
+    assert refused["finding"]["status"] == "inconclusive"
+
+    for fmt, marker in (("markdown", "#"), ("html", "<!doctype html"), ("json", "{")):
+        built = _call(stack_mcp.report_build, fmt=fmt)
+        assert built["ok"] and built["report"].lstrip().lower().startswith(marker)
+    report = json.loads(_call(stack_mcp.report_build, fmt="json")["report"])
+    assert [row["id"] for row in report["findings"]] == [finding_id]  # only the proven one
+
+    bundle = _call(stack_mcp.evidence_export, finding_id=finding_id)
+    assert bundle["ok"] and "curl" in bundle["files"]["reproduce.sh"]
+    assert "ledger-excerpt.jsonl" not in bundle["files"]  # audit data stays with the operator
+    written = stack["audit"] / "acme" / "evidence" / bundle["bundle_id"]
+    assert (written / "evidence.har").is_file() and (written / "ledger-excerpt.jsonl").is_file()
+
+
+def test_identities_are_listed_without_secrets_and_attached_by_name(stack) -> None:
+    _lab_scope(stack)
+    secret = "tok-" + "9f2c7a1b4d6e"  # built at runtime: not a real credential
+    folder = stack["secrets"] / "acme"
+    folder.mkdir(parents=True)
+    (folder / "identities.json").write_text(
+        json.dumps(
+            {
+                "identities": [
+                    {
+                        "name": "alice",
+                        "role": "user",
+                        "owner_of": [stack["target"] + "/"],
+                        "static": {"headers": {"Authorization": f"Bearer {secret}"}},
+                    }
+                ]
+            }
+        )
+    )
+    listed = _call(stack_mcp.identities_list)
+    assert [row["name"] for row in listed["identities"]] == ["alice"]
+    assert secret not in json.dumps(listed)
+
+    sent = _call(stack_mcp.http_send, method="GET", url=stack["target"] + "/", identity="alice")
+    assert sent["status"] == 200 and sent["identity"] == "alice"
+    assert secret not in json.dumps(sent)
+    unknown = _call(
+        stack_mcp.http_send, method="GET", url=stack["target"] + "/", identity="mallory"
+    )
+    assert unknown["code"] == "UNKNOWN_IDENTITY"
+
+    matrix = _call(
+        stack_mcp.authz_matrix_run, urls_json=json.dumps([stack["target"] + "/"]), max_requests=20
+    )
+    assert "matrix" in matrix and secret not in json.dumps(matrix)
+
+
+def test_lessons_are_scrubbed_and_trusted_only_with_a_verified_finding(stack) -> None:
+    _lab_scope(stack)
+    lesson = {
+        "kind": "guide",
+        "title": "GraphQL batching hides rate limits",
+        "body": "Send aliases in one query against 127.0.0.1 to bypass per-request limits.",
+        "classes": ["graphql"],
+        "technologies": ["graphql"],
+        "trust": "verified",  # a lesson cannot vouch for itself
+        "finding_id": "F-000000000000",
+    }
+    saved = _call(stack_mcp.memory_save, lesson_json=json.dumps(lesson))
+    assert saved["ok"] and saved["trusted"] is False
+    assert "127.0.0.1" not in json.dumps(saved["lesson"])  # the target is scrubbed
+    assert _call(stack_mcp.memory_search, technologies_json='["graphql"]')["lessons"] == []
+    bad = _call(stack_mcp.memory_save, lesson_json="not json")
+    assert bad["code"] == "BAD_ARGUMENT"
+
+
+def test_the_board_coordinates_work_and_refuses_a_second_claim(stack, monkeypatch) -> None:
+    fact = _call(stack_mcp.fact_add, text="Orders API uses numeric ids")["fact"]
+    opened = _call(
+        stack_mcp.intent_open,
+        text="Check order ownership",
+        from_facts_json=json.dumps([fact["id"]]),
+    )["intent"]
+    assert _call(stack_mcp.intent_claim, intent_id=opened["id"])["ok"]
+
+    # Another worker (a different agent name in the run) cannot take a live claim.
+    monkeypatch.setattr(stack_mcp, "current_actor", lambda: "other-agent:thread")
+    taken = _call(stack_mcp.intent_claim, intent_id=opened["id"])
+    assert taken.get("error") == "conflict"
+    monkeypatch.undo()
+    monkeypatch.setenv("BUGGY_STACK_MCP_TOKEN", STACK_TOKEN)
+    for name, port in stack["ports"].items():
+        monkeypatch.setenv(stack_mcp.SERVER_ENV[name], f"http://127.0.0.1:{port}/mcp")
+    monkeypatch.setenv("BUGGY_ENGAGEMENT_ID", "acme")
+
+    done = _call(
+        stack_mcp.intent_conclude, intent_id=opened["id"], fact_text="Ownership is enforced (403)"
+    )
+    assert done["ok"]
+    assert _call(stack_mcp.hint_add, text="Try the export endpoint next")["ok"]
+    board = _call(stack_mcp.facts_list)
+    assert len(board["facts"]) == 2 and board["open_work"] == []
+    assert [h["text"] for h in _call(stack_mcp.hints_list)["hints"]] == [
+        "Try the export endpoint next"
+    ]
+
+
+def test_recon_coverage_is_served(stack) -> None:
+    coverage = _call(stack_mcp.recon_coverage)
+    assert coverage["engagement"] == "acme" and "counts" in coverage
+
+
+def test_the_matrix_tool_is_gated_on_every_url_it_would_request() -> None:
+    assert "authz_matrix_run" in GATED_TOOL_NAMES
+    urls = json.dumps(["https://a.test/o/1", "HEAD https://b.test/o/2", {"url": "https://c.test/"}])
+    assert NETWORK_TARGET_EXTRACTORS["authz_matrix_run"]({"urls_json": urls}) == [
+        "a.test",
+        "b.test",
+        "c.test",
+    ]
+    assert NETWORK_TARGET_EXTRACTORS["authz_matrix_run"]({"urls_json": "not json"}) == []
