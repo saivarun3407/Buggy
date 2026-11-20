@@ -1,5 +1,5 @@
 {
- "updated": "2026-11-20 16:43 UTC",
+ "updated": "2026-11-20 16:45 UTC",
  "columns": [
   "backlog",
   "ready",
@@ -684,12 +684,12 @@
    "depends": [
     "F3"
    ],
-   "status": "in_progress",
+   "status": "done",
    "agent": "",
    "branch": "",
-   "commit": "",
-   "tests": "",
-   "note": "",
+   "commit": "81f559b",
+   "tests": "24 passed",
+   "note": "Tool and domain readiness check merged; tool list derived from the capability registry, probe runs version flags only. Real Kali image run in progress",
    "order": 31
   },
   {
@@ -700,7 +700,7 @@
    "depends": [
     "F4"
    ],
-   "status": "backlog",
+   "status": "in_progress",
    "agent": "",
    "branch": "",
    "commit": "",
