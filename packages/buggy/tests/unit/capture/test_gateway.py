@@ -369,7 +369,8 @@ class TestApprovalGate:
 class TestProbes:
     def test_registry_covers_the_priority_classes(self) -> None:
         classes = {spec.vuln_class for spec in REGISTRY.values()}
-        assert classes == {
+        # Later probes add classes; these six must never go missing.
+        assert classes >= {
             "auth_session",
             "access_control",
             "ssrf",

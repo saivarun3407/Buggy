@@ -180,7 +180,7 @@ def test_recon_scope_and_capture_round_trip(stack) -> None:
         "numeric_boundary",
         "mass_assignment",
         "graphql_checks",
-    } == probes
+    } <= probes  # later probes are added to the registry; these must stay listed
     result = _call(
         stack_mcp.probe_run,
         probe="graphql_checks",
