@@ -142,6 +142,17 @@ RUN --mount=type=cache,target=/var/cache/apt,sharing=locked,id=sandbox-apt-cache
 # per-session RSS by ~60% vs the previous 50K.
 RUN echo "set-option -g history-limit 20000" > /root/.tmux.conf
 
+# nmap must be able to start after the sandbox drops CAP_NET_ADMIN.
+# Kali's package gives /usr/lib/nmap/nmap the file capabilities
+# cap_net_bind_service,cap_net_admin,cap_net_raw=eip. The entrypoint removes
+# CAP_NET_ADMIN from the bounding set (so nothing the agent runs can change
+# routing), and the kernel refuses to exec a file whose permitted file
+# capabilities are not all available: every nmap call failed with "Operation
+# not permitted". The sandbox runs as root with CAP_NET_RAW, which is all a
+# SYN scan needs, so the file capabilities are removed.
+RUN if [ -e /usr/lib/nmap/nmap ]; then setcap -r /usr/lib/nmap/nmap; fi \
+    && ! getcap -r /usr /opt /bin /sbin 2>/dev/null | grep -q cap_net_admin
+
 # ── Memory forensics (DFIR agent) — volatility3 ──
 # volatility3 has no apt package in kali-rolling, so it is pip-installed
 # at BUILD time (baked in, always present + runnable via bash `vol`)
