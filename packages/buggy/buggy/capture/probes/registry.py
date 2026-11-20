@@ -10,6 +10,7 @@ from buggy.capture.probes import checks
 from buggy.capture.probes.base import Context, ProbeInputError, ProbeSpec
 from buggy.capture.probes.execution import command_injection, ssti
 from buggy.capture.probes.injection import sqli
+from buggy.capture.probes.misc import cors, open_redirect, path_traversal
 from buggy.capture.probes.xss import xss_reflected
 
 REGISTRY: dict[str, ProbeSpec] = {
@@ -159,6 +160,58 @@ REGISTRY: dict[str, ProbeSpec] = {
                 "allow_time": "also try 3-second delay payloads (default true)",
             },
             True, command_injection,
+        ),
+        ProbeSpec(
+            "open_redirect", "open_redirect", "CWE-601",
+            "Does one named parameter choose where the user is redirected? A random host under "
+            "the reserved .example TLD, then at most 4 bypass forms if the plain one is "
+            "refused. At most 6 requests; redirects are never followed.",
+            {
+                "url": "endpoint (the query string may already carry the parameter; for "
+                "location path it carries a {parameter} placeholder)",
+                "parameter": "name of the parameter to test (dotted path for json)",
+                "method": "HTTP method (default GET); any other method counts as "
+                "state-changing and goes through the approval gate",
+                "location": "where the parameter lives: query | json | form | path "
+                "(default query)",
+                "value": "the original value, e.g. an allowed URL (default: the value already "
+                "in the request)",
+                "body": "request body for json/form (object or string)",
+                "headers": "optional headers, e.g. auth",
+                "allowlist_hint": "optional allowed URL or host used by the bypass forms "
+                "(default: the original value when it is a URL, else the target's host)",
+            },
+            False, open_redirect,
+        ),
+        ProbeSpec(
+            "path_traversal", "file_handling", "CWE-22",
+            "Does one named parameter read a file outside its directory? ../ chains (depth "
+            "2-6, plain and URL-encoded, with and without a NUL + extension suffix) to two "
+            "world-readable markers only: etc/passwd and windows/win.ini. At most 10 requests.",
+            {
+                "url": "endpoint (the query string may already carry the parameter; for "
+                "location path it carries a {parameter} placeholder)",
+                "parameter": "name of the parameter to test (dotted path for json)",
+                "method": "HTTP method (default GET); any other method counts as "
+                "state-changing and goes through the approval gate",
+                "location": "where the parameter lives: query | json | form | path "
+                "(default query)",
+                "value": "a valid file name (default: the value already in the request; "
+                "required for path, written as it goes on the wire)",
+                "body": "request body for json/form (object or string)",
+                "headers": "optional headers, e.g. auth",
+            },
+            False, path_traversal,
+        ),
+        ProbeSpec(
+            "cors", "misconfiguration", "CWE-942",
+            "Does the endpoint allow a random or null Origin together with credentials? "
+            "Three GETs: no Origin, a random .example origin, Origin: null.",
+            {
+                "url": "endpoint (GET)",
+                "headers": "optional headers, e.g. auth (any Origin given here is replaced)",
+            },
+            False, cors,
         ),
     )
 }  # fmt: skip
