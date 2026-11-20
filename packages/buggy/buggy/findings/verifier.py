@@ -26,17 +26,19 @@ import inspect
 import time
 from dataclasses import dataclass, field
 from typing import Any
+from urllib.parse import urlsplit
 
 from buggy.capture.gateway import SAFE_METHODS, CaptureGateway, GatewayRefusal
 from buggy.capture.probes.base import similarity, text
 from buggy.capture.store import Capture, request_fingerprint
-from buggy.findings.model import Assertion, Expect, Finding, Status
+from buggy.findings.model import Assertion, Expect, Finding, Status, normalize_endpoint
 
 SAME_AS_MIN = 0.95
 DIFFERS_BELOW = 0.80
 
 NO_ASSERTIONS = "no assertions"
 NEEDS_APPROVED_REPLAY = "needs operator-approved replay"
+EVIDENCE_NOT_ON_ENDPOINT = "no cited capture targets the finding's endpoint"
 
 PASSED = "passed"
 FAILED = "failed"
@@ -152,6 +154,17 @@ def _cited_ids(assertion: Assertion) -> list[tuple[str, str]]:
     return cited
 
 
+def _on_endpoint(url: str, endpoint: str) -> bool:
+    """True when ``url`` targets ``endpoint`` (same normalised form; a bare path matches any host)."""
+    wanted = normalize_endpoint(endpoint).rstrip("/")
+    if not wanted:
+        return False
+    got = normalize_endpoint(url).rstrip("/")
+    if "://" in wanted:
+        return got == wanted
+    return urlsplit(got).path.rstrip("/") == wanted
+
+
 def verify(
     finding: Finding,
     gateway: CaptureGateway,
@@ -210,6 +223,12 @@ def verify(
                 cited[capture_id] = capture
     if invalid:
         return Verification(Status.DISCARDED.value, now, reasons=invalid)
+
+    # The evidence must be about the finding: at least one primary capture has
+    # to target the endpoint the finding names. Passing assertions on some
+    # other endpoint prove nothing about this one.
+    if not any(_on_endpoint(cited[a.capture_id].url, finding.endpoint) for a in assertions):
+        return Verification(Status.INCONCLUSIVE.value, now, reasons=[EVIDENCE_NOT_ON_ENDPOINT])
 
     # Pass 2: re-send and evaluate.
     results: list[dict[str, Any]] = []
@@ -353,6 +372,7 @@ __all__ = [
     "INVALID",
     "NEEDS_APPROVED_REPLAY",
     "NOT_REPLAYED",
+    "EVIDENCE_NOT_ON_ENDPOINT",
     "NO_ASSERTIONS",
     "PASSED",
     "REFUSED",

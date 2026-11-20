@@ -20,6 +20,7 @@ from buggy.findings.model import Assertion, Expect, Finding, finding_id, validat
 from buggy.findings.service import FindingService
 from buggy.findings.store import FindingStore
 from buggy.findings.verifier import (
+    EVIDENCE_NOT_ON_ENDPOINT,
     NEEDS_APPROVED_REPLAY,
     NO_ASSERTIONS,
     SourceVerificationError,
@@ -584,34 +585,40 @@ class TestExpectations:
         assert len(out["finding"]["verification"]["replay_capture_ids"]) == 2
 
 
-class _Sessions:
-    """What task D1's SessionManager offers: the current headers for a named identity."""
+def _declare(roots: Roots, tokens: dict[str, str], engagement: str = "acme") -> None:
+    """Write the operator's identities file: static bearer tokens by name."""
+    folder = roots.secrets / engagement
+    folder.mkdir(parents=True, exist_ok=True)
+    document = {
+        "identities": [
+            {"name": name, "static": {"headers": {"Authorization": f"Bearer {token}"}}}
+            for name, token in tokens.items()
+        ]
+    }
+    (folder / "identities.json").write_text(json.dumps(document))
 
-    def __init__(self, tokens: dict[str, str]) -> None:
-        self.tokens = tokens
 
-    def auth_for(self, _engagement: str, name: str) -> tuple[dict[str, str], dict[str, str]]:
-        return {"Authorization": f"Bearer {self.tokens[name]}"}, {}
+class _LegacyGateway(CaptureGateway):
+    """A gateway whose ``send`` has no ``identity`` argument."""
 
-
-class _IdentityGateway(CaptureGateway):
-    """The real gateway plus the ``identity`` argument task D1 adds to ``send``."""
-
-    def __init__(self, *args, sessions: _Sessions, **kwargs) -> None:
-        super().__init__(*args, **kwargs)
-        self._sessions = sessions
-        self.identities: list[str] = []
-
-    def send(self, engagement, method, url, *, headers=None, identity="", **kwargs):
-        merged = dict(headers or {})
-        if identity:
-            self.identities.append(identity)
-            merged.update(self._sessions.auth_for(engagement, identity)[0])
-        return super().send(engagement, method, url, headers=merged, **kwargs)
+    def send(self, engagement, method, url, *, headers=None, body=None, note="", replay_of=""):
+        return super().send(
+            engagement, method, url, headers=headers, body=body, note=note, replay_of=replay_of
+        )
 
 
 class TestIdentities:
-    """Sessions expire; with ``sessions`` the verifier asks for the identity's current one."""
+    """Sessions expire; with ``sessions`` the gateway attaches the identity's current one.
+
+    These run against the real gateway and a real ``identities.json``.
+    """
+
+    def _env(self, tmp_path: Path) -> Env:
+        env = Env(tmp_path)
+        env.gateway.store.close()
+        env.roots = replace(env.roots, secrets=tmp_path / "secrets")
+        env.gateway = CaptureGateway(env.roots, opener=env.site, sleep=lambda _s: None)
+        return env
 
     def _rotated(self, env: Env, gateway: CaptureGateway) -> Finding:
         live = {"alice", "bob-1"}
@@ -646,36 +653,98 @@ class TestIdentities:
             }
         )
 
-    def test_identity_is_attached_only_when_sessions_are_given(self, env: Env) -> None:
-        sessions = _Sessions({"alice": "alice", "bob": "bob-2"})
-        gateway = _IdentityGateway(
-            env.roots,
-            store=env.gateway.store,
-            opener=env.site,
-            sleep=lambda _s: None,
-            sessions=sessions,
-        )
-        finding = self._rotated(env, gateway)
+    def test_identity_is_attached_only_when_sessions_are_given(self, tmp_path: Path) -> None:
+        env = self._env(tmp_path)
+        try:
+            _declare(env.roots, {"alice": "alice", "bob": "bob-2"})
+            finding = self._rotated(env, env.gateway)
 
-        # Without sessions the stored (expired) credentials are replayed: not verified.
-        stale = verify(finding, gateway)
-        assert stale.status == "inconclusive" and gateway.identities == []
-        assert stale.results[1]["replay_status"] == 401
-        assert env.site.seen[-1][2]["authorization"] == "Bearer bob-1"
+            # Without sessions the stored (expired) credentials are replayed: not verified.
+            stale = verify(finding, env.gateway)
+            assert stale.status == "inconclusive"
+            assert stale.results[1]["replay_status"] == 401
+            assert env.site.seen[-1][2]["authorization"] == "Bearer bob-1"
 
-        fresh = verify(finding, gateway, sessions=sessions)
-        assert fresh.status == "exploit_verified" and gateway.identities == ["alice", "bob"]
-        assert env.site.seen[-1][2]["authorization"] == "Bearer bob-2"
+            fresh = verify(finding, env.gateway, sessions=env.gateway.sessions)
+            assert fresh.status == "exploit_verified"
+            assert env.site.seen[-1][2]["authorization"] == "Bearer bob-2"
+            replay = env.gateway.store.get("acme", fresh.results[1]["replay_capture_id"])
+            assert replay.identity == "bob"
+        finally:
+            env.close()
+
+    def test_an_undeclared_identity_is_refused_and_nothing_is_sent(self, tmp_path: Path) -> None:
+        env = self._env(tmp_path)
+        try:
+            _declare(env.roots, {"alice": "alice"})  # bob is not declared
+            finding = self._rotated(env, env.gateway)
+            sent = len(env.site.seen)
+            outcome = verify(finding, env.gateway, sessions=env.gateway.sessions)
+            assert outcome.status == "inconclusive"
+            assert [r["outcome"] for r in outcome.results] == ["passed", "refused"]
+            assert "UNKNOWN_IDENTITY" in outcome.reasons[-1]
+            assert len(env.site.seen) == sent + 1  # only alice's replay went out
+        finally:
+            env.close()
 
     def test_a_gateway_without_identity_support_is_not_asked_and_nothing_is_sent(
         self, env: Env
     ) -> None:
-        finding = self._rotated(env, env.gateway)
+        gateway = _LegacyGateway(
+            env.roots, store=env.gateway.store, opener=env.site, sleep=lambda _s: None
+        )
+        finding = self._rotated(env, gateway)
         sent = len(env.site.seen)
-        outcome = verify(finding, env.gateway, sessions=_Sessions({}))
+        outcome = verify(finding, gateway, sessions=object())
         assert outcome.status == "inconclusive" and len(env.site.seen) == sent
         assert [r["outcome"] for r in outcome.results] == ["refused", "refused"]
         assert "cannot attach identity 'bob'" in outcome.reasons[1]
+
+
+class TestEvidenceIsAboutTheFinding:
+    """Passing assertions on another endpoint do not verify this finding."""
+
+    def _claim(self, env: Env, endpoint: str) -> Finding:
+        env.site.routes[("GET", ORDER)] = lambda _h, _b: (200, ALICE_ORDER)
+        capture = env.gateway.send("acme", "GET", ORDER, headers=ALICE)
+        return validate(
+            {
+                "engagement": "acme",
+                "title": "claim",
+                "class": "access_control",
+                "severity": "high",
+                "endpoint": endpoint,
+                "parameter": "id",
+                "source": "agent:hunter",
+                "assertions": [{"capture_id": capture.id, "expect": {"status": 200}}],
+            }
+        )
+
+    def test_evidence_from_another_endpoint_is_inconclusive_and_nothing_is_sent(
+        self, env: Env
+    ) -> None:
+        finding = self._claim(env, "https://app.acme.test/api/admin/users")
+        sent = len(env.site.seen)
+        outcome = verify(finding, env.gateway)
+        assert outcome.status == "inconclusive"
+        assert outcome.reasons == [EVIDENCE_NOT_ON_ENDPOINT]
+        assert len(env.site.seen) == sent
+
+    @pytest.mark.parametrize(
+        "endpoint",
+        [
+            ORDER,
+            "https://app.acme.test/api/orders/2002?x=1",  # same endpoint, another object id
+            "/api/orders/{id}",  # a bare path matches the capture's path
+            "https://APP.acme.test/api/orders/1001/",
+        ],
+    )
+    def test_evidence_on_the_named_endpoint_verifies(self, env: Env, endpoint: str) -> None:
+        assert verify(self._claim(env, endpoint), env.gateway).status == "exploit_verified"
+
+    def test_same_path_on_another_host_does_not_count(self, env: Env) -> None:
+        finding = self._claim(env, "https://other.acme.test/api/orders/1001")
+        assert verify(finding, env.gateway).reasons == [EVIDENCE_NOT_ON_ENDPOINT]
 
 
 class TestSourceVerified:
