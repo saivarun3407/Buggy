@@ -21,6 +21,20 @@ What happens, in order:
 
 Nothing is sent to a host outside the scope, and nothing state-changing is
 sent without your approval (``buggy-cli approvals list <engagement>``).
+
+Running it again. With ``--engagement-name`` of an engagement that already
+has an enforced scope, the scope this command line would write is compared
+with the stored one. Equal: nothing is rewritten, nothing is asked, the run
+continues from the recon that exists (``resuming <name>``). Different: the
+difference is printed field by field and the stored scope is replaced only
+after a confirmation (``--yes`` counts as one); otherwise the command stops
+with exit code 2 and nothing on disk changes. ``--resume NAME`` takes the
+targets and options from the stored scope, so it needs nothing else; options
+given next to it replace the stored ones (and a changed scope is confirmed as
+above).
+
+Every run ends by writing ``<control>/<engagement>/hunt-result.json`` and by
+exiting with a code a pipeline can gate on: see ``--help``.
 """
 
 from __future__ import annotations
@@ -32,6 +46,7 @@ import json
 import os
 import re
 import sys
+import tempfile
 import time
 from pathlib import Path
 from typing import Any
@@ -48,11 +63,60 @@ from buggy.cli.engage import (
 
 EXIT_OK = 0
 EXIT_CONFIG = 2
-EXIT_INTERNAL = 3
+EXIT_INCOMPLETE = 3
+#: The name this code had before the exit codes were documented.
+EXIT_INTERNAL = EXIT_INCOMPLETE
+EXIT_FINDINGS = 10
+
+EXIT_CODES_HELP = """\
+exit codes:
+  0   the run is complete and nothing is at or above the --fail-on threshold
+      (without --fail-on, findings never fail the run)
+  10  the run is complete and something is at or above --fail-on: an
+      exploit-verified finding, or with --fail-on-issues also a known issue
+      from the recon report
+  3   the run is incomplete: recon timed out or did not complete, the agent
+      run failed, or the result file could not be written
+  2   usage or configuration error, including a scope change that was not
+      confirmed (nothing is changed on disk)
+
+Every run that gets past the scope step writes
+<control-root>/<engagement>/hunt-result.json with the same information.
+"""
+
+#: Most severe first; the order ``--fail-on`` thresholds are read in.
+SEVERITIES = ("critical", "high", "medium", "low", "info")
+RESULT_FILE = "hunt-result.json"
+#: The blocks of ``roe.json`` that decide what may be sent where. A re-run
+#: whose blocks equal the stored ones is a resume; any difference needs a yes.
+COMPARED_BLOCKS = ("machine_enforcement", "pipeline", "approvals", "network")
+#: ``recon.state`` in the result file. A watched run is complete only as
+#: ``completed``; ``timed_out`` and any other final status (``failed``,
+#: ``interrupted``) make the run incomplete.
+RECON_COMPLETED = "completed"
+RECON_TIMED_OUT = "timed_out"
+#: States in which this command did not watch a pipeline run to its end: the
+#: pipeline does not run in this mode (``skipped``), no recon server is
+#: configured (``not_watched``), ``--no-recon-wait`` (``background``), or the
+#: server could not be read (``unavailable``). They are reported, not failed.
+RECON_NOT_WATCHED = frozenset({"skipped", "not_watched", "background", "unavailable"})
+#: Boolean options kept in the stored scope (``hunt.flags``) for ``--resume``.
+RESUME_FLAGS = (
+    "include_subdomains",
+    "port_scan",
+    "internal",
+    "lab",
+    "allow_sandbox_network",
+    "no_agent",
+    "force_agent",
+    "no_recon_wait",
+    "fail_on_issues",
+)
 
 #: Polite for a target you named yourself; program imports default lower.
 DEFAULT_RPS = 10
 MAX_RPS = 50
+MODES = ("audit", "warn", "enforce")
 RECON_POLL_SECONDS = 5.0
 #: Record types the report reads, and how many of each at most.
 REPORT_TYPES: dict[str, int] = {
@@ -72,8 +136,35 @@ def _build_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(
         prog="buggy-cli hunt",
         description="Test a target you are authorized to test, starting from a URL.",
+        epilog=EXIT_CODES_HELP,
+        formatter_class=argparse.RawDescriptionHelpFormatter,
     )
-    p.add_argument("targets", nargs="+", metavar="TARGET", help="URL, host, IP or CIDR.")
+    p.add_argument(
+        "targets",
+        nargs="*",
+        metavar="TARGET",
+        help="URL, host, IP or CIDR. At least one, unless --resume is given.",
+    )
+    p.add_argument(
+        "--resume",
+        default=None,
+        metavar="NAME",
+        help="Continue engagement NAME with the targets and options stored in its enforced "
+        "scope. Options given with it replace the stored ones.",
+    )
+    p.add_argument(
+        "--fail-on",
+        choices=SEVERITIES,
+        default=None,
+        metavar="SEVERITY",
+        help="Exit 10 when an exploit-verified finding is at or above this severity "
+        "(critical, high, medium, low, info). Default: findings never fail the run.",
+    )
+    p.add_argument(
+        "--fail-on-issues",
+        action="store_true",
+        help="With --fail-on: known issues from the recon report count too.",
+    )
     p.add_argument(
         "--scope",
         action="append",
@@ -133,9 +224,14 @@ def _build_parser() -> argparse.ArgumentParser:
     p.add_argument("--no-recon-wait", action="store_true", help="Do not wait for the pipeline.")
     p.add_argument("--recon-timeout", type=int, default=3600)
     p.add_argument("--yes", "-y", action="store_true", help="I am authorized; do not prompt.")
-    p.add_argument("--engagement-name", default=None)
+    p.add_argument(
+        "--engagement-name",
+        default=None,
+        help="Name of the engagement. Naming one that exists resumes it when the scope is "
+        "unchanged, and asks before replacing a scope that differs.",
+    )
     p.add_argument("--plan-only", action="store_true", help="Write the scope and stop.")
-    p.add_argument("--mode", choices=("audit", "warn", "enforce"), default="enforce")
+    p.add_argument("--mode", choices=MODES, default="enforce")
     p.add_argument("--workspace-root", type=Path, default=None)
     p.add_argument("--control-root", type=Path, default=None)
     p.add_argument(
@@ -295,6 +391,221 @@ def _describe(scope: dict[str, Any], mode: str) -> list[str]:
     if scope["out_of_scope"]:
         lines.insert(2, f"  out of scope    {', '.join(scope['out_of_scope'])}")
     return lines
+
+
+# ── resume ───────────────────────────────────────────────────────────
+
+_ABSENT: Any = object()
+
+
+def requested_blocks(scope: dict[str, Any], mode: str) -> dict[str, Any]:
+    """The compared blocks of the ``roe.json`` this command line would write."""
+    extra = scope["document_extra"]
+    return {
+        "machine_enforcement": {
+            "mode": mode,
+            "in_scope": list(scope["in_scope"]),
+            "out_of_scope": list(scope["out_of_scope"]),
+            "forbidden_command_patterns": [],
+            **scope["enforcement_extra"],
+        },
+        **{name: extra[name] for name in COMPARED_BLOCKS if name in extra},
+    }
+
+
+def _shown(value: Any) -> str:
+    if value is _ABSENT:
+        return "(not set)"
+    return value if isinstance(value, str) else json.dumps(value, sort_keys=True)
+
+
+def _field_diff(name: str, stored: Any, requested: Any) -> list[str]:
+    if stored == requested:
+        return []
+    if isinstance(stored, list) and isinstance(requested, list):
+        lines = [f"  {name}: + {_shown(item)}" for item in requested if item not in stored]
+        lines += [f"  {name}: - {_shown(item)}" for item in stored if item not in requested]
+        return lines or [f"  {name}: same entries, different order or repeats"]
+    return [f"  {name}: {_shown(stored)} -> {_shown(requested)}"]
+
+
+def scope_diff(stored: dict[str, Any], requested: dict[str, Any]) -> list[str]:
+    """Field-by-field differences between a stored ``roe.json`` and the requested blocks.
+
+    One line per changed field (``+`` adds a list entry, ``-`` removes one,
+    ``old -> new`` otherwise). Empty exactly when every compared block is
+    equal: only then may a re-run leave the stored scope as it is.
+    """
+    lines: list[str] = []
+    for block in COMPARED_BLOCKS:
+        old, new = stored.get(block, _ABSENT), requested.get(block, _ABSENT)
+        if isinstance(old, dict) and isinstance(new, dict):
+            for key in [*new, *(k for k in old if k not in new)]:
+                lines += _field_diff(f"{block}.{key}", old.get(key, _ABSENT), new.get(key, _ABSENT))
+        else:
+            lines += _field_diff(block, old, new)
+    return lines
+
+
+def _read_document(path: Path) -> tuple[dict[str, Any], str]:
+    """``(document, "")`` for a readable ``roe.json``; ``({}, why not)`` otherwise."""
+    try:
+        document = json.loads(path.read_text(encoding="utf-8"))
+    except FileNotFoundError:
+        return {}, f"there is no enforced scope at {path}"
+    except (OSError, ValueError) as exc:
+        return {}, f"the enforced scope {path} cannot be read: {exc}"
+    if not isinstance(document, dict):
+        return {}, f"the enforced scope {path} is not a JSON object"
+    return document, ""
+
+
+def _confirm_change(slug: str, changes: list[str], assume_yes: bool) -> bool:
+    print(f"The stored scope of engagement {slug} differs from this command line:", file=sys.stderr)
+    for line in changes:
+        print(line, file=sys.stderr)
+    if assume_yes:
+        print("  replacing the stored scope (--yes)", file=sys.stderr)
+        return True
+    if not sys.stdin.isatty():
+        print(
+            "error: the stored scope is kept. Re-run with --yes to replace it (you confirm that "
+            f"you are authorized to test the new scope), or with `--resume {slug}` to continue "
+            "with the stored one.",
+            file=sys.stderr,
+        )
+        return False
+    answer = input("Replace the stored scope? You must be authorized to test the new one. [y/N] ")
+    return answer.strip().lower() in {"y", "yes"}
+
+
+def hunt_settings(args: argparse.Namespace, scope: dict[str, Any]) -> dict[str, Any]:
+    """What ``--resume`` needs to run this command line again (the ``hunt`` key of ``roe.json``).
+
+    Patterns from ``--scope-file`` are stored resolved, so a resume does not
+    depend on that file still being there. ``--yes`` is never stored: a
+    confirmation belongs to one invocation.
+    """
+    derived = set(scope["hosts"])
+    if args.include_subdomains:
+        derived |= {f"**.{host}" for host in scope["hosts"]}
+    return {
+        "targets": list(scope["targets"]),
+        "rps": scope["rps"],
+        "flags": {name: bool(getattr(args, name)) for name in RESUME_FLAGS},
+        "options": {
+            "scope": [pattern for pattern in scope["in_scope"] if pattern not in derived],
+            "exclude": list(scope["out_of_scope"]),
+            "crawl_exclude": list(args.crawl_exclude),
+            "instruction": args.instruction,
+            "mode": args.mode,
+            "recon_timeout": int(args.recon_timeout),
+            "timeout": int(args.timeout),
+            "fail_on": args.fail_on,
+        },
+    }
+
+
+def _is_text_list(value: Any) -> bool:
+    return isinstance(value, list) and all(isinstance(item, str) for item in value)
+
+
+def _is_int(value: Any) -> bool:
+    return type(value) is int
+
+
+_OPTION_CHECKS: dict[str, Any] = {
+    "scope": _is_text_list,
+    "exclude": _is_text_list,
+    "crawl_exclude": _is_text_list,
+    "instruction": lambda value: isinstance(value, str),
+    "mode": lambda value: value in MODES,
+    "recon_timeout": _is_int,
+    "timeout": _is_int,
+    "fail_on": lambda value: value is None or value in SEVERITIES,
+}
+
+
+def stored_settings(document: dict[str, Any]) -> tuple[dict[str, Any], str]:
+    """Parser values (by option name) from a stored ``hunt`` key, or ``({}, problem)``."""
+    block = document.get("hunt")
+    if not isinstance(block, dict):
+        return {}, (
+            "its enforced scope holds no hunt settings (it was written by another command or "
+            "an older version); name the targets and pass --engagement-name instead"
+        )
+    targets, rps = block.get("targets"), block.get("rps")
+    flags, options = block.get("flags", {}), block.get("options", {})
+    bad: list[str] = []
+    if not (_is_text_list(targets) and targets):
+        bad.append("targets")
+    if not _is_int(rps):
+        bad.append("rps")
+    if not isinstance(flags, dict) or any(type(value) is not bool for value in flags.values()):
+        bad.append("flags")
+        flags = {}
+    if not isinstance(options, dict):
+        bad.append("options")
+        options = {}
+    values: dict[str, Any] = {"targets": targets, "rps": rps}
+    values.update({name: flags[name] for name in RESUME_FLAGS if name in flags})
+    for name, accepts in _OPTION_CHECKS.items():
+        if name not in options:
+            continue
+        if not accepts(options[name]):
+            bad.append(f"options.{name}")
+        values[name] = options[name]
+    if bad:
+        return {}, f"its stored hunt settings are damaged ({', '.join(bad)})"
+    return {
+        name: list(value) if isinstance(value, list) else value for name, value in values.items()
+    }, ""
+
+
+def _explicit_options(argv: list[str]) -> set[str]:
+    """The option names that ``argv`` itself sets (not the ones left at a default)."""
+    parser = _build_parser()
+    for action in parser._actions:  # noqa: SLF001 - argparse has no public way to ask this
+        action.default = argparse.SUPPRESS  # an option left out then sets nothing at all
+    return {name for name, value in vars(parser.parse_args(argv)).items() if value != []}
+
+
+def _valid_name(name: str) -> bool:
+    return (
+        bool(name.strip())
+        and name == name.strip()
+        and not name.startswith(".")
+        and not any(char in name for char in "/\\\x00")
+    )
+
+
+def apply_resume(args: argparse.Namespace, argv: list[str], control: Path) -> str:
+    """Fill ``args`` from the stored settings of ``args.resume``; return a problem or ``""``.
+
+    Stored values replace parser defaults only: an option given on this
+    command line wins, and a scope it changes is then confirmed like any other
+    scope change.
+    """
+    name = str(args.resume)
+    if args.engagement_name and args.engagement_name != name:
+        return (
+            f"--resume {name} and --engagement-name {args.engagement_name} "
+            "name different engagements"
+        )
+    if not _valid_name(name):
+        return f"{name!r} is not an engagement name"
+    document, problem = _read_document(control / name / "roe.json")
+    if problem:
+        return f"cannot resume {name}: {problem}"
+    values, problem = stored_settings(document)
+    if problem:
+        return f"cannot resume {name}: {problem}"
+    explicit = _explicit_options(argv)
+    for option, value in values.items():
+        if option not in explicit:
+            setattr(args, option, value)
+    args.engagement_name = name
+    return ""
 
 
 # ── recon ────────────────────────────────────────────────────────────
@@ -489,107 +800,226 @@ def kickoff_text(slug: str, scope: dict[str, Any], *, recon_done: bool, instruct
     return " ".join(parts)
 
 
+# ── result ───────────────────────────────────────────────────────────
+
+
+def _capture(tool: str, engagement: str, **arguments: Any) -> dict[str, Any]:
+    from buggy.pipeline.mcp_client import call_mcp_sync  # noqa: PLC0415
+
+    return call_mcp_sync("capture", tool, {"engagement": engagement, **arguments})
+
+
+def status_sections(slug: str, control: Path) -> dict[str, Any]:
+    """The ``buggy-cli status`` snapshot of this engagement; ``{}`` when it cannot be taken.
+
+    Findings and approvals are counted from it, so the result file and
+    ``status`` cannot disagree. Of its remote reads only ``findings_list`` is
+    made: the recon state is the one this run watched, and captures are not
+    part of the result.
+    """
+    try:
+        from buggy.cli import status  # noqa: PLC0415 - only at the end of a run
+    except ImportError:
+        return {}
+
+    def fetch(server: str, tool: str, arguments: dict[str, Any]) -> dict[str, Any]:
+        if (server, tool) == ("capture", "findings_list"):
+            return _capture(tool, **arguments)
+        return {"error": "not read by hunt"}
+
+    try:
+        return status.snapshot(
+            slug, control=control, audit=_paths.audit_root(), fetch=fetch, now=time.time()
+        )
+    except Exception:  # noqa: BLE001 - counts that cannot be read are reported as unavailable
+        return {}
+
+
+def count_findings(section: Any) -> dict[str, Any]:
+    """Finding counts from the ``findings`` section of a status snapshot.
+
+    An unavailable section counts as zero and says ``"available": false``. An
+    exploit-verified finding whose severity is not one of the five is counted
+    under ``unknown`` rather than dropped.
+    """
+    section = section if isinstance(section, dict) else {}
+    counts: dict[str, Any] = {
+        "available": bool(section.get("available")),
+        "exploit_verified": dict.fromkeys(SEVERITIES, 0),
+        "inconclusive": 0,
+        "candidates": 0,
+    }
+    if not counts["available"]:
+        return counts
+    verified = counts["exploit_verified"]
+    for item in section.get("exploit_verified") or []:
+        severity = str(item.get("severity") or "").lower() if isinstance(item, dict) else ""
+        key = severity if severity in SEVERITIES else "unknown"
+        verified[key] = verified.get(key, 0) + 1
+    by_status = section.get("by_status")
+    by_status = by_status if isinstance(by_status, dict) else {}
+    counts["inconclusive"] = int(by_status.get("inconclusive") or 0)
+    counts["candidates"] = int(by_status.get("candidate") or 0)
+    return counts
+
+
+def recon_is_complete(state: str) -> bool:
+    """False for a recon run that timed out or ended in any state but ``completed``.
+
+    A run this command did not watch (no recon server, ``--no-recon-wait``,
+    a mode the pipeline does not run in) is not called incomplete; its state
+    in the result file says that it was not watched.
+    """
+    return state == RECON_COMPLETED or state in RECON_NOT_WATCHED
+
+
+def recon_outcome(state: str, summary: dict[str, Any] | None) -> dict[str, Any]:
+    """The ``recon`` block of the result: how the watch ended and what the store holds."""
+    summary = summary or {}
+    records = summary.get("records")
+    last = summary.get("last_run")
+    drops = last.get("scope_drops") if isinstance(last, dict) else None
+    return {
+        "state": state,
+        "records": {
+            str(name): count
+            for name, count in sorted((records if isinstance(records, dict) else {}).items())
+            if type(count) is int
+        },
+        # The drop count belongs to a finished run; a run still going has none yet.
+        "scope_drops": drops if type(drops) is int and state != RECON_TIMED_OUT else None,
+    }
+
+
+def build_result(
+    slug: str, outcome: dict[str, Any], sections: dict[str, Any], *, now: float
+) -> dict[str, Any]:
+    """What ``hunt-result.json`` says. ``complete`` is false when recon timed out or
+    finished in any state but ``completed``, or when the agent run failed."""
+    recon, agent = outcome["recon"], outcome["agent"]
+    approvals = sections.get("approvals")
+    approvals = approvals if isinstance(approvals, dict) else {}
+    return {
+        "engagement": slug,
+        "finished_at": now,
+        "recon": recon,
+        "issues": {severity: int(outcome["issues"].get(severity, 0)) for severity in SEVERITIES},
+        "findings": count_findings(sections.get("findings")),
+        "approvals_pending": int(approvals.get("pending") or 0)
+        if approvals.get("available")
+        else 0,
+        "agent": {"ran": bool(agent["ran"]), "error": agent["error"]},
+        "complete": recon_is_complete(recon["state"]) and not agent["error"],
+    }
+
+
+def gate_count(result: dict[str, Any], fail_on: str | None, include_issues: bool) -> int:
+    """How many things are at or above ``fail_on``; 0 without a threshold.
+
+    Exploit-verified findings always count, known issues only with
+    ``include_issues``. A verified finding of unknown severity meets every
+    threshold: a gate does not pass on a finding it cannot rank.
+    """
+    if not fail_on:
+        return 0
+    at_or_above = SEVERITIES[: SEVERITIES.index(fail_on) + 1]
+    verified = result["findings"]["exploit_verified"]
+    count = sum(verified.get(severity, 0) for severity in at_or_above) + verified.get("unknown", 0)
+    if include_issues:
+        count += sum(result["issues"].get(severity, 0) for severity in at_or_above)
+    return count
+
+
+def exit_code(result: dict[str, Any], *, fail_on: str | None, fail_on_issues: bool) -> int:
+    if not result["complete"]:
+        return EXIT_INCOMPLETE
+    return EXIT_FINDINGS if gate_count(result, fail_on, fail_on_issues) else EXIT_OK
+
+
+def write_result(control: Path, slug: str, result: dict[str, Any]) -> Path:
+    """Write ``hunt-result.json`` atomically; a reader never sees half a file."""
+    directory = control / slug
+    directory.mkdir(parents=True, exist_ok=True)
+    target = directory / RESULT_FILE
+    fd, tmp_name = tempfile.mkstemp(dir=directory, prefix=".hunt-result-", suffix=".tmp")
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as handle:
+            handle.write(json.dumps(result, indent=2) + "\n")
+        os.chmod(tmp_name, 0o644)
+        os.replace(tmp_name, target)
+    except BaseException:
+        Path(tmp_name).unlink(missing_ok=True)
+        raise
+    return target
+
+
 # ── entry ────────────────────────────────────────────────────────────
 
 
-def main(argv: list[str] | None = None) -> int:  # noqa: PLR0911, PLR0912, PLR0915
-    args = _build_parser().parse_args(argv)
-    try:
-        scope = build_scope(args)
-    except RuntimeError as exc:  # unreadable or malformed --scope-file
-        print(f"error: {exc}", file=sys.stderr)
-        return EXIT_CONFIG
-    if not scope["targets"]:
-        print("error: name at least one target", file=sys.stderr)
-        return EXIT_CONFIG
-    errors = pattern_errors([*scope["in_scope"], *scope["out_of_scope"]])
-    errors += _validate_scope_entries(scope["in_scope"], scope["out_of_scope"])
-    if errors:
-        for err in errors:
-            print(f"error: {err}", file=sys.stderr)
-        return EXIT_CONFIG
-    if not _confirm(scope, args.yes):
-        print("not started; nothing was written or sent", file=sys.stderr)
-        return EXIT_CONFIG
-
-    slug = _slug(scope["hosts"], args.engagement_name)
-    started_at = time.time()
-    workspace = _paths.workspace_root(args.workspace_root)
-    control = _paths.control_root(args.control_root)
-    try:
-        _write_plan_bundle(
-            root=workspace,
-            slug=slug,
-            targets=scope["targets"],
-            in_scope=scope["in_scope"],
-            out_of_scope=scope["out_of_scope"],
-            mode=args.mode,
-            forbidden_commands=[],
-            instruction=args.instruction,
-            control_root=control,
-            enforcement_extra=scope["enforcement_extra"],
-            document_extra=scope["document_extra"],
-            generated_by="buggy-cli hunt",
-        )
-    except OSError as exc:
-        print(
-            f"error: cannot write the scope: {exc}\n"
-            "The enforced scope lives under the operator-controlled root. Run this on the host, "
-            "or with `docker compose --profile operator run --rm operator buggy-cli hunt ...`.",
-            file=sys.stderr,
-        )
-        return EXIT_CONFIG
-
-    print(f"\n[1/4] scope enforced for engagement {slug}", file=sys.stderr)
-    for line in _describe(scope, args.mode):
-        print(line, file=sys.stderr)
-    if args.plan_only:
-        print("--plan-only: scope written, nothing started", file=sys.stderr)
-        return EXIT_OK
-
+def run_stages(  # noqa: PLR0912, PLR0915
+    args: argparse.Namespace,
+    slug: str,
+    scope: dict[str, Any],
+    control: Path,
+    workspace: Path,
+    *,
+    since: float,
+) -> dict[str, Any]:
+    """Recon, report and agents. Returns what happened, for the result file."""
+    issues = dict.fromkeys(SEVERITIES, 0)
+    agent: dict[str, Any] = {"ran": False, "error": None}
+    state, summary = "skipped", None
     recon_done = False
     if args.mode != "enforce":
         print("\n[2/4] recon skipped: the pipeline only runs in enforce mode", file=sys.stderr)
     elif not recon_available():
+        state = "not_watched"
         print(
             "\n[2/4] recon not watched: this shell cannot reach the recon server "
             "(BUGGY_MCP_RECON_URL). The pipeline service still runs on its own.",
             file=sys.stderr,
         )
     elif args.no_recon_wait:
+        state = "background"
         print("\n[2/4] recon started in the background (--no-recon-wait)", file=sys.stderr)
     else:
         print("\n[2/4] recon: deterministic pipeline, no LLM", file=sys.stderr)
         summary = wait_for_recon(
             slug,
             timeout=float(args.recon_timeout),
-            since=started_at,
+            since=since,
             quiet=args.non_interactive,
         )
         if summary.get("error"):
+            state = "unavailable"
             print(f"  recon unavailable: {summary['error']}", file=sys.stderr)
         else:
             recon_done = not summary.get("timed_out")
             if summary.get("timed_out"):
+                state = RECON_TIMED_OUT
                 print("  recon is still running; continuing with what exists", file=sys.stderr)
+            else:
+                state = str((summary.get("last_run") or {}).get("status") or "unknown")
             try:
                 path, digest = write_report(control, slug, scope, summary)
             except OSError as exc:
                 print(f"  could not write the report: {exc}", file=sys.stderr)
             else:
-                issues = ", ".join(f"{n} {s}" for s, n in digest["issues"].items() if n) or "none"
+                issues = {severity: int(digest["issues"].get(severity, 0)) for severity in issues}
+                listed = ", ".join(f"{n} {s}" for s, n in digest["issues"].items() if n) or "none"
                 print("\n[3/4] recon report (no LLM)", file=sys.stderr)
                 print(f"  live services    {digest['services']}", file=sys.stderr)
-                print(f"  known issues     {issues}", file=sys.stderr)
+                print(f"  known issues     {listed}", file=sys.stderr)
                 print(f"  exposed secrets  {digest['secrets']}", file=sys.stderr)
                 print(f"  test candidates  {digest['candidates']}", file=sys.stderr)
                 print(f"  report           {_host_path(path)}", file=sys.stderr)
                 if args.non_interactive:
                     print(json.dumps({"type": "recon_report", "path": str(path), **digest}))
+    outcome = {"recon": recon_outcome(state, summary), "issues": issues, "agent": agent}
 
     if args.no_agent:
         print("\n[4/4] agents skipped (--no-agent)", file=sys.stderr)
-        return EXIT_OK
+        return outcome
     if not args.force_agent and not model_configured():
         print(
             "\n[4/4] agents skipped: no model is configured. Run `buggy onboard` to add one, "
@@ -597,11 +1027,12 @@ def main(argv: list[str] | None = None) -> int:  # noqa: PLR0911, PLR0912, PLR09
             "(--force-agent starts the run anyway.)",
             file=sys.stderr,
         )
-        return EXIT_OK
+        return outcome
 
     print(
         "\n[4/4] agents: choosing what to test, running probes, chaining findings", file=sys.stderr
     )
+    agent["ran"] = True
     try:
         result = _stream_kickoff(
             langgraph_url=args.langgraph_url,
@@ -612,8 +1043,9 @@ def main(argv: list[str] | None = None) -> int:  # noqa: PLR0911, PLR0912, PLR09
             non_interactive=args.non_interactive,
         )
     except Exception as exc:  # noqa: BLE001 - recon and the report already stand on their own
+        agent["error"] = f"{type(exc).__name__}: {str(exc)[:300]}"
         print(
-            f"  the agent run did not complete: {type(exc).__name__}: {str(exc)[:300]}\n"
+            f"  the agent run did not complete: {agent['error']}\n"
             + (
                 "  Recon and the report above are complete. "
                 if recon_done
@@ -623,7 +1055,7 @@ def main(argv: list[str] | None = None) -> int:  # noqa: PLR0911, PLR0912, PLR09
             f"service is healthy, then re-run with --engagement-name {slug} to continue.",
             file=sys.stderr,
         )
-        return EXIT_INTERNAL
+        return outcome
 
     findings = sorted((workspace / slug).glob("findings/FIND-*.md"))
     print(f"\ndone: {slug} ({result.get('event_count', 0)} agent events)", file=sys.stderr)
@@ -632,7 +1064,139 @@ def main(argv: list[str] | None = None) -> int:  # noqa: PLR0911, PLR0912, PLR09
     )
     print(f"  approvals        buggy-cli approvals list {slug}", file=sys.stderr)
     print(f"  audit ledger     buggy-cli audit {slug}", file=sys.stderr)
-    return EXIT_OK
+    return outcome
+
+
+def main(argv: list[str] | None = None) -> int:  # noqa: PLR0911, PLR0912, PLR0915
+    argv = list(sys.argv[1:] if argv is None else argv)
+    args = _build_parser().parse_args(argv)
+    control = _paths.control_root(args.control_root)
+    if args.resume is not None:
+        problem = apply_resume(args, argv, control)
+        if problem:
+            print(f"error: {problem}", file=sys.stderr)
+            return EXIT_CONFIG
+    if args.fail_on_issues and not args.fail_on:
+        print("error: --fail-on-issues needs a threshold: add --fail-on SEVERITY", file=sys.stderr)
+        return EXIT_CONFIG
+    if not any(target.strip() for target in args.targets):
+        print(
+            "error: name at least one target, or an engagement to continue with --resume NAME",
+            file=sys.stderr,
+        )
+        return EXIT_CONFIG
+    try:
+        scope = build_scope(args)
+    except RuntimeError as exc:  # unreadable or malformed --scope-file
+        print(f"error: {exc}", file=sys.stderr)
+        return EXIT_CONFIG
+    errors = pattern_errors([*scope["in_scope"], *scope["out_of_scope"]])
+    errors += _validate_scope_entries(scope["in_scope"], scope["out_of_scope"])
+    if errors:
+        for err in errors:
+            print(f"error: {err}", file=sys.stderr)
+        return EXIT_CONFIG
+
+    slug = _slug(scope["hosts"], args.engagement_name)
+    stored_path = control / slug / "roe.json"
+    resumed = False
+    if args.engagement_name and (stored_path.exists() or stored_path.is_symlink()):
+        # An engagement of this name has a scope. Leave it alone when this
+        # command line asks for the same one; replace it only after a yes.
+        stored, problem = _read_document(stored_path)
+        changes = (
+            [f"  {problem}; it would be replaced"]
+            if problem
+            else scope_diff(stored, requested_blocks(scope, args.mode))
+        )
+        if not changes:
+            resumed = True
+            print(f"resuming {slug}", file=sys.stderr)
+        elif not _confirm_change(slug, changes, args.yes):
+            print(
+                "not started; the stored scope was not changed and nothing was sent",
+                file=sys.stderr,
+            )
+            return EXIT_CONFIG
+    elif not _confirm(scope, args.yes):
+        print("not started; nothing was written or sent", file=sys.stderr)
+        return EXIT_CONFIG
+
+    started_at = time.time()
+    workspace = _paths.workspace_root(args.workspace_root)
+    if not resumed:
+        try:
+            _write_plan_bundle(
+                root=workspace,
+                slug=slug,
+                targets=scope["targets"],
+                in_scope=scope["in_scope"],
+                out_of_scope=scope["out_of_scope"],
+                mode=args.mode,
+                forbidden_commands=[],
+                instruction=args.instruction,
+                control_root=control,
+                enforcement_extra=scope["enforcement_extra"],
+                document_extra={**scope["document_extra"], "hunt": hunt_settings(args, scope)},
+                generated_by="buggy-cli hunt",
+            )
+        except OSError as exc:
+            print(
+                f"error: cannot write the scope: {exc}\n"
+                "The enforced scope lives under the operator-controlled root. Run this on the "
+                "host, or with `docker compose --profile operator run --rm operator buggy-cli "
+                "hunt ...`.",
+                file=sys.stderr,
+            )
+            return EXIT_CONFIG
+
+    print(
+        f"\n[1/4] scope enforced for engagement {slug}"
+        + (" (stored scope unchanged, not rewritten)" if resumed else ""),
+        file=sys.stderr,
+    )
+    for line in _describe(scope, args.mode):
+        print(line, file=sys.stderr)
+    if args.plan_only:
+        print(
+            "--plan-only: scope already in place, nothing started"
+            if resumed
+            else "--plan-only: scope written, nothing started",
+            file=sys.stderr,
+        )
+        return EXIT_OK
+
+    # A resumed engagement continues from the pipeline run that exists: the
+    # pipeline starts a new one only for a scope it has not run against.
+    outcome = run_stages(
+        args, slug, scope, control, workspace, since=0.0 if resumed else started_at
+    )
+    result = build_result(slug, outcome, status_sections(slug, control), now=time.time())
+    code = exit_code(result, fail_on=args.fail_on, fail_on_issues=args.fail_on_issues)
+    try:
+        path = write_result(control, slug, result)
+    except OSError as exc:
+        print(f"error: cannot write {control / slug / RESULT_FILE}: {exc}", file=sys.stderr)
+        return EXIT_INCOMPLETE
+    print(f"\n  result           {_host_path(path)}", file=sys.stderr)
+    if not result["complete"]:
+        reasons = []
+        if not recon_is_complete(result["recon"]["state"]):
+            reasons.append(f"recon {result['recon']['state']}")
+        if result["agent"]["error"]:
+            reasons.append("the agent run failed")
+        print(
+            f"  incomplete       {', '.join(reasons)}; continue with "
+            f"`buggy-cli hunt --resume {slug}` (exit {code})",
+            file=sys.stderr,
+        )
+    elif code == EXIT_FINDINGS:
+        count = gate_count(result, args.fail_on, args.fail_on_issues)
+        print(
+            f"  gate             {count} at or above {args.fail_on} (exit {code})",
+            file=sys.stderr,
+        )
+    return code
 
 
 if __name__ == "__main__":
