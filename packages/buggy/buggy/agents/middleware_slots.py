@@ -412,6 +412,12 @@ def _make_budget(**_: Any):
     return BudgetEnforcementMiddleware()
 
 
+def _make_loop_guard(*, role: str, **_: Any):
+    from buggy.middleware.loop_guard import make_loop_guard  # noqa: PLC0415
+
+    return make_loop_guard(role)
+
+
 def _make_prompt_injection_shield(**_: Any):
     # UNTRUSTED_OUTPUT already injects its own quarantine system policy;
     # appending the shield's policy too would double-inject. The shield
@@ -453,6 +459,7 @@ SlotFactory = Callable[..., Any]
 
 DEFAULT_SLOT_FACTORIES: dict[MiddlewareSlot, SlotFactory] = {
     MiddlewareSlot.ENGAGEMENT_CONTEXT: _make_engagement_context,
+    MiddlewareSlot.LOOP_GUARD: _make_loop_guard,
     MiddlewareSlot.ROE_GUARDRAIL: _make_roe_guardrail,
     MiddlewareSlot.HITL_APPROVAL: _make_hitl,
     MiddlewareSlot.PARSING_FIREWALL: _make_parsing_firewall,

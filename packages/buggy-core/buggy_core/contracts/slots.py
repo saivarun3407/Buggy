@@ -28,6 +28,11 @@ class MiddlewareSlot(StrEnum):
     """
 
     ENGAGEMENT_CONTEXT = "engagement-context"
+    # Declared before ROE_GUARDRAIL and HITL_APPROVAL so it is the outer
+    # wrapper on tool calls: it sees their refusals, never replaces them, and
+    # a call it withholds (an agent repeating itself, or past its tool-call
+    # cap) reaches neither gate.
+    LOOP_GUARD = "loop-guard"
     ROE_GUARDRAIL = "roe-guardrail"
     HITL_APPROVAL = "hitl-approval"
     # Declared immediately BEFORE UNTRUSTED_OUTPUT on purpose. ``wrap_*``
@@ -178,6 +183,9 @@ _BASE_SLOTS: frozenset[MiddlewareSlot] = _TAIL_SLOTS | {
     MiddlewareSlot.EVENT_LOG,
     MiddlewareSlot.PROMPT_INJECTION_SHIELD,
     MiddlewareSlot.BUDGET,
+    # Stops an agent that repeats one call, caps tool calls per role, and
+    # counts what a run did (audit/<engagement>/run-telemetry.jsonl).
+    MiddlewareSlot.LOOP_GUARD,
 }
 
 # Standard bash-executing agents (recon/exploit/postexploit/analyst/

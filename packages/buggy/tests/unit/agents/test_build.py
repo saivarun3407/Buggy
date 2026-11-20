@@ -616,6 +616,7 @@ def test_middleware_slot_enum_order_is_assembly_order():
     """Declaration order == assembly order — pin the exact Wave 2 order."""
     assert [s.value for s in MiddlewareSlot] == [
         "engagement-context",
+        "loop-guard",  # outer wrapper on tool calls: sees RoE/HITL refusals, replaces none
         "roe-guardrail",
         "hitl-approval",
         # PARSING_FIREWALL must stay immediately before UNTRUSTED_OUTPUT so
@@ -674,3 +675,16 @@ def test_hitl_is_safety_critical_and_additive_slots_are_not():
     # critical so a plugin bundle can't disable it without an explicit
     # BUGGY_ALLOW_SAFETY_OVERRIDES.
     assert MiddlewareSlot.PROMPT_INJECTION_SHIELD in SAFETY_CRITICAL_SLOTS
+
+
+def test_every_role_gets_the_loop_guard_outside_the_roe_gate():
+    from buggy.middleware.loop_guard import LoopGuardMiddleware
+    from buggy.middleware.roe import RoEGuardrailMiddleware
+    from buggy_core.contracts.slots import SLOTS_PER_ROLE
+
+    stack = _build_exploit_stack()
+    kinds = [type(m) for m in stack]
+    assert LoopGuardMiddleware in kinds
+    assert kinds.index(LoopGuardMiddleware) < kinds.index(RoEGuardrailMiddleware)
+    for role, slots in SLOTS_PER_ROLE.items():
+        assert MiddlewareSlot.LOOP_GUARD in slots, role
