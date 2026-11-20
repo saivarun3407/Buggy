@@ -7,6 +7,12 @@ on the history, so it cannot be rewritten through this connection or another.
 A ``candidate`` row can also carry a soft claim (``claimed_by``, ``claimed_at``):
 who is working on it and since when. The claim is not part of the finding and
 :meth:`FindingStore.upsert` never touches it.
+
+A finding can also carry its latest retest (``retest``: ``{at, outcome,
+capture_ids}``) and the time a retest first showed it fixed (``fixed_at``,
+``0`` when not fixed). Like the claim, they are not part of the finding's
+schema, :meth:`FindingStore.upsert` never touches them, and only
+:meth:`FindingStore.record_retest` writes them.
 """
 
 from __future__ import annotations
@@ -54,7 +60,9 @@ CREATE TABLE IF NOT EXISTS findings (
     created_at REAL NOT NULL,
     updated_at REAL NOT NULL,
     claimed_by TEXT NOT NULL DEFAULT '',
-    claimed_at REAL NOT NULL DEFAULT 0
+    claimed_at REAL NOT NULL DEFAULT 0,
+    retest TEXT NOT NULL DEFAULT '{}',
+    fixed_at REAL NOT NULL DEFAULT 0
 );
 CREATE INDEX IF NOT EXISTS findings_engagement ON findings (engagement, status);
 CREATE TABLE IF NOT EXISTS finding_events (
@@ -81,7 +89,17 @@ END;
 _MIGRATIONS = {
     "claimed_by": "ALTER TABLE findings ADD COLUMN claimed_by TEXT NOT NULL DEFAULT ''",
     "claimed_at": "ALTER TABLE findings ADD COLUMN claimed_at REAL NOT NULL DEFAULT 0",
+    "retest": "ALTER TABLE findings ADD COLUMN retest TEXT NOT NULL DEFAULT '{}'",
+    "fixed_at": "ALTER TABLE findings ADD COLUMN fixed_at REAL NOT NULL DEFAULT 0",
 }
+_CLAIM_COLUMNS = frozenset({"claimed_by", "claimed_at"})
+_RETEST_COLUMNS = frozenset({"retest", "fixed_at"})
+
+# Retest outcomes (decided by ``buggy.findings.retest``; recorded here).
+RETEST_FIXED = "fixed"
+RETEST_STILL_VULNERABLE = "still_vulnerable"
+RETEST_INCONCLUSIVE = "inconclusive"
+RETEST_OUTCOMES = (RETEST_FIXED, RETEST_STILL_VULNERABLE, RETEST_INCONCLUSIVE)
 
 # A decided finding does not go back in the queue.
 _NEVER_BACK_TO_CANDIDATE = frozenset({Status.DISCARDED.value, Status.EXPLOIT_VERIFIED.value})
@@ -132,7 +150,8 @@ class FindingStore:
             )
             # A store nobody has opened for writing since the claim columns were added.
             present = {row[1] for row in self._db.execute("PRAGMA table_info(findings)")}
-            self._has_claims = set(_MIGRATIONS) <= present
+            self._has_claims = _CLAIM_COLUMNS <= present
+            self._has_retest = _RETEST_COLUMNS <= present
         else:
             self.path.parent.mkdir(parents=True, exist_ok=True)
             self._db = sqlite3.connect(
@@ -147,6 +166,7 @@ class FindingStore:
                     if column not in present:
                         cur.execute(statement)
             self._has_claims = True
+            self._has_retest = True
         self._db.row_factory = sqlite3.Row
 
     def close(self) -> None:
@@ -448,6 +468,89 @@ class FindingStore:
             for row in rows
         }
 
+    # ── retest record ───────────────────────────────────────────────
+
+    def record_retest(
+        self,
+        engagement: str,
+        finding_id: str,
+        *,
+        actor: str,
+        outcome: str,
+        capture_ids: list[str],
+        detail: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        """Record one retest of a finding; its ``status`` and ``updated_at`` are not touched.
+
+        Sets ``retest = {at, outcome, capture_ids}`` and appends a ``retest``
+        event. ``fixed`` sets ``fixed_at`` (kept if it is already set);
+        ``still_vulnerable`` on a finding that has a ``fixed_at`` clears it and
+        appends a ``regressed`` event first; ``inconclusive`` leaves ``fixed_at``
+        as it is. The read that decides and the writes are one transaction.
+        Returns :meth:`retest_state` as it is afterwards plus ``regressed``.
+        """
+        who = self._actor(actor)
+        if outcome not in RETEST_OUTCOMES:
+            raise ValueError(f"unknown retest outcome {outcome!r}")
+        now = self._clock()
+        record = {"at": now, "outcome": outcome, "capture_ids": [str(c) for c in capture_ids]}
+        with self._tx() as cur:
+            row = cur.execute(
+                "SELECT fixed_at FROM findings WHERE id = ? AND engagement = ?",
+                (finding_id, engagement),
+            ).fetchone()
+            if row is None:
+                raise FindingNotFound(f"no finding {finding_id!r} in engagement {engagement!r}")
+            previous_fixed_at = float(row[0] or 0.0)
+            fixed_at = previous_fixed_at
+            regressed = False
+            if outcome == RETEST_FIXED and not previous_fixed_at:
+                fixed_at = now
+            elif outcome == RETEST_STILL_VULNERABLE and previous_fixed_at:
+                fixed_at = 0.0
+                regressed = True
+            cur.execute(
+                "UPDATE findings SET retest = ?, fixed_at = ? WHERE id = ? AND engagement = ?",
+                (json.dumps(record, sort_keys=True), fixed_at, finding_id, engagement),
+            )
+            if regressed:
+                self._append_event(
+                    cur,
+                    engagement,
+                    finding_id,
+                    now,
+                    who,
+                    "regressed",
+                    {"fixed_at": previous_fixed_at, "capture_ids": record["capture_ids"]},
+                )
+            self._append_event(
+                cur,
+                engagement,
+                finding_id,
+                now,
+                who,
+                "retest",
+                {**(detail or {}), **record, "fixed_at": fixed_at or None},
+            )
+        return {"retest": record, "fixed_at": fixed_at or None, "regressed": regressed}
+
+    def retest_state(self, engagement: str, finding_id: str) -> dict[str, Any]:
+        """``{"retest": {at, outcome, capture_ids} | None, "fixed_at": float | None}``."""
+        if not self._has_retest:
+            return {"retest": None, "fixed_at": None}
+        with self._lock:
+            row = self._db.execute(
+                "SELECT retest, fixed_at FROM findings WHERE id = ? AND engagement = ?",
+                (finding_id, engagement),
+            ).fetchone()
+        if row is None:
+            raise FindingNotFound(f"no finding {finding_id!r} in engagement {engagement!r}")
+        record = json.loads(row["retest"] or "{}")
+        return {
+            "retest": record if isinstance(record, dict) and record else None,
+            "fixed_at": float(row["fixed_at"]) if row["fixed_at"] else None,
+        }
+
     # ── reads ───────────────────────────────────────────────────────
 
     def get(self, engagement: str, finding_id: str) -> Finding | None:
@@ -508,5 +611,9 @@ __all__ = [
     "FindingNotFound",
     "FindingStore",
     "IllegalTransition",
+    "RETEST_FIXED",
+    "RETEST_INCONCLUSIVE",
+    "RETEST_OUTCOMES",
+    "RETEST_STILL_VULNERABLE",
     "check_transition",
 ]
