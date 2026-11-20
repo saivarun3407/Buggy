@@ -509,7 +509,7 @@ def snapshot(
 
     ``control`` and ``audit`` are the roots that hold ``<engagement>/``.
     ``fetch(server, tool, arguments)`` reads from a stack MCP server
-    (``buggy.tools.stack_mcp.call_mcp_sync`` in production). A read that
+    (``buggy.pipeline.mcp_client.call_mcp_sync`` in production). A read that
     raises, returns an ``error`` or returns something unusable turns its
     section into ``{"available": false, "detail": ...}``.
 
@@ -813,7 +813,9 @@ def _build_parser() -> argparse.ArgumentParser:
 def _stack_fetch() -> Fetch:
     """The real remote reader; a reader that reports why when the client cannot be loaded."""
     try:
-        from buggy.tools.stack_mcp import call_mcp_sync  # noqa: PLC0415 - heavy, only when run
+        # The pipeline client has no agent-framework imports, so this also
+        # works from the slim pipeline image.
+        from buggy.pipeline.mcp_client import call_mcp_sync  # noqa: PLC0415 - only when run
     except ImportError as exc:
         reason = f"the stack MCP client cannot be loaded: {exc}"
 

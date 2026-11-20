@@ -175,7 +175,9 @@ def _summary(document: dict[str, Any]) -> str:
 
 
 def _validate(document: dict[str, Any]) -> None:
-    from buggy.middleware.roe import InvalidRoEError, parse_roe_document
+    # From buggy_core, where they are defined: the middleware module needs the
+    # agent framework and this command also runs from the slim pipeline image.
+    from buggy_core.types.roe_document import InvalidRoEError, parse_roe_document
 
     try:
         rules = parse_roe_document(document, required=True)

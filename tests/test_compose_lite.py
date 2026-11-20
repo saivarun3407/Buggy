@@ -732,14 +732,6 @@ def test_hunt_runs_from_exactly_what_the_slim_image_contains(tmp_path: Path) -> 
 
 
 @pytest.mark.usefixtures("image_requirements")
-@pytest.mark.xfail(
-    strict=True,
-    raises=AssertionError,
-    reason="buggy/cli/__main__.py imports the audit, export-transcript and telemetry commands "
-    "at module load; they need buggy.middleware, buggy.runtime and buggy.telemetry, which the "
-    "slim image does not have. The operator's default command therefore cannot start there "
-    "until those imports are made lazy (not a file of task A3). Remove this marker then.",
-)
 def test_the_operators_default_command_runs_in_the_slim_image(tmp_path: Path) -> None:
     command = _source()["services"]["operator"]["command"]
     assert command[:2] == ["python", "-m"]

@@ -4,12 +4,9 @@ from __future__ import annotations
 
 import sys
 
-from buggy.cli.audit import main as audit_main
-from buggy.cli.auth import main as auth_main
-from buggy.cli.export_transcript import main as export_transcript_main
-from buggy.cli.scan import main as scan_main
-from buggy.cli.telemetry import main as telemetry_main
-from buggy.cli.zip import main as zip_main
+# Every command is imported inside its own branch. Some commands need the
+# agent framework; the slim pipeline image does not have it, and must still be
+# able to run the others (hunt, scope, approvals, status, doctor).
 
 
 def _print_help() -> int:
@@ -75,16 +72,28 @@ def main(argv: list[str] | None = None) -> int:
 
         return workflows_main(rest)
     if sub == "scan":
+        from buggy.cli.scan import main as scan_main
+
         return scan_main(rest)
     if sub == "auth":
+        from buggy.cli.auth import main as auth_main
+
         return auth_main(rest)
     if sub == "audit":
+        from buggy.cli.audit import main as audit_main
+
         return audit_main(rest)
     if sub == "zip":
+        from buggy.cli.zip import main as zip_main
+
         return zip_main(rest)
     if sub == "export-transcript":
+        from buggy.cli.export_transcript import main as export_transcript_main
+
         return export_transcript_main(rest)
     if sub == "telemetry":
+        from buggy.cli.telemetry import main as telemetry_main
+
         return telemetry_main(rest)
     # Any other command is a module `buggy.cli.<name>` exposing
     # `main(argv) -> int` (dashes in the command become underscores), so a new
