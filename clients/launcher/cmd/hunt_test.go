@@ -2,10 +2,13 @@ package cmd
 
 import (
 	"errors"
+	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"reflect"
 	"slices"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -412,5 +415,66 @@ func TestPrepareStack_FreshFullRunOpensTheWizard(t *testing.T) {
 	_, _, _ = prepareStack(huntCmd)
 	if *wizard != 1 {
 		t.Fatalf("fresh full run: wizard ran %d times, want 1", *wizard)
+	}
+}
+
+// The gate flags reach the operator command after everything a plain hunt
+// passes, and --resume needs no target.
+func TestHuntOperatorCommand_ResumeAndGateFlags(t *testing.T) {
+	got := huntOperatorCommand(nil, huntFlags{mode: "enforce", resume: "acme", failOn: "high", failOnIssues: true, yes: true})
+	want := []string{"buggy-cli", "hunt", "--mode", "enforce", "--yes", "--resume", "acme", "--fail-on", "high", "--fail-on-issues"}
+	if !reflect.DeepEqual(got, want) {
+		t.Errorf("resume argv:\n got %v\nwant %v", got, want)
+	}
+	named := huntOperatorCommand([]string{"app.example.com"}, huntFlags{mode: "enforce", engagement: "acme", lite: true})
+	if !slices.Contains(named, "--engagement-name") || named[len(named)-1] != "acme" {
+		t.Errorf("engagement name not passed: %v", named)
+	}
+	// Without the new flags nothing is added.
+	plain := huntOperatorCommand([]string{"app.example.com"}, huntFlags{mode: "enforce"})
+	for _, flag := range []string{"--resume", "--fail-on", "--fail-on-issues", "--engagement-name"} {
+		if slices.Contains(plain, flag) {
+			t.Errorf("%s passed without being set: %v", flag, plain)
+		}
+	}
+
+	prev := huntResume
+	t.Cleanup(func() { huntResume = prev })
+	huntResume = ""
+	if err := huntCmd.Args(huntCmd, nil); err == nil {
+		t.Error("no target and no --resume was accepted")
+	}
+	huntResume = "acme"
+	if err := huntCmd.Args(huntCmd, nil); err != nil {
+		t.Errorf("--resume without a target was refused: %v", err)
+	}
+}
+
+// exitWith returns the error a command exiting with code produces.
+func exitWith(t *testing.T, code int) error {
+	t.Helper()
+	err := exec.Command("sh", "-c", "exit "+strconv.Itoa(code)).Run()
+	if err == nil {
+		t.Fatalf("exit %d produced no error", code)
+	}
+	return fmt.Errorf("docker compose run operator: %w", err)
+}
+
+// The hunt's own exit codes are passed through; anything else stays an error.
+func TestHuntVerdict(t *testing.T) {
+	for _, code := range []int{10, 3, 2} {
+		got, message, ok := huntVerdict(exitWith(t, code))
+		if !ok || got != code || message == "" {
+			t.Errorf("exit %d: got code=%d ok=%v message=%q", code, got, ok, message)
+		}
+	}
+	if _, _, ok := huntVerdict(exitWith(t, 1)); ok {
+		t.Error("exit 1 (a crash) was reported as a hunt verdict")
+	}
+	if _, _, ok := huntVerdict(errors.New("docker not found")); ok {
+		t.Error("a start failure was reported as a hunt verdict")
+	}
+	if _, _, ok := huntVerdict(nil); ok {
+		t.Error("success was reported as a failed verdict")
 	}
 }

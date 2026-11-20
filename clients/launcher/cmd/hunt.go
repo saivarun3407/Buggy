@@ -1,7 +1,10 @@
 package cmd
 
 import (
+	"errors"
 	"fmt"
+	"os"
+	"os/exec"
 	"strconv"
 	"strings"
 
@@ -29,6 +32,10 @@ var (
 	huntPortScan       bool
 	huntRPS            int
 	huntLite           bool
+	huntEngagement     string
+	huntResume         string
+	huntFailOn         string
+	huntFailOnIssues   bool
 )
 
 var huntCmd = &cobra.Command{
@@ -44,7 +51,13 @@ var huntCmd = &cobra.Command{
 		"  buggy hunt api.example.com app.example.com --include-subdomains\n" +
 		"  buggy hunt https://example.com --scope '*.example.com' --instruction 'focus auth'\n" +
 		"  buggy hunt example.com --lite    (recon and report only, no model key)",
-	Args: cobra.MinimumNArgs(1),
+	Args: func(cmd *cobra.Command, args []string) error {
+		// --resume takes its targets from the stored engagement.
+		if huntResume != "" {
+			return nil
+		}
+		return cobra.MinimumNArgs(1)(cmd, args)
+	},
 	RunE: runHunt,
 }
 
@@ -65,6 +78,10 @@ func init() {
 	huntCmd.Flags().BoolVar(&huntPortScan, "port-scan", false, "Scan the top 100 ports")
 	huntCmd.Flags().IntVar(&huntRPS, "rps", 0, "Requests per second (default 5)")
 	huntCmd.Flags().BoolVar(&huntLite, "lite", false, liteFlagHelp)
+	huntCmd.Flags().StringVar(&huntEngagement, "engagement-name", "", "Name of the engagement (default: derived from the target)")
+	huntCmd.Flags().StringVar(&huntResume, "resume", "", "Continue the named engagement with its stored targets and options (no TARGET needed)")
+	huntCmd.Flags().StringVar(&huntFailOn, "fail-on", "", "Exit 10 when an exploit-verified finding is at or above: critical|high|medium|low|info")
+	huntCmd.Flags().BoolVar(&huntFailOnIssues, "fail-on-issues", false, "With --fail-on: also count known issues from the recon report")
 	rootCmd.AddCommand(huntCmd)
 }
 
@@ -97,6 +114,10 @@ type huntFlags struct {
 	portScan       bool
 	rps            int
 	lite           bool
+	engagement     string
+	resume         string
+	failOn         string
+	failOnIssues   bool
 }
 
 func currentHuntFlags() huntFlags {
@@ -117,6 +138,10 @@ func currentHuntFlags() huntFlags {
 		portScan:       huntPortScan,
 		rps:            huntRPS,
 		lite:           huntLite,
+		engagement:     huntEngagement,
+		resume:         huntResume,
+		failOn:         huntFailOn,
+		failOnIssues:   huntFailOnIssues,
 	}
 }
 
@@ -187,7 +212,51 @@ func huntOperatorCommand(targets []string, f huntFlags) []string {
 	if f.rps > 0 {
 		cliArgs = append(cliArgs, "--rps", strconv.Itoa(f.rps))
 	}
+	if f.engagement != "" {
+		cliArgs = append(cliArgs, "--engagement-name", f.engagement)
+	}
+	if f.resume != "" {
+		cliArgs = append(cliArgs, "--resume", f.resume)
+	}
+	if f.failOn != "" {
+		cliArgs = append(cliArgs, "--fail-on", f.failOn)
+	}
+	if f.failOnIssues {
+		cliArgs = append(cliArgs, "--fail-on-issues")
+	}
 	return cliArgs
+}
+
+// Exit codes of `buggy-cli hunt`, passed through so `buggy hunt` works as a
+// CI gate: 0 complete and nothing at or above --fail-on, 10 complete with
+// something at or above it, 3 incomplete, 2 usage or configuration.
+const (
+	huntExitGate       = 10
+	huntExitIncomplete = 3
+	huntExitUsage      = 2
+)
+
+// huntExit ends the process with the hunt's verdict. It is a variable so
+// tests can observe the code.
+var huntExit = os.Exit
+
+// huntVerdict maps the operator container's result to the code `buggy hunt`
+// exits with and a line saying what it means. ok is false when err is not an
+// exit status of the hunt itself (the container could not be started).
+func huntVerdict(err error) (code int, message string, ok bool) {
+	var exit *exec.ExitError
+	if err == nil || !errors.As(err, &exit) {
+		return 0, "", false
+	}
+	switch exit.ExitCode() {
+	case huntExitGate:
+		return huntExitGate, "Hunt finished: something is at or above --fail-on (exit 10). See hunt-result.json.", true
+	case huntExitIncomplete:
+		return huntExitIncomplete, "Hunt is incomplete (exit 3): recon or the agent stage did not finish. Re-run with --resume to continue.", true
+	case huntExitUsage:
+		return huntExitUsage, "Hunt was not started (exit 2): see the message above.", true
+	}
+	return exit.ExitCode(), "", false
 }
 
 func runHunt(cmd *cobra.Command, args []string) error {
@@ -219,7 +288,11 @@ func runHunt(cmd *cobra.Command, args []string) error {
 	cliArgs := huntOperatorCommand(args, flags)
 	c := huntCompose(flags.lite)
 
-	ui.Info("Starting hunt against: " + strings.Join(args, ", "))
+	if flags.resume != "" {
+		ui.Info("Resuming hunt: " + flags.resume)
+	} else {
+		ui.Info("Starting hunt against: " + strings.Join(args, ", "))
+	}
 
 	// Run as a one-off `operator` container. It carries the python buggy
 	// package (same image as langgraph; the slim pipeline image in the lite
@@ -227,7 +300,13 @@ func runHunt(cmd *cobra.Command, args []string) error {
 	// read-write: `buggy-cli hunt` writes the enforced scope there, which the
 	// other services can only read.
 	if err := c.RunInteractive([]string{compose.Profiles.Operator}, "operator", nil, cliArgs...); err != nil {
-		return err
+		code, message, ok := huntVerdict(err)
+		if !ok {
+			return err
+		}
+		ui.Warning(message)
+		huntExit(code)
+		return nil
 	}
 
 	if flags.lite {
