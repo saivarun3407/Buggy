@@ -5,6 +5,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"sort"
 	"strconv"
 	"strings"
 
@@ -13,11 +14,32 @@ import (
 	"github.com/saivarun3407/buggy/clients/launcher/internal/runtime"
 )
 
+// Compose files the launcher runs, by their name in the Buggy home.
+const (
+	// MainFile is the full stack.
+	MainFile = "docker-compose.yml"
+	// LiteFile is the recon-only stack (pipeline, pipeline-mcp, operator):
+	// no model gateway, no agent runtime. It stands alone, and it uses the
+	// same service, container, volume and network names as MainFile, so the
+	// two cannot run side by side from one Buggy home.
+	LiteFile = "docker-compose.lite.yml"
+	// LabFile adds the local, intentionally vulnerable practice targets.
+	LabFile = "docker-compose.lab.yml"
+	// DemoFile makes LiteFile + LabFile a runnable stack for `buggy demo`.
+	DemoFile = "docker-compose.demo.yml"
+)
+
 // Compose wraps Docker Compose commands for Buggy services.
 type Compose struct {
 	Home        string
 	ComposeFile string
 	EnvFile     string
+	// Overlays are further compose files layered on ComposeFile, in order.
+	Overlays []string
+	// Standalone marks a base file that is not the full stack. The
+	// launcher-managed opscontrol overlay mounts a socket into the langgraph
+	// service, which only the full stack has, so it is never attached here.
+	Standalone bool
 	// Runtime is the container runtime selected at construction time
 	// (docker / podman / nerdctl). Stored so every call uses the same
 	// binary + socket and we don't re-probe on every invocation.
@@ -30,7 +52,24 @@ type Compose struct {
 // runtime is reachable so existing tests and dev workflows that don't
 // have Podman installed keep working unchanged.
 func New() *Compose {
+	return NewWithFile(MainFile)
+}
+
+// NewWithFile is New for another base compose file, with optional overlays
+// layered on it in the order given. A relative path is resolved against the
+// Buggy home, so NewWithFile(LiteFile) is the lite stack of this install.
+func NewWithFile(path string, overlays ...string) *Compose {
 	home := config.BuggyHome()
+	inHome := func(p string) string {
+		if filepath.IsAbs(p) {
+			return p
+		}
+		return filepath.Join(home, p)
+	}
+	var layered []string
+	for _, overlay := range overlays {
+		layered = append(layered, inHome(overlay))
+	}
 	rt, err := runtime.Detect()
 	if err != nil {
 		// No runtime available right now — fall back to assuming
@@ -41,10 +80,29 @@ func New() *Compose {
 	}
 	return &Compose{
 		Home:        home,
-		ComposeFile: filepath.Join(home, "docker-compose.yml"),
+		ComposeFile: inHome(path),
 		EnvFile:     filepath.Join(home, ".env"),
+		Overlays:    layered,
+		Standalone:  filepath.Base(path) != MainFile,
 		Runtime:     rt,
 	}
+}
+
+// Files returns the compose files of this stack: the base file, then the
+// overlays in the order compose merges them.
+func (c *Compose) Files() []string {
+	return append([]string{c.ComposeFile}, c.Overlays...)
+}
+
+// MissingFiles returns the files of this stack that are not on disk.
+func (c *Compose) MissingFiles() []string {
+	var missing []string
+	for _, file := range c.Files() {
+		if !fileExists(file) {
+			missing = append(missing, file)
+		}
+	}
+	return missing
 }
 
 // Profiles defines the Docker Compose profile names this launcher
@@ -106,6 +164,12 @@ func (c *Compose) baseArgs() []string {
 	// use by another project" conflict on the next ops_start.
 	args = append(args, "-p", opscontrol.ComposeProjectName())
 	args = append(args, "-f", c.ComposeFile, "--env-file", c.EnvFile)
+	for _, overlay := range c.Overlays {
+		args = append(args, "-f", overlay)
+	}
+	if c.Standalone {
+		return args
+	}
 	// ADR-0006 Sprint 1: include the opscontrol overlay only when
 	// the file exists AND the host socket has been bound. Attaching
 	// the overlay without BUGGY_OPSCONTROL_SOCK_HOST exported
@@ -207,12 +271,29 @@ func (c *Compose) run(args []string, interactive bool) error {
 // BUGGY_STARTUP_TIMEOUT_SECONDS for slower hardware. Default 600s
 // covers most environments after measuring 136s LiteLLM cold start in CI.
 func (c *Compose) Up(profiles ...string) error {
+	return c.run(upArgs(profiles, nil), false)
+}
+
+// UpServices is Up for the named services only (and what they depend on).
+// It is how a stack with one-off or optional services starts just the
+// long-running ones.
+func (c *Compose) UpServices(services ...string) error {
+	return c.run(upArgs(nil, services), false)
+}
+
+// UpArgs returns the full argv (after the runtime binary) that Up and
+// UpServices execute.
+func (c *Compose) UpArgs(profiles []string, services ...string) []string {
+	return append(c.baseArgs(), upArgs(profiles, services)...)
+}
+
+func upArgs(profiles, services []string) []string {
 	args := []string{}
 	for _, p := range profiles {
 		args = append(args, "--profile", p)
 	}
 	args = append(args, "up", "-d", "--no-build", "--wait", "--wait-timeout", startupTimeoutSeconds())
-	return c.run(args, false)
+	return append(args, services...)
 }
 
 // startupTimeoutSeconds returns the --wait-timeout value as a string.
@@ -228,9 +309,17 @@ func startupTimeoutSeconds() string {
 
 // Down stops and removes containers using all profiles for clean teardown.
 func (c *Compose) Down() error {
-	args := AllProfiles()
-	args = append(args, "down")
-	return c.run(args, false)
+	return c.run(downArgs(), false)
+}
+
+// DownArgs returns the full argv (after the runtime binary) that Down
+// executes.
+func (c *Compose) DownArgs() []string {
+	return append(c.baseArgs(), downArgs()...)
+}
+
+func downArgs() []string {
+	return append(AllProfiles(), "down")
 }
 
 // DownAndPurge tears down containers, networks, and named volumes. Used by
@@ -267,6 +356,22 @@ func imageTag(version string) string {
 	return strings.TrimPrefix(strings.TrimSpace(version), "v")
 }
 
+// ImageTag returns the tag compose resolves ${BUGGY_VERSION:-stable} to for
+// this install: the .version marker, else BUGGY_VERSION from the process
+// environment, else from env (the loaded .env), else "stable".
+func (c *Compose) ImageTag(env map[string]string) string {
+	if v := c.readVersion(); v != "" {
+		return imageTag(v)
+	}
+	if v := strings.TrimSpace(os.Getenv("BUGGY_VERSION")); v != "" {
+		return v
+	}
+	if v := strings.TrimSpace(env["BUGGY_VERSION"]); v != "" {
+		return v
+	}
+	return "stable"
+}
+
 // Ps shows service status.
 func (c *Compose) Ps() error {
 	return c.run([]string{"ps"}, false)
@@ -283,8 +388,17 @@ func (c *Compose) Logs(service string) error {
 
 // Exec runs a command inside a running service container.
 func (c *Compose) Exec(service string, command ...string) error {
-	args := append([]string{"exec", "-T", service}, command...)
-	return c.run(args, false)
+	return c.run(execArgs(service, command), false)
+}
+
+// ExecArgs returns the full argv (after the runtime binary) that Exec
+// executes.
+func (c *Compose) ExecArgs(service string, command ...string) []string {
+	return append(c.baseArgs(), execArgs(service, command)...)
+}
+
+func execArgs(service string, command []string) []string {
+	return append([]string{"exec", "-T", service}, command...)
 }
 
 // ExecWithEnv runs a command inside a running service container with extra
@@ -303,6 +417,21 @@ func (c *Compose) ExecWithEnv(service string, env map[string]string, command ...
 
 // RunInteractive runs a one-off container with stdin attached.
 func (c *Compose) RunInteractive(profiles []string, service string, env map[string]string, command ...string) error {
+	cmd := exec.Command(c.Runtime.Bin, c.RunArgs(profiles, service, env, command...)...)
+	cmd.Env = c.composeEnv()
+	cmd.Stdin = os.Stdin
+	cmd.Stdout = os.Stdout
+	cmd.Stderr = os.Stderr
+	if err := cmd.Run(); err != nil {
+		return fmt.Errorf("%s compose run %s: %w", c.Runtime.Name, service, err)
+	}
+	return nil
+}
+
+// RunArgs returns the full argv (after the runtime binary) that
+// RunInteractive executes. The -e entries are sorted by name so the argv is
+// the same on every call.
+func (c *Compose) RunArgs(profiles []string, service string, env map[string]string, command ...string) []string {
 	cmdArgs := c.baseArgs()
 	for _, p := range profiles {
 		cmdArgs = append(cmdArgs, "--profile", p)
@@ -314,21 +443,16 @@ func (c *Compose) RunInteractive(profiles []string, service string, env map[stri
 	// apply here because the cli image is pulled at install time and
 	// `run` only builds when the image is missing.
 	cmdArgs = append(cmdArgs, "run", "--rm")
-	for k, v := range env {
-		cmdArgs = append(cmdArgs, "-e", k+"="+v)
+	names := make([]string, 0, len(env))
+	for k := range env {
+		names = append(names, k)
+	}
+	sort.Strings(names)
+	for _, k := range names {
+		cmdArgs = append(cmdArgs, "-e", k+"="+env[k])
 	}
 	cmdArgs = append(cmdArgs, service)
-	cmdArgs = append(cmdArgs, command...)
-
-	cmd := exec.Command(c.Runtime.Bin, cmdArgs...)
-	cmd.Env = c.composeEnv()
-	cmd.Stdin = os.Stdin
-	cmd.Stdout = os.Stdout
-	cmd.Stderr = os.Stderr
-	if err := cmd.Run(); err != nil {
-		return fmt.Errorf("%s compose run %s: %w", c.Runtime.Name, service, err)
-	}
-	return nil
+	return append(cmdArgs, command...)
 }
 
 // CleanScratch removes legacy root-level scratch/session directories inside

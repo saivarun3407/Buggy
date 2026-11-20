@@ -1,11 +1,14 @@
 package cmd
 
 import (
+	"fmt"
 	"strconv"
 	"strings"
 
 	"github.com/saivarun3407/buggy/clients/launcher/internal/compose"
+	"github.com/saivarun3407/buggy/clients/launcher/internal/config"
 	"github.com/saivarun3407/buggy/clients/launcher/internal/ui"
+	"github.com/saivarun3407/buggy/clients/launcher/internal/updater"
 	"github.com/spf13/cobra"
 )
 
@@ -25,6 +28,7 @@ var (
 	huntAllowSandbox   bool
 	huntPortScan       bool
 	huntRPS            int
+	huntLite           bool
 )
 
 var huntCmd = &cobra.Command{
@@ -38,7 +42,8 @@ var huntCmd = &cobra.Command{
 		"--include-subdomains.\n\n" +
 		"  buggy hunt example.com\n" +
 		"  buggy hunt api.example.com app.example.com --include-subdomains\n" +
-		"  buggy hunt https://example.com --scope '*.example.com' --instruction 'focus auth'",
+		"  buggy hunt https://example.com --scope '*.example.com' --instruction 'focus auth'\n" +
+		"  buggy hunt example.com --lite    (recon and report only, no model key)",
 	Args: cobra.MinimumNArgs(1),
 	RunE: runHunt,
 }
@@ -59,77 +64,239 @@ func init() {
 	huntCmd.Flags().BoolVar(&huntAllowSandbox, "allow-sandbox-network", false, "Let the agent shell reach in-scope targets directly (not held for approval)")
 	huntCmd.Flags().BoolVar(&huntPortScan, "port-scan", false, "Scan the top 100 ports")
 	huntCmd.Flags().IntVar(&huntRPS, "rps", 0, "Requests per second (default 5)")
+	huntCmd.Flags().BoolVar(&huntLite, "lite", false, liteFlagHelp)
 	rootCmd.AddCommand(huntCmd)
 }
 
+// liteFlagHelp is the help text of --lite. It states the one limit of the
+// lite stack a user can run into.
+const liteFlagHelp = "Recon and report only, on the lite stack (docker-compose.lite.yml): " +
+	"no model key needed, implies --no-agent. The lite stack uses the same " +
+	"service, container, volume and network names as the full stack, so the " +
+	"two cannot run side by side from one Buggy home"
+
+// liteServices are the long-running services of the lite stack. The operator
+// is a one-off container and is not started with them.
+var liteServices = []string{"pipeline", "pipeline-mcp"}
+
+// huntFlags is the state of the hunt flags for one invocation.
+type huntFlags struct {
+	scope          []string
+	exclude        []string
+	includeSubs    bool
+	scopeFile      string
+	instruction    string
+	mode           string
+	planOnly       bool
+	nonInteractive bool
+	yes            bool
+	noAgent        bool
+	lab            bool
+	internal       bool
+	allowSandbox   bool
+	portScan       bool
+	rps            int
+	lite           bool
+}
+
+func currentHuntFlags() huntFlags {
+	return huntFlags{
+		scope:          huntScope,
+		exclude:        huntExclude,
+		includeSubs:    huntIncludeSubs,
+		scopeFile:      huntScopeFile,
+		instruction:    huntInstruction,
+		mode:           huntMode,
+		planOnly:       huntPlanOnly,
+		nonInteractive: huntNonInteractive,
+		yes:            huntYes,
+		noAgent:        huntNoAgent,
+		lab:            huntLab,
+		internal:       huntInternal,
+		allowSandbox:   huntAllowSandbox,
+		portScan:       huntPortScan,
+		rps:            huntRPS,
+		lite:           huntLite,
+	}
+}
+
+// skipsModelAuth reports whether this hunt never calls a model, and so must
+// not be refused for lacking a model provider.
+func (f huntFlags) skipsModelAuth() bool {
+	return f.lite
+}
+
+// huntCompose returns the stack a hunt runs on: the lite file of the Buggy
+// home with --lite, the full stack otherwise.
+func huntCompose(lite bool) *compose.Compose {
+	if lite {
+		return compose.NewWithFile(compose.LiteFile)
+	}
+	return compose.New()
+}
+
+// huntOperatorCommand builds the command the one-off operator container runs.
+//
+// The full stack's operator image has the `buggy-cli` script. The lite
+// stack's operator is the slim pipeline image, which does not: there the same
+// command runs as a module, and --no-agent is always passed because the lite
+// stack has no agent runtime to hand over to.
+func huntOperatorCommand(targets []string, f huntFlags) []string {
+	cliArgs := []string{"buggy-cli", "hunt"}
+	if f.lite {
+		cliArgs = []string{"python", "-m", "buggy.cli", "hunt"}
+	}
+	cliArgs = append(cliArgs, targets...)
+	for _, s := range f.scope {
+		cliArgs = append(cliArgs, "--scope", s)
+	}
+	for _, e := range f.exclude {
+		cliArgs = append(cliArgs, "--exclude", e)
+	}
+	if f.includeSubs {
+		cliArgs = append(cliArgs, "--include-subdomains")
+	}
+	if f.scopeFile != "" {
+		cliArgs = append(cliArgs, "--scope-file", f.scopeFile)
+	}
+	if f.instruction != "" {
+		cliArgs = append(cliArgs, "--instruction", f.instruction)
+	}
+	cliArgs = append(cliArgs, "--mode", f.mode)
+	if f.planOnly {
+		cliArgs = append(cliArgs, "--plan-only")
+	}
+	if f.nonInteractive {
+		cliArgs = append(cliArgs, "--non-interactive")
+	}
+	for _, toggle := range []struct {
+		flag string
+		on   bool
+	}{
+		{"--yes", f.yes},
+		{"--no-agent", f.noAgent || f.lite},
+		{"--lab", f.lab},
+		{"--internal", f.internal},
+		{"--allow-sandbox-network", f.allowSandbox},
+		{"--port-scan", f.portScan},
+	} {
+		if toggle.on {
+			cliArgs = append(cliArgs, toggle.flag)
+		}
+	}
+	if f.rps > 0 {
+		cliArgs = append(cliArgs, "--rps", strconv.Itoa(f.rps))
+	}
+	return cliArgs
+}
+
 func runHunt(cmd *cobra.Command, args []string) error {
-	_, env, err := prepareStack(cmd)
+	flags := currentHuntFlags()
+	_, env, err := prepareStackFor(cmd, flags.skipsModelAuth())
 	if err != nil {
 		return err
 	}
 
-	// Non-interactive hunt: leave BUGGY_ENGAGEMENT_WORKSPACE unset so the
-	// whole workspace tree mounts at /workspace. buggy-cli hunt writes
-	// plan/roe.json under <root>/<slug> and tells the agent workspace_path is
-	// /workspace/<slug>; keeping the root at /workspace makes those resolve
-	// identically for the langgraph agent and the sandbox.
-	if err := startServices(env); err != nil {
-		return err
-	}
-
-	cliArgs := []string{"buggy-cli", "hunt"}
-	cliArgs = append(cliArgs, args...)
-	for _, s := range huntScope {
-		cliArgs = append(cliArgs, "--scope", s)
-	}
-	for _, e := range huntExclude {
-		cliArgs = append(cliArgs, "--exclude", e)
-	}
-	if huntIncludeSubs {
-		cliArgs = append(cliArgs, "--include-subdomains")
-	}
-	if huntScopeFile != "" {
-		cliArgs = append(cliArgs, "--scope-file", huntScopeFile)
-	}
-	if huntInstruction != "" {
-		cliArgs = append(cliArgs, "--instruction", huntInstruction)
-	}
-	cliArgs = append(cliArgs, "--mode", huntMode)
-	if huntPlanOnly {
-		cliArgs = append(cliArgs, "--plan-only")
-	}
-	if huntNonInteractive {
-		cliArgs = append(cliArgs, "--non-interactive")
-	}
-	for flag, on := range map[string]bool{
-		"--yes":                   huntYes,
-		"--no-agent":              huntNoAgent,
-		"--lab":                   huntLab,
-		"--internal":              huntInternal,
-		"--allow-sandbox-network": huntAllowSandbox,
-		"--port-scan":             huntPortScan,
-	} {
-		if on {
-			cliArgs = append(cliArgs, flag)
+	if flags.lite {
+		lite := huntCompose(true)
+		if err := ensureComposeFiles(env, lite); err != nil {
+			return err
+		}
+		if err := startLiteServices(env, lite, liteServices...); err != nil {
+			return err
+		}
+	} else {
+		// Non-interactive hunt: leave BUGGY_ENGAGEMENT_WORKSPACE unset so the
+		// whole workspace tree mounts at /workspace. buggy-cli hunt writes
+		// plan/roe.json under <root>/<slug> and tells the agent workspace_path is
+		// /workspace/<slug>; keeping the root at /workspace makes those resolve
+		// identically for the langgraph agent and the sandbox.
+		if err := startServices(env); err != nil {
+			return err
 		}
 	}
-	if huntRPS > 0 {
-		cliArgs = append(cliArgs, "--rps", strconv.Itoa(huntRPS))
-	}
+
+	cliArgs := huntOperatorCommand(args, flags)
+	c := huntCompose(flags.lite)
 
 	ui.Info("Starting hunt against: " + strings.Join(args, ", "))
 
 	// Run as a one-off `operator` container. It carries the python buggy
-	// package (same image as langgraph) and is the only container with the
-	// control root mounted read-write: `buggy-cli hunt` writes the enforced
-	// scope there, which the langgraph and sandbox services can only read.
-	c := compose.New()
+	// package (same image as langgraph; the slim pipeline image in the lite
+	// stack) and is the only container with the control root mounted
+	// read-write: `buggy-cli hunt` writes the enforced scope there, which the
+	// other services can only read.
 	if err := c.RunInteractive([]string{compose.Profiles.Operator}, "operator", nil, cliArgs...); err != nil {
 		return err
 	}
 
+	if flags.lite {
+		ui.DimText("Hunt finished. Recon report: ~/.buggy/control/<engagement>/recon-report.md. " +
+			"The lite stack is still running; stop it with: " + stopCommand(c))
+		return nil
+	}
 	ui.DimText("Hunt finished. Recon report: ~/.buggy/control/<engagement>/recon-report.md. " +
 		"Findings: ~/.buggy/workspace/<engagement>/findings/. " +
 		"Run 'buggy' to open the UI, or 'buggy stop' to shut the stack down.")
+	return nil
+}
+
+// stopCommand is the command line that takes the stack c down, for hints.
+func stopCommand(c *compose.Compose) string {
+	bin := c.Runtime.Bin
+	if bin == "" {
+		bin = "docker"
+	}
+	return bin + " " + strings.Join(c.DownArgs(), " ")
+}
+
+// syncConfigFn is indirected so tests can see a download being requested
+// without reaching GitHub.
+var syncConfigFn = updater.SyncConfigFiles
+
+// ensureComposeFiles makes sure every compose file of c is in the Buggy home.
+//
+// prepareStack downloads the release's config files only when the full
+// compose file is absent. An install that predates the lite and demo files
+// has that file but not these, so they are fetched here the same way.
+func ensureComposeFiles(env map[string]string, c *compose.Compose) error {
+	if len(c.MissingFiles()) == 0 {
+		return nil
+	}
+	ref := "v" + version
+	if version == "dev" || version == "" {
+		ref = config.Get(env, "BUGGY_BRANCH", "main")
+	}
+	ui.Info("Downloading configuration files...")
+	if err := syncConfigFn(ref, nil); err != nil {
+		return fmt.Errorf("sync config: %w", err)
+	}
+	if missing := c.MissingFiles(); len(missing) > 0 {
+		return fmt.Errorf("missing after sync (%s): %s", ref, strings.Join(missing, ", "))
+	}
+	return nil
+}
+
+// startLiteServices brings the named services of a lite-based stack up and
+// blocks until their healthchecks pass.
+//
+// It is startServices without everything the lite stack does not have: no
+// opscontrol daemon, no database or gateway credentials to refuse, no
+// langgraph to wait for. The lite file has no env_file; the one secret it
+// needs, BUGGY_STACK_MCP_TOKEN, is interpolated from .env, where it is
+// generated when missing.
+func startLiteServices(env map[string]string, c *compose.Compose, services ...string) error {
+	generated, err := config.EnsureScopeSecrets(config.EnvPath(), env)
+	if err != nil {
+		return fmt.Errorf("generate scope-enforcement secrets: %w", err)
+	}
+	if len(generated) > 0 {
+		ui.Info("Generated " + strings.Join(generated, ", ") + " in " + config.EnvPath())
+	}
+
+	ui.Info("Starting Buggy services (lite: " + strings.Join(services, ", ") + ")...")
+	if err := c.UpServices(services...); err != nil {
+		return fmt.Errorf("start services: %w", err)
+	}
 	return nil
 }

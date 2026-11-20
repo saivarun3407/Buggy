@@ -24,7 +24,8 @@ import (
 
 // ConfigManifestAsset is the name of the sha256sum-format manifest the
 // release workflow uploads alongside the Go binaries. It pins
-// docker-compose.yml, docker-compose.tun.yml, config/litellm.yaml, and
+// docker-compose.yml, docker-compose.tun.yml, docker-compose.lite.yml,
+// docker-compose.lab.yml, docker-compose.demo.yml, config/litellm.yaml, and
 // .env.example.
 const ConfigManifestAsset = "config-checksums.txt"
 
@@ -355,12 +356,19 @@ func configSyncTargets(home string) map[string]string {
 		// base compose file so release installs can enable TUN; inert unless
 		// the operator passes `-f docker-compose.tun.yml`.
 		"docker-compose.tun.yml": filepath.Join(home, "docker-compose.tun.yml"),
-		"config/litellm.yaml":    filepath.Join(home, "config", "litellm.yaml"),
+		// Lite stack (`buggy hunt --lite`): recon and report, no model.
+		"docker-compose.lite.yml": filepath.Join(home, "docker-compose.lite.yml"),
+		// `buggy demo` layers these two on the lite file: the lab overlay
+		// defines the practice target and its internal network, the demo
+		// overlay makes lite + lab a runnable stack.
+		"docker-compose.lab.yml":  filepath.Join(home, "docker-compose.lab.yml"),
+		"docker-compose.demo.yml": filepath.Join(home, "docker-compose.demo.yml"),
+		"config/litellm.yaml":     filepath.Join(home, "config", "litellm.yaml"),
 	}
 }
 
-// SyncConfigFiles downloads updated docker-compose.yml,
-// docker-compose.tun.yml and litellm.yaml.
+// SyncConfigFiles downloads updated docker-compose.yml, its overlays
+// (tun, lab, demo), docker-compose.lite.yml and litellm.yaml.
 //
 // When “release“ is non-nil AND the release exposes a
 // “config-checksums.txt“ asset, every downloaded file is verified

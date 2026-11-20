@@ -1,0 +1,49 @@
+# Demo overlay: the lite stack plus one bundled practice target.
+#
+# `buggy demo` layers three files, in this order:
+#
+#   docker compose -f docker-compose.lite.yml -f docker-compose.lab.yml \
+#       -f docker-compose.demo.yml up -d pipeline pipeline-mcp juice-shop
+#   docker compose -f docker-compose.lite.yml -f docker-compose.lab.yml \
+#       -f docker-compose.demo.yml --profile operator run --rm operator \
+#       python -m buggy.cli hunt http://juice-shop.lab:3000 \
+#       --lab --no-agent --yes --rps 50 --engagement-name demo
+#
+# The lite file is recon and report with no LLM. The lab file defines OWASP
+# Juice Shop on `lab-net`, an internal network: the target has no route out
+# and no published port. This file makes the two a runnable stack:
+#
+#   * the pipeline (the scanners) joins lab-net, and resolves names with
+#     Docker's resolver, because `juice-shop.lab` does not exist in public
+#     DNS. The lab file says the same; it is repeated here so the demo does
+#     not depend on that file keeping it;
+#   * the lab file also extends services that only the full stack has (the
+#     egress guard, the evidence gateway, the browser). Without their
+#     definitions compose refuses to render them, so they are removed. The
+#     other practice targets are removed too: the demo starts exactly one.
+#
+# What must stay true (tests/test_compose_demo.py pins it): the target is on
+# lab-net only and publishes nothing; lab-net is internal; the query server
+# and the operator, which hold the stack token, share no network with the
+# target; every rule of the lite stack still holds.
+#
+# `!reset` (remove an element another file defined) needs a recent Docker
+# Compose: use v2.24 or newer.
+#
+# lab-net uses the subnet BUGGY_LAB_SUBNET (default 172.30.252.0/24). Set it
+# to another private /24 when that range is already taken on this host.
+services:
+  pipeline:
+    environment:
+      - BUGGY_PIPELINE_DNS_RESOLVERS=127.0.0.11:53
+    networks:
+      lab-net: {}
+
+  # Full-stack services the lab file extends; the lite stack has none of them.
+  egress-guard: !reset null
+  capture-mcp: !reset null
+  browser-mcp: !reset null
+
+  # Practice targets the demo does not start.
+  dvga: !reset null
+  dvwa: !reset null
