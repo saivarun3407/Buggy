@@ -221,3 +221,128 @@ def test_report_lists_coverage_gaps_by_stage_and_flags_the_issue_list() -> None:
     assert "| Assets with incomplete coverage | 0 |" in clean
     assert "not complete" not in clean and "Every stage completed" in clean
     assert clean.split("## Known issues\n", 1)[1].strip().startswith("None reported")
+
+
+def _parameter(method: str, url: str, location: str, name: str, *hints: str) -> dict:
+    return _record(
+        "parameter",
+        f"{method} {url} {location}:{name}",
+        name=name,
+        location=location,
+        method=method,
+        url=url,
+        example="",
+        sources=["openapi"],
+        hints=list(hints),
+    )
+
+
+def _rows(records: dict) -> set[tuple[str, str, str]]:
+    return {(c["class"], c["where"], c["probe"]) for c in rank_candidates(records)}
+
+
+def test_parameter_hints_decide_the_ssrf_access_control_and_file_rows() -> None:
+    image_url = _parameter("POST", "https://a.test/api/avatar", "body", "image_url", "url-like")
+    rows = _rows(
+        {
+            "parameter": [
+                image_url,
+                _parameter("GET", "https://a.test/download", "query", "file", "file-like"),
+                _parameter("GET", "https://a.test/api/orders", "query", "order_id", "id-like"),
+                _parameter("GET", "https://a.test/search", "query", "q"),
+                # A number is not a file name: page=2 is pagination.
+                _parameter("GET", "https://a.test/list", "query", "page", "file-like", "numeric"),
+                _parameter("GET", "https://a.test/me", "query", "token", "auth-like"),
+            ]
+        }
+    )
+    assert rows == {
+        ("ssrf", "POST https://a.test/api/avatar", "ssrf_canary"),
+        ("file_handling", "GET https://a.test/download", "path_traversal"),
+        ("access_control", "GET https://a.test/api/orders", "idor"),
+    }
+    (ssrf,) = rank_candidates({"parameter": [image_url]})
+    assert "body parameter image_url" in ssrf["why"]
+
+
+def test_the_same_rows_come_from_records_that_have_no_stored_parameters() -> None:
+    """A store written before parameter records existed still gets its rows."""
+    rows = _rows(
+        {
+            "api_operation": [
+                _record(
+                    "api_operation",
+                    "POST https://a.test/api/avatar",
+                    method="POST",
+                    url="https://a.test/api/avatar",
+                    request_body_schema={"properties": {"image_url": {"type": "string"}}},
+                ),
+                _record(
+                    "api_operation",
+                    "GET https://a.test/api/search",
+                    method="GET",
+                    url="https://a.test/api/search",
+                    parameters=[{"name": "q", "in": "query"}],
+                ),
+            ],
+            "url": [
+                _record("url", "https://a.test/download?file=report.txt"),
+                _record("url", "https://a.test/search?q=shoes"),
+                _record("url", "https://a.test/list?page=2"),
+                _record("url", "https://a.test/assets/site.css?file=x"),
+            ],
+        }
+    )
+    assert rows == {
+        ("ssrf", "POST https://a.test/api/avatar", "ssrf_canary"),
+        ("file_handling", "https://a.test/download?file=report.txt", "path_traversal"),
+    }
+
+
+def test_a_stored_parameter_and_the_url_it_came_from_are_one_candidate() -> None:
+    url = _record("url", "https://a.test/fetch?url=https://x.test/a.png&id=4")
+    stored = [
+        _parameter("GET", "https://a.test/fetch", "query", "url", "url-like"),
+        _parameter("GET", "https://a.test/fetch", "query", "id", "id-like", "numeric"),
+    ]
+    assert _rows({"url": [url], "parameter": stored}) == {
+        ("ssrf", "GET https://a.test/fetch", "ssrf_canary"),
+        ("access_control", "GET https://a.test/fetch", "idor"),
+    }
+    # Control: a parameter of that URL the stored records do not name still counts.
+    assert _rows({"url": [url], "parameter": stored[:1]}) == {
+        ("ssrf", "GET https://a.test/fetch", "ssrf_canary"),
+        ("access_control", "https://a.test/fetch?url=https://x.test/a.png&id=4", "idor"),
+    }
+
+
+def test_file_handling_ranks_between_ssrf_and_api_and_reaches_the_report() -> None:
+    records = {
+        "graphql": [_record("graphql", "https://a.test/graphql")],
+        "api_operation": [
+            _record(
+                "api_operation",
+                "POST https://a.test/api/orders",
+                method="POST",
+                url="https://a.test/api/orders",
+                request_body_types=["application/json"],
+            )
+        ],
+        "parameter": [
+            _parameter("GET", "https://a.test/download", "query", "file", "file-like"),
+            _parameter("GET", "https://a.test/proxy", "query", "url", "url-like"),
+            _parameter("GET", "https://a.test/api/orders/{id}", "path", "id", "id-like"),
+        ],
+    }
+    assert [c["class"] for c in rank_candidates(records)] == [
+        "access_control",
+        "ssrf",
+        "file_handling",
+        "api",
+        "graphql",
+    ]
+    text = render_report("acme", {"records": {}, "last_run": None}, records, generated_at=0)
+    assert (
+        "| file_handling | GET https://a.test/download | names a file or path: "
+        "query parameter file | `path_traversal` |"
+    ) in text

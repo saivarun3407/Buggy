@@ -46,7 +46,7 @@ from buggy.pipeline.schema import (
 )
 from buggy.pipeline.scope import ScopeFilter
 from buggy.pipeline.store import ReconStore
-from buggy.pipeline.tools import apispec, crtsh, jsparse
+from buggy.pipeline.tools import apispec, crtsh, jsparse, params
 from buggy.pipeline.tools.amass import Amass
 from buggy.pipeline.tools.archives import Gau, Waybackurls
 from buggy.pipeline.tools.base import Invocation
@@ -1297,7 +1297,47 @@ class Pipeline:
                 version=versions.BUILTIN_VERSION,
                 raw_ref=ref,
             )
+        self._extract_parameters(stats, pending)
         self._complete("apispec", stats, pending)
+
+    def _extract_parameters(self, stats: StageStats, pending: dict[str, str]) -> None:
+        """Parameter records for the hosts this stage processed (no request, no tool).
+
+        Read off the URLs, endpoints and API operations the store holds for
+        those hosts. Every parameter belongs to one of the stage's inputs, so
+        it is cached, re-derived and retired with that input. Nothing here can
+        fail for one asset, so it adds no outcome to the coverage stamp.
+        """
+        owners: dict[str, list[str]] = {}
+        for origin in sorted(pending):
+            owners.setdefault(_asset(origin), []).append(origin)
+        sources: list[StoredRecord] = []
+        for kind in (RecordType.URL, RecordType.ENDPOINT, RecordType.API_OPERATION):
+            for record in self._records(kind):
+                if record.asset not in owners:
+                    continue
+                # An operation this run's fetch of its spec no longer reports is
+                # retired when the stage completes; it is not an input any more.
+                spec_origin = _origin(str(record.attrs.get("spec_url") or ""))
+                if spec_origin in pending and record.last_run_id != self.run_id:
+                    continue
+                sources.append(record)
+        lines: list[str] = []
+        pairs: list[tuple[Record, str]] = []
+        for record in params.extract(sources):
+            hosts = owners.get(record.asset)
+            if not hosts:
+                continue
+            origin = _origin(str(record.attrs["url"]))
+            lines.append(json.dumps({"parameter": record.value, **record.attrs}, sort_keys=True))
+            pairs.append(
+                (_with_line(record, len(lines)), origin if origin in pending else hosts[0])
+            )
+        if pairs:
+            ref = self._save_raw("apispec", params.NAME, "\n".join(lines) + "\n")
+            self._store(
+                "apispec", stats, params.NAME, pairs, version=versions.BUILTIN_VERSION, raw_ref=ref
+            )
 
     # ── stage 7: known issues ───────────────────────────────────────
 
