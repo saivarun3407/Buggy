@@ -428,3 +428,51 @@ class TestScopeTestCall:
                 ]
             )
         assert not (roots["control"] / "acme" / "roe.json").exists()
+
+
+class TestBase64IsNotAHidingPlace:
+    """`echo <base64> | base64 -d | sh` must not carry a forbidden command past a rule."""
+
+    RM = r"rm\s+-rf\s+/"
+
+    @staticmethod
+    def _b64(text: str, *, urlsafe: bool = False, pad: bool = True) -> str:
+        import base64
+
+        raw = (base64.urlsafe_b64encode if urlsafe else base64.b64encode)(text.encode()).decode()
+        return raw if pad else raw.rstrip("=")
+
+    @pytest.mark.parametrize(
+        ("urlsafe", "pad"), [(False, True), (False, False), (True, True), (True, False)]
+    )
+    def test_a_base64_encoded_command_is_caught(self, urlsafe: bool, pad: bool) -> None:
+        token = self._b64("cd /tmp; rm -rf / --no-preserve-root", urlsafe=urlsafe, pad=pad)
+        args = {"command": f"echo {token} | base64 -d | sh"}
+        decision = evaluate_call("bash", args, _rules(self.RM))
+        assert decision.blocked and decision.rule == "tool_guard[0]"
+
+    def test_it_is_caught_inside_a_url_encoded_json_body(self) -> None:
+        token = self._b64("x'; DROP TABLE users;--   padding to length")
+        body = json.dumps({"q": token.replace("=", "%3D")})
+        assert evaluate_call("http_send", _http_send(body), _rules(DROP)).blocked
+
+    def test_ordinary_tokens_and_binary_blobs_are_not_blocked(self) -> None:
+        import base64
+
+        blob = base64.b64encode(bytes(range(256)) * 2).decode()  # binary: not readable text
+        args = {
+            "command": f"curl -H 'X-Trace: 9f8e7d6c5b4a39281706f5e4d3c2b1a0' -d '{blob}' {TARGET}",
+            "note": "a_long_identifier_name_with_underscores_and-dashes",
+        }
+        assert not evaluate_call("bash", args, _rules(self.RM, DROP)).blocked
+
+    def test_the_decoded_text_is_added_once_and_only_one_level_deep(self) -> None:
+        inner = self._b64("rm -rf / is hidden twice over")
+        outer = self._b64(f"echo {inner} | base64 -d")
+        variants = decode_rounds(f"echo {outer} | base64 -d | sh")
+        assert any(inner in variant for variant in variants)  # first level is revealed
+        assert not any("rm -rf /" in variant for variant in variants)  # the second is not
+
+    def test_many_tokens_are_bounded(self) -> None:
+        tokens = " ".join(self._b64(f"harmless text number {i:04d}") for i in range(500))
+        assert len(decode_rounds(tokens)) <= 1 + 20

@@ -20,6 +20,7 @@ Pure standard library: no agent-framework imports.
 
 from __future__ import annotations
 
+import base64
 import html
 import json
 import re
@@ -277,9 +278,37 @@ def _unescape(text: str) -> str:
     return _ESCAPE_RE.sub(lambda m: chr(int(m.group(1) or m.group(2), 16)), text)
 
 
+#: A run of base64 (standard or URL-safe alphabet) long enough to hide a command.
+_BASE64_RE = re.compile(r"[A-Za-z0-9+/_-]{16,}={0,2}")
+MAX_BASE64_TOKENS = 20
+MAX_BASE64_TOKEN_LENGTH = 20_000
+
+
+def _base64_texts(text: str) -> list[str]:
+    """Readable text hidden in base64 tokens of ``text`` (bounded; binary results are ignored)."""
+    found: list[str] = []
+    for match in _BASE64_RE.finditer(text):
+        if len(found) >= MAX_BASE64_TOKENS:
+            break
+        token = match.group(0)
+        if len(token) > MAX_BASE64_TOKEN_LENGTH:
+            continue
+        body = token.rstrip("=").replace("-", "+").replace("_", "/")
+        try:
+            raw = base64.b64decode(body + "=" * (-len(body) % 4), validate=True)
+            decoded = raw.decode("utf-8")
+        except (ValueError, UnicodeDecodeError):
+            continue
+        printable = sum(1 for ch in decoded if ch.isprintable() or ch in "\n\r\t")
+        if decoded and printable >= 0.9 * len(decoded) and decoded not in found:
+            found.append(decoded)
+    return found
+
+
 def decode_rounds(text: str, rounds: int = DECODE_ROUNDS) -> list[str]:
     """``text``, each successive ``unquote_plus`` while it keeps changing (max ``rounds``),
-    then one pass of HTML-entity and ``\\xNN`` / ``\\uNNNN`` unescaping of each of those."""
+    one pass of HTML-entity and ``\\xNN`` / ``\\uNNNN`` unescaping of each of those, and
+    the readable text of any base64 token found in them (one level)."""
     variants = [text]
     current = text
     for _ in range(max(0, min(rounds, DECODE_ROUNDS))):
@@ -293,7 +322,14 @@ def decode_rounds(text: str, rounds: int = DECODE_ROUNDS) -> list[str]:
         candidate = _unescape(variant)
         if candidate not in variants and candidate not in unescaped:
             unescaped.append(candidate)
-    return variants + unescaped
+    seen = variants + unescaped
+    # One level of base64: `echo <b64> | base64 -d | sh` must not hide a command.
+    hidden: list[str] = []
+    for variant in list(seen):
+        for decoded in _base64_texts(variant):
+            if decoded not in seen and decoded not in hidden:
+                hidden.append(decoded)
+    return seen + hidden
 
 
 def _windows(text: str) -> Iterable[str]:
