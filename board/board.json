@@ -1,5 +1,5 @@
 {
- "updated": "2026-11-20 01:02 UTC",
+ "updated": "2026-11-20 01:08 UTC",
  "columns": [
   "backlog",
   "ready",
@@ -542,12 +542,12 @@
    "lane": "E",
    "title": "Findings store and an independent verifier (`exploit_verified` or it is not a finding)",
    "depends": [],
-   "status": "in_progress",
+   "status": "done",
    "agent": "",
    "branch": "",
-   "commit": "",
-   "tests": "",
-   "note": "",
+   "commit": "4b8b449",
+   "tests": "133 passed",
+   "note": "Findings store + verifier merged; endpoint binding added. 133 tests pass",
    "order": 22
   },
   {
@@ -558,7 +558,7 @@
    "depends": [
     "E1"
    ],
-   "status": "backlog",
+   "status": "in_progress",
    "agent": "",
    "branch": "",
    "commit": "",
