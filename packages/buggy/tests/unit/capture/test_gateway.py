@@ -22,6 +22,12 @@ from buggy.cli import approvals as approvals_cli
 from buggy.middleware._audit_sink import iter_records, verify_ledger
 
 
+def _must[T](value: T | None) -> T:
+    """``value``, asserted present."""
+    assert value is not None
+    return value
+
+
 class Site:
     """A fake origin: routes ``(method, url)`` to ``(status, body)`` or a callable."""
 
@@ -1048,6 +1054,7 @@ class TestIdentityColumnMigration:
         store = CaptureStore(path)
         assert {"identity", "redaction"} <= self._columns(path)
         old = store.get("acme", "cap-old")
+        assert old is not None
         assert (old.identity, old.redact_headers, old.redact_bodies) == ("", (), False)
         assert old.detail()["request_headers"]["Authorization"] == "<redacted>"
         new = store.add(
@@ -1068,6 +1075,7 @@ class TestIdentityColumnMigration:
 
         reopened = CaptureStore(path)  # the migration runs once; a second open is a no-op
         again = reopened.get("acme", new.id)
+        assert again is not None
         assert (again.identity, again.redact_headers) == ("alice", ("x-session-token",))
         assert again.detail()["request_headers"]["X-Session-Token"] == "<redacted>"
         assert again.detail()["response_body"] == "hello <redacted>"
@@ -1078,6 +1086,6 @@ class TestIdentityColumnMigration:
         path = tmp_path / "captures.sqlite3"
         self._old_store(path)
         store = CaptureStore(path, read_only=True)
-        assert store.get("acme", "cap-old").identity == ""
+        assert _must(store.get("acme", "cap-old")).identity == ""
         store.close()
         assert "identity" not in self._columns(path)

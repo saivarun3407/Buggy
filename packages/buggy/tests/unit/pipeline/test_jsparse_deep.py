@@ -257,8 +257,8 @@ class _Body(io.BytesIO):
     def __enter__(self):
         return self
 
-    def __exit__(self, *_exc):
-        return False
+    def __exit__(self, *_exc) -> None:
+        return None
 
 
 def _run(tmp_path: Path, script: str, **kwargs) -> tuple[ReconStore, ScriptOpener, Path]:

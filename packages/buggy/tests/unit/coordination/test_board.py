@@ -25,6 +25,13 @@ from buggy.coordination.board import (
     normalise_intent_text,
 )
 
+
+def _must[T](value: T | None) -> T:
+    """``value``, asserted present."""
+    assert value is not None
+    return value
+
+
 ENG = "acme"
 
 
@@ -129,7 +136,7 @@ def test_facts_are_append_only(tmp_path: Path) -> None:
 
     # ...a returned fact is a copy...
     board.facts(ENG)[0]["text"] = "rewritten"
-    assert board.get_fact(ENG, "f0001")["text"] == "an observation"
+    assert _must(board.get_fact(ENG, "f0001"))["text"] == "an observation"
 
     # ...and the file itself refuses to rewrite or drop one, whoever asks.
     db = _raw(tmp_path)
@@ -214,7 +221,7 @@ def test_multi_source_intent_keeps_all_sources(tmp_path: Path) -> None:
 
     intent = board.open_intent(ENG, "read another user's order", ["f0002", "f0001"], "planner")
     assert intent["from_facts"] == ["f0002", "f0001"]
-    assert board.get_intent(ENG, intent["id"])["from_facts"] == ["f0002", "f0001"]
+    assert _must(board.get_intent(ENG, intent["id"]))["from_facts"] == ["f0002", "f0001"]
     assert board.snapshot(ENG)["intents"][0]["from_facts"] == ["f0002", "f0001"]
 
     # Sources survive the whole life of the intent.
@@ -282,7 +289,7 @@ def test_second_worker_conflicts_while_live_and_succeeds_after_expiry(tmp_path: 
     assert refused.value.worker == "w1"
     assert refused.value.lease_expires_at == 1_600.0
     json.dumps(refused.value.to_dict())
-    assert board.get_intent(ENG, intent_id)["worker"] == "w1"  # the refusal changed nothing
+    assert _must(board.get_intent(ENG, intent_id))["worker"] == "w1"  # the refusal changed nothing
 
     clock.now = 1_600.0  # the lease has run out
     taken = board.claim(ENG, intent_id, "w2")
@@ -346,7 +353,7 @@ def test_heartbeat_needs_a_claim_and_release_reopens(tmp_path: Path) -> None:
     board.claim(ENG, intent_id, "w1")
     with pytest.raises(NotClaimer):
         board.release(ENG, intent_id, "w2")
-    assert board.get_intent(ENG, intent_id)["worker"] == "w1"
+    assert _must(board.get_intent(ENG, intent_id))["worker"] == "w1"
 
     released = board.release(ENG, intent_id, "w1")
     assert released["status"] == "open" and released["worker"] is None
@@ -364,7 +371,7 @@ def test_only_the_claimer_can_conclude(tmp_path: Path) -> None:
     with pytest.raises(NotClaimer, match="w2 does not hold it"):
         board.conclude(ENG, intent_id, "w2", "login is injectable", ["cap-1"])
     assert _count(tmp_path, "facts") == 1
-    assert board.get_intent(ENG, intent_id)["status"] == "claimed"
+    assert _must(board.get_intent(ENG, intent_id))["status"] == "claimed"
 
     done = board.conclude(ENG, intent_id, "w1", "login is injectable via username", ["cap-1"])
     assert done["fact"]["id"] == "f0002"
@@ -372,7 +379,7 @@ def test_only_the_claimer_can_conclude(tmp_path: Path) -> None:
     assert done["fact"]["evidence"] == ["cap-1"] and done["fact"]["duplicate"] is False
     assert done["intent"]["status"] == "concluded"
     assert done["intent"]["to_fact"] == "f0002" and done["intent"]["worker"] == "w1"
-    assert board.get_fact(ENG, "f0002")["text"] == "login is injectable via username"
+    assert _must(board.get_fact(ENG, "f0002"))["text"] == "login is injectable via username"
     json.dumps(done)
 
     # A finished intent takes no further calls.
@@ -395,7 +402,7 @@ def test_unclaimed_intent_cannot_be_concluded(tmp_path: Path) -> None:
     with pytest.raises(NotClaimer, match="not claimed"):
         board.conclude(ENG, intent_id, "recon", "done without claiming")
     assert _count(tmp_path, "facts") == 1
-    assert board.get_intent(ENG, intent_id)["to_fact"] is None
+    assert _must(board.get_intent(ENG, intent_id))["to_fact"] is None
 
 
 def test_conclude_after_takeover_is_refused_but_expired_holder_may_finish(tmp_path: Path) -> None:
@@ -439,6 +446,7 @@ def test_conclude_is_atomic_when_the_link_fails_after_the_fact_write(tmp_path: P
     assert [fact["id"] for fact in board.facts(ENG)] == ["f0001"]
     assert db.execute("SELECT COUNT(*) FROM facts").fetchone()[0] == 1
     intent = board.get_intent(ENG, intent_id)
+    assert intent is not None
     assert intent["status"] == "claimed" and intent["to_fact"] is None
     assert intent["worker"] == "w1"
 
@@ -467,6 +475,7 @@ def test_conclude_is_atomic_when_the_fact_write_fails(tmp_path: Path) -> None:
         board.abandon(ENG, intent_id, "w1", "no injection point")
 
     intent = board.get_intent(ENG, intent_id)
+    assert intent is not None
     assert intent["status"] == "claimed" and intent["to_fact"] is None
     assert _count(tmp_path, "facts") == 1
     # The board still works after the rolled-back calls.
@@ -481,7 +490,7 @@ def test_conclude_with_existing_fact_text_links_to_that_fact(tmp_path: Path) -> 
     done = board.conclude(ENG, intent_id, "w1", "login is not injectable", ["cap-2"])
     assert done["fact"]["id"] == known["id"] and done["fact"]["duplicate"] is True
     assert done["intent"]["to_fact"] == known["id"]
-    assert board.get_fact(ENG, known["id"])["evidence"] == ["cap-1"]  # the fact is unchanged
+    assert _must(board.get_fact(ENG, known["id"]))["evidence"] == ["cap-1"]  # the fact is unchanged
     assert _count(tmp_path, "facts") == 2
 
 
@@ -496,7 +505,7 @@ def test_abandon_remembers_the_dead_end(tmp_path: Path) -> None:
 
     with pytest.raises(Conflict):  # w1's claim is live
         board.abandon(ENG, held, "w2", "looks pointless")
-    assert board.get_intent(ENG, held)["status"] == "claimed"
+    assert _must(board.get_intent(ENG, held))["status"] == "claimed"
     assert len(board.facts(ENG)) == 3
 
     gone = board.abandon(ENG, held, "w1", "WAF blocks every payload")
@@ -504,7 +513,7 @@ def test_abandon_remembers_the_dead_end(tmp_path: Path) -> None:
     assert gone["fact"]["kind"] == "result" and gone["fact"]["created_by"] == "w1"
     assert gone["intent"]["status"] == "abandoned"
     assert gone["intent"]["to_fact"] == gone["fact"]["id"] == "f0004"
-    assert board.get_fact(ENG, "f0004")["text"] == "abandoned: WAF blocks every payload"
+    assert _must(board.get_fact(ENG, "f0004"))["text"] == "abandoned: WAF blocks every payload"
 
     # Nobody holds the second intent, so any worker may close it.
     also_gone = board.abandon(ENG, unclaimed, "w2", "endpoint was removed")
@@ -572,7 +581,7 @@ def test_open_work_lists_unclaimed_and_expired_only(tmp_path: Path) -> None:
     assert at_100[1]["expired"] is True and at_100[1]["worker"] == "w1"
     assert [item["id"] for item in board.open_work(ENG, now=150.0)] == [unclaimed, live, stale]
     # Listing is a read: the stale claim is still recorded until someone takes it.
-    assert board.get_intent(ENG, stale, now=150.0)["status"] == "claimed"
+    assert _must(board.get_intent(ENG, stale, now=150.0))["status"] == "claimed"
 
 
 def test_stop_clears_claims_and_open_work_lists_them(tmp_path: Path) -> None:
@@ -602,6 +611,7 @@ def test_stop_clears_claims_and_open_work_lists_them(tmp_path: Path) -> None:
         board.heartbeat(ENG, second, "w2")  # the old claim is gone
     # Finished work is not reopened by a stop.
     concluded = board.get_intent(ENG, finished)
+    assert concluded is not None
     assert concluded["status"] == "concluded" and concluded["worker"] == "w3"
     assert board.stop(ENG)["released"] == [first]  # only w9's new claim was left
 
@@ -661,7 +671,7 @@ def test_complete_then_reopen_then_complete_again(tmp_path: Path) -> None:
     assert snap["complete"] is False and snap["goal_fact"] is None and snap["reopened"] == 1
     # The overturned goal is still on the board; nothing was erased.
     assert [fact["id"] for fact in snap["facts"]] == ["f0001", "f0002", "f0003", "f0004"]
-    assert board.get_fact(ENG, "f0003")["kind"] == "goal"
+    assert _must(board.get_fact(ENG, "f0003"))["kind"] == "goal"
     assert [item["id"] for item in board.open_work(ENG)] == [reopened["intent"]["id"]]
     with pytest.raises(BoardError, match="nothing to reopen"):
         board.reopen(ENG, "again")
@@ -720,7 +730,7 @@ def test_board_survives_reopening_the_file(tmp_path: Path) -> None:
     board.close()
 
     again = _open(tmp_path)
-    assert again.get_intent(ENG, intent_id)["worker"] == "w1"
+    assert _must(again.get_intent(ENG, intent_id))["worker"] == "w1"
     assert again.add_fact(ENG, "next fact", "recon")["id"] == "f0002"
     with pytest.raises(Conflict):
         again.claim(ENG, intent_id, "w2")
@@ -770,7 +780,7 @@ def test_eight_workers_race_for_one_intent_and_exactly_one_wins(
     assert len(won) == 1
     assert len(lost) == 7
     assert set(lost) == {won[0]}  # every loser was told who holds it
-    assert shared.get_intent(ENG, intent_id)["worker"] == won[0]
+    assert _must(shared.get_intent(ENG, intent_id))["worker"] == won[0]
 
 
 def test_concurrent_fact_writers_get_distinct_ids_and_one_per_text(tmp_path: Path) -> None:
@@ -821,8 +831,10 @@ def test_ids_and_reads_never_cross_engagements(tmp_path: Path) -> None:
     assert same_text_b["id"] == "f0002" and same_text_b["duplicate"] is False
 
     # The same id reads a different fact in each engagement.
-    assert board.get_fact("acme", "f0001")["text"] == "acme: login form at /login"
-    assert board.get_fact("globex", "f0001")["text"] == "globex: GraphQL endpoint at /graphql"
+    assert _must(board.get_fact("acme", "f0001"))["text"] == "acme: login form at /login"
+    assert (
+        _must(board.get_fact("globex", "f0001"))["text"] == "globex: GraphQL endpoint at /graphql"
+    )
     assert board.get_fact("globex", "f0003") is None  # exists only in acme
     assert board.get_fact("initech", "f0001") is None
 
@@ -838,10 +850,10 @@ def test_ids_and_reads_never_cross_engagements(tmp_path: Path) -> None:
     # A claim, a stop and a completion in one engagement leave the other alone.
     board.claim("acme", "i0001", "w1")
     assert board.claim("globex", "i0001", "w2")["worker"] == "w2"
-    assert board.get_intent("acme", "i0001")["worker"] == "w1"
+    assert _must(board.get_intent("acme", "i0001"))["worker"] == "w1"
     board.stop("acme")
-    assert board.get_intent("acme", "i0001")["status"] == "open"
-    assert board.get_intent("globex", "i0001")["worker"] == "w2"
+    assert _must(board.get_intent("acme", "i0001"))["status"] == "open"
+    assert _must(board.get_intent("globex", "i0001"))["worker"] == "w2"
     assert board.open_work("globex") == []
 
     board.add_hint("acme", "acme only hint", "operator")

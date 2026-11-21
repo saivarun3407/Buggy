@@ -248,7 +248,8 @@ def _project_one(b: _Builder, record: Mapping[str, Any]) -> None:
     kind = str(record.get("type") or "")
     value = str(record.get("value") or "")
     asset = str(record.get("asset") or "")
-    attrs = record.get("attrs") if isinstance(record.get("attrs"), Mapping) else {}
+    raw_attrs = record.get("attrs")
+    attrs: Mapping[str, Any] = raw_attrs if isinstance(raw_attrs, Mapping) else {}
 
     if kind == RecordType.SUBDOMAIN.value:
         name = normalize_host(value or asset)

@@ -38,21 +38,31 @@ SHARED = "198.51.100.80"  # one load balancer in front of many real names
 # ── the functions ───────────────────────────────────────────────────
 
 
-def _resolver(answers: dict[str, set[str]], wild: Callable[[str], set[str]] | None = None):
+class _Resolver:
     """``resolve`` over fixed answers; ``wild`` answers for every other name."""
-    asked: list[list[str]] = []
 
-    def resolve(names: list[str]) -> dict[str, set[str]]:
-        asked.append(list(names))
+    def __init__(
+        self, answers: dict[str, set[str]], wild: Callable[[str], set[str]] | None
+    ) -> None:
+        self.answers = answers
+        self.wild = wild
+        self.asked: list[list[str]] = []
+
+    def __call__(self, names: list[str]) -> dict[str, set[str]]:
+        self.asked.append(list(names))
         out = {}
         for name in names:
-            found = answers.get(name) or (wild(name) if wild else set())
+            found = self.answers.get(name) or (self.wild(name) if self.wild else set())
             if found:
                 out[name] = set(found)
         return out
 
-    resolve.asked = asked  # type: ignore[attr-defined]
-    return resolve
+
+def _resolver(
+    answers: dict[str, set[str]], wild: Callable[[str], set[str]] | None = None
+) -> _Resolver:
+    """``resolve`` over fixed answers; ``wild`` answers for every other name."""
+    return _Resolver(answers, wild)
 
 
 class TestProbeNames:

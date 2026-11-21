@@ -233,7 +233,7 @@ class FakeOpener:
     def __init__(self) -> None:
         self.requested: list[tuple[str, str]] = []
 
-    def open(self, request, timeout=None):  # noqa: ARG002
+    def open(self, request, timeout=None) -> io.BytesIO:  # noqa: ARG002
         url, method = request.full_url, request.get_method()
         self.requested.append((method, url))
         if url.endswith("/app.js"):
@@ -255,8 +255,8 @@ class _Body(io.BytesIO):
     def __enter__(self):
         return self
 
-    def __exit__(self, *_exc):
-        return False
+    def __exit__(self, *_exc) -> None:
+        return None
 
 
 @pytest.fixture

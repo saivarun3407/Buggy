@@ -28,6 +28,13 @@ from buggy.pipeline.query import ReconQueries
 from buggy.pipeline.schema import Record, RecordType
 from buggy.pipeline.store import ReconStore
 
+
+def _must[T](value: T | None) -> T:
+    """``value``, asserted present."""
+    assert value is not None
+    return value
+
+
 NOW = 1_800_000_000.0
 
 RECON = ("recon", "recon_summary")
@@ -505,7 +512,7 @@ class TestReconStates:
         run = recon_world.store.begin_run("acme", trigger="scope:new")
         recon_world.add_subdomains(run, "a.acme.test", "b.acme.test")
         recon_world.store.set_run_progress(run, stage="live", done=["enumerate", "dns"])
-        started = recon_world.store.get_run(run)["started_at"]
+        started = _must(recon_world.store.get_run(run))["started_at"]
         assert recon_world.recon(after_start=90.5) == {
             "available": True,
             "state": "running",
@@ -524,6 +531,7 @@ class TestReconStates:
         recon_world.add_subdomains(run, "a.acme.test")
         recon_world.store.finish_run(run, status="completed", stats={"scope_drops": 3})
         stored = recon_world.store.get_run(run)
+        assert stored is not None
         recon = recon_world.recon(after_start=5000)
         assert recon["state"] == "completed"
         assert recon["stage"] == "" and recon["stages_done"] == []

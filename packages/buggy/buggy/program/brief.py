@@ -248,7 +248,8 @@ def in_scope(program: dict[str, Any], host: str) -> bool:
 
 
 def _record_host(record: dict[str, Any]) -> str:
-    attrs = record.get("attrs") if isinstance(record.get("attrs"), dict) else {}
+    raw_attrs = record.get("attrs")
+    attrs: dict[str, Any] = raw_attrs if isinstance(raw_attrs, dict) else {}
     for value in (attrs.get("url"), record.get("value")):
         host = _host(value)
         if host and "." in host and " " not in host:
@@ -403,7 +404,8 @@ def _section(status: str, items: list[dict[str, Any]], note: str = "") -> dict[s
 
 
 def _scope_summary(program: dict[str, Any]) -> list[dict[str, Any]]:
-    caps = program.get("severity_caps") if isinstance(program.get("severity_caps"), dict) else {}
+    raw_caps = program.get("severity_caps")
+    caps: dict[Any, Any] = raw_caps if isinstance(raw_caps, dict) else {}
     lowered = {str(k).strip().lower(): str(v).strip().lower() for k, v in caps.items()}
     offers = program.get("offers_bounties")
     out = []

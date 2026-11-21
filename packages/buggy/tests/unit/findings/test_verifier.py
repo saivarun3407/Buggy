@@ -182,6 +182,7 @@ class TestIdor:
         assert len(replays) == 2 and not set(replays) & set(cited)
         for replay_id, cited_id in zip(replays, cited, strict=True):
             replay = env.gateway.store.get("acme", replay_id)
+            assert replay is not None
             assert replay.replay_of == cited_id and replay.note == "verifier"
             assert replay.status == 200
         # The verifier really re-sent both requests, with the credentials of the cited captures.
@@ -598,13 +599,17 @@ def _declare(roots: Roots, tokens: dict[str, str], engagement: str = "acme") -> 
     (folder / "identities.json").write_text(json.dumps(document))
 
 
-class _LegacyGateway(CaptureGateway):
-    """A gateway whose ``send`` has no ``identity`` argument."""
+def _legacy_gateway(gateway: CaptureGateway, monkeypatch: pytest.MonkeyPatch) -> CaptureGateway:
+    """``gateway`` with a ``send`` that has no ``identity`` argument."""
+    original = gateway.send
 
-    def send(self, engagement, method, url, *, headers=None, body=None, note="", replay_of=""):
-        return super().send(
+    def send(engagement, method, url, *, headers=None, body=None, note="", replay_of=""):
+        return original(
             engagement, method, url, headers=headers, body=body, note=note, replay_of=replay_of
         )
+
+    monkeypatch.setattr(gateway, "send", send)
+    return gateway
 
 
 class TestIdentities:
@@ -669,6 +674,7 @@ class TestIdentities:
             assert fresh.status == "exploit_verified"
             assert env.site.seen[-1][2]["authorization"] == "Bearer bob-2"
             replay = env.gateway.store.get("acme", fresh.results[1]["replay_capture_id"])
+            assert replay is not None
             assert replay.identity == "bob"
         finally:
             env.close()
@@ -688,10 +694,13 @@ class TestIdentities:
             env.close()
 
     def test_a_gateway_without_identity_support_is_not_asked_and_nothing_is_sent(
-        self, env: Env
+        self, env: Env, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        gateway = _LegacyGateway(
-            env.roots, store=env.gateway.store, opener=env.site, sleep=lambda _s: None
+        gateway = _legacy_gateway(
+            CaptureGateway(
+                env.roots, store=env.gateway.store, opener=env.site, sleep=lambda _s: None
+            ),
+            monkeypatch,
         )
         finding = self._rotated(env, gateway)
         sent = len(env.site.seen)

@@ -381,8 +381,9 @@ def to_json(report: Report) -> str:
 
 def _recon_rows(recon: dict[str, Any] | None) -> list[tuple[str, str]]:
     rows: list[tuple[str, str]] = []
-    for key in sorted(recon or {}, key=str):
-        value = recon[key]
+    source = recon or {}
+    for key in sorted(source, key=str):
+        value = source[key]
         shown = value if isinstance(value, str) else json.dumps(value, sort_keys=True, default=str)
         rows.append((str(key), shown))
     return rows

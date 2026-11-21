@@ -32,6 +32,13 @@ from .test_probes_find_known_bugs import (
     lab,  # noqa: F401 - the module-scoped lab fixture
 )
 
+
+def _must[T](value: T | None) -> T:
+    """``value``, asserted present."""
+    assert value is not None
+    return value
+
+
 _SHARED = bool(os.environ.get("BUGGY_LAB_JUICE_URL") and os.environ.get("BUGGY_LAB_DVGA_URL"))
 
 pytestmark = [
@@ -76,8 +83,10 @@ def test_sqli_probe_finds_product_search_injection(lab: Lab) -> None:  # noqa: F
     assert details["error"]["control_signatures"] == []
     _check_evidence(lab, result)
     quote = lab.gateway.store.get(ENGAGEMENT, details["captures"]["error_quote"])
+    assert quote is not None
     assert b"SQLITE_ERROR" in quote.response_body
     control = lab.gateway.store.get(ENGAGEMENT, details["captures"]["error_control"])
+    assert control is not None
     assert b"SQLITE_ERROR" not in control.response_body
 
 
@@ -153,7 +162,9 @@ def test_sqli_probe_finds_graphql_filter_injection(lab: Lab) -> None:  # noqa: F
     _check_evidence(lab, result)
     # The TRUE condition returned this test's paste; the FALSE condition returned nothing.
     true = lab.gateway.store.get(ENGAGEMENT, details["captures"]["boolean_true_string"])
+    assert true is not None
     false = lab.gateway.store.get(ENGAGEMENT, details["captures"]["boolean_false_string"])
+    assert false is not None
     assert [p["title"] for p in json.loads(true.response_body)["data"]["pastes"]] == [title]
     assert json.loads(false.response_body)["data"]["pastes"] == []
 
@@ -294,6 +305,7 @@ def test_xss_probe_reports_json_reflection_as_not_exploitable(lab: Lab) -> None:
     _check_xss_evidence(lab, result)
     # The value really is reflected, as a JSON string, in the response it was judged on.
     baseline = lab.gateway.store.get(ENGAGEMENT, details["captures"]["baseline"])
+    assert baseline is not None
     assert baseline.status == 200
     assert json.loads(baseline.response_body)["data"][0]["orderId"] == details["marker"]
 
@@ -314,7 +326,7 @@ def test_xss_probe_does_not_flag_an_entity_encoded_error_page(lab: Lab) -> None:
     _check_xss_evidence(lab, result)
     # The probe strings came back, with their angle brackets as entities and no new element.
     for context in details["contexts"]:
-        body = lab.gateway.store.get(ENGAGEMENT, context["capture"]).response_body.decode()
+        body = _must(lab.gateway.store.get(ENGAGEMENT, context["capture"])).response_body.decode()
         marker = context["marker"]
         assert f"&lt;{marker}x&gt;" in body and f"<{marker}x>" not in body
 
@@ -338,7 +350,7 @@ def test_xss_probe_does_not_flag_an_escaped_script_string(lab: Lab) -> None:  # 
     assert details["requests_sent"] == 2
     _check_xss_evidence(lab, result)
     # Neither way out worked: the quote is backslash-escaped and "<" is \u003c.
-    body = lab.gateway.store.get(ENGAGEMENT, context["capture"]).response_body.decode()
+    body = _must(lab.gateway.store.get(ENGAGEMENT, context["capture"])).response_body.decode()
     marker = context["marker"]
     assert f'\\";{marker}//\\u003c/script\\u003e' in body
     assert f"<{marker}x>" not in body
@@ -395,6 +407,7 @@ def _check_execution_evidence(lab: Lab, result: dict[str, Any], bound: int) -> N
 
 def _graphql_data(lab: Lab, result: dict[str, Any], role: str) -> Any:  # noqa: F811
     capture = lab.gateway.store.get(ENGAGEMENT, result["details"]["captures"][role])
+    assert capture is not None
     return json.loads(capture.response_body)["data"]
 
 
@@ -550,6 +563,7 @@ def test_ssti_probe_does_not_flag_a_reflecting_error_page(lab: Lab) -> None:  # 
     _check_execution_evidence(lab, result, 8)
     numbers = details["numbers"]
     page = lab.gateway.store.get(ENGAGEMENT, details["captures"]["canary_jinja2_twig"])
+    assert page is not None
     assert f"x{{{{{numbers['a']}*{numbers['b']}}}}}".encode() in page.response_body
     assert str(numbers["product"]).encode() not in page.response_body
 
@@ -641,6 +655,7 @@ def test_open_redirect_probe_finds_the_juice_shop_allowlist_bypass(lab: Lab) -> 
         ("fragment", 302),
     ]
     proof = lab.gateway.store.get(ENGAGEMENT, details["captures"]["fragment"])
+    assert proof is not None
     location = next(v for k, v in proof.response_headers.items() if k.lower() == "location")
     assert location == f"https://{host}/#{_ALLOWED_REDIRECT}"
     _check_c4_evidence(lab, result, 6)

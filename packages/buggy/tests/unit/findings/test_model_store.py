@@ -27,6 +27,13 @@ from buggy.findings.model import (
 )
 from buggy.findings.store import FindingNotFound, FindingStore, IllegalTransition
 
+
+def _must[T](value: T | None) -> T:
+    """``value``, asserted present."""
+    assert value is not None
+    return value
+
+
 # The keys of the Finding contract in board/CONTRACTS.md, in its order.
 CONTRACT_KEYS = [
     "id",
@@ -334,7 +341,7 @@ class TestStore:
         assert (first.created_at, first.updated_at) == (1000.0, 1000.0)
 
         assert store.get("acme", first.id) == first
-        assert store.get("acme", first.id).to_dict() == first.to_dict()
+        assert _must(store.get("acme", first.id)).to_dict() == first.to_dict()
         assert store.get("acme", "F-000000000000") is None
         # A finding is visible only inside its own engagement.
         assert store.get("other", first.id) is None and store.get("acme", elsewhere.id) is None
@@ -356,6 +363,7 @@ class TestStore:
         again = store.upsert(replace(first, title="Sharper title", severity="critical"), "agent:b")
         assert again.id == first.id and len(store.list("acme")) == 1
         stored = store.get("acme", first.id)
+        assert stored is not None
         assert (stored.title, stored.severity) == ("Sharper title", "critical")
         assert stored.created_at == first.created_at and stored.updated_at > first.updated_at
         assert stored.assertions == first.assertions
@@ -394,6 +402,7 @@ class TestStore:
 
         # Nothing was written by the refused changes.
         stored = store.get("acme", finding.id)
+        assert stored is not None
         assert stored.status == final and stored.title == finding.title
         assert store.events("acme", finding.id) == history
 
@@ -419,7 +428,7 @@ class TestStore:
             store.set_status("acme", "F-000000000000", "inconclusive", actor="verifier")
         with pytest.raises(FindingNotFound):  # right id, wrong engagement
             store.set_status("other", finding.id, "inconclusive", actor="verifier")
-        assert store.get("acme", finding.id).status == "candidate"
+        assert _must(store.get("acme", finding.id)).status == "candidate"
 
     def test_set_status_stores_the_verification_record(self, store: FindingStore) -> None:
         finding = store.upsert(_finding(), "agent:hunter")
@@ -481,7 +490,7 @@ class TestEvents:
             store.set_status("acme", finding.id, "inconclusive", actor=actor)
         with pytest.raises(ValueError, match="actor is required"):
             store.add_event("acme", finding.id, actor, "note")
-        assert store.get("acme", finding.id).status == "candidate"
+        assert _must(store.get("acme", finding.id)).status == "candidate"
         assert len(store.events("acme", finding.id)) == 1
 
     def test_history_cannot_be_rewritten_or_deleted(self, store: FindingStore) -> None:

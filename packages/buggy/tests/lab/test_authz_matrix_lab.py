@@ -147,6 +147,7 @@ def test_matrix_finds_the_basket_idor_both_ways(shop: Shop) -> None:
     assert received["id"] == shop.alice["bid"]
     assert [p["id"] for p in received["Products"]] == [1]
     sent = shop.lab.gateway.store.get(ENGAGEMENT, attacker["capture_id"])
+    assert sent is not None
     assert sent.identity == "bob" and sent.method == "GET" and sent.url == mine
 
     # The evidence can be reproduced by the gateway, as bob.

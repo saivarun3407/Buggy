@@ -334,7 +334,8 @@ def to_sarif(report: dict[str, Any], *, tool_version: str) -> dict[str, Any]:
         if not isinstance(value, list):
             raise ValueError(f"the report's {key!r} must be a list")
         sections[key] = value
-    summary = report.get("summary") if isinstance(report.get("summary"), dict) else {}
+    raw_summary = report.get("summary")
+    summary: dict[str, Any] = raw_summary if isinstance(raw_summary, dict) else {}
 
     verified: list[dict[str, Any]] = []
     not_results = 0

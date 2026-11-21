@@ -49,6 +49,13 @@ from buggy.findings.store import FindingStore
 from buggy.pipeline.report import rank_candidates
 from buggy.pipeline.tools.nuclei import Nuclei
 
+
+def _must[T](value: T | None) -> T:
+    """``value``, asserted present."""
+    assert value is not None
+    return value
+
+
 REPO_ROOT = Path(__file__).resolve().parents[5]
 BASE = "https://app.acme.test"
 ORDER = f"{BASE}/api/orders/1001"
@@ -185,7 +192,7 @@ class Env:
         found = [
             capture_id
             for capture_id in result["evidence_capture_ids"]
-            if fragment in self.gateway.store.get("acme", capture_id).note
+            if fragment in _must(self.gateway.store.get("acme", capture_id)).note
         ]
         assert len(found) == 1, (fragment, found)
         return found[0]
@@ -805,6 +812,7 @@ class TestFromProbe:
         assert not case.technique or result["details"]["technique"] == case.technique
 
         candidate = from_probe(result, "acme", case.url)
+        assert candidate is not None
 
         assert candidate["assertions"] == case.expected(env, result)
         assert candidate["source"] == f"probe:{case.probe}" and candidate["status"] == "candidate"
@@ -819,7 +827,7 @@ class TestFromProbe:
 
         out = enqueue(env.service, [candidate], "queue")
         assert out["ok"] and out["ids"] == [candidate["id"]], out
-        stored = env.store.get("acme", candidate["id"]).to_dict()
+        stored = _must(env.store.get("acme", candidate["id"])).to_dict()
         assert stored["assertions"] == candidate["assertions"]
         assert stored["method"] == case.method
         sent = len(env.site.seen)  # queueing sent nothing; the verifier now re-sends
@@ -839,6 +847,7 @@ class TestFromProbe:
     ) -> None:
         case = CASES[name](env)
         candidate = from_probe(_probe(env, case), "acme", case.url)
+        assert candidate is not None
         enqueue(env.service, [candidate], "queue")
         (case.to_break or case.fix)()
         verified = env.service.verify(
@@ -888,7 +897,8 @@ class TestFromProbe:
         assert env.store.list("acme") == []
         # Control: the very same result, had the probe said "vulnerable", is a candidate.
         assert (
-            from_probe({**result, "vulnerable": True}, "acme", ORDER)["class"] == "access_control"
+            _must(from_probe({**result, "vulnerable": True}, "acme", ORDER))["class"]
+            == "access_control"
         )
 
     @pytest.mark.parametrize("verdict", [None, False, "true", 1, "missing"])
@@ -929,9 +939,10 @@ class TestFromProbe:
             "details": {"parameter": "from_details", "captures": {"proof": "cap-1"}},
         }
         candidate = from_probe(result, "acme", FETCH, parameter="url")
+        assert candidate is not None
         assert candidate["parameter"] == "url" and candidate["class"] == "ssrf"  # from the CWE
         assert candidate["assertions"] == [] and candidate["source"] == "probe:homemade"
-        assert from_probe(result, "acme", FETCH)["parameter"] == "from_details"
+        assert _must(from_probe(result, "acme", FETCH))["parameter"] == "from_details"
 
 
 # ── the ranked surface ──────────────────────────────────────────────
@@ -1197,7 +1208,7 @@ class TestClaims:
             "queue",
         )
         assert merged["merged"] == 1
-        assert env.store.get("acme", first).source == "agent:hunter | probe:idor"
+        assert _must(env.store.get("acme", first)).source == "agent:hunter | probe:idor"
         assert first not in self._next(env, "agent:b", limit=5)
         assert self._next(env, "agent:a") == [first]
 
@@ -1245,7 +1256,7 @@ class TestClaims:
         for _ in range(2):  # opening twice adds the columns once
             store = FindingStore(path, clock=lambda: 20.0)
             assert {"claimed_by", "claimed_at"} <= columns()
-            assert store.get("acme", old_id).title == "old lead"
+            assert _must(store.get("acme", old_id)).title == "old lead"
             assert _ids(next_candidates(store, "acme", claimed_by="agent:a")) == [old_id]
             assert next_candidates(store, "acme", claimed_by="agent:b") == []
             store.close()

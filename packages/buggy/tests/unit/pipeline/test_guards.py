@@ -176,12 +176,15 @@ class TestScopedHTTP:
             {"https://www.acme.test/a": (301, "/b"), "https://www.acme.test/b": b"hello"}
         )
         response = client.get("https://www.acme.test/a")
+        assert response is not None
         assert response.status == 200 and response.text() == "hello"
         assert response.url == "https://www.acme.test/b" and client.requests_sent == 2
 
     def test_error_status_and_bad_scheme(self) -> None:
         client, _ = self._client({})
-        assert client.get("https://www.acme.test/missing").status == 404
+        missing = client.get("https://www.acme.test/missing")
+        assert missing is not None
+        assert missing.status == 404
         with pytest.raises(OutOfScopeRequest, match="scheme"):
             client.get("file:///etc/passwd")
 
@@ -506,6 +509,7 @@ class TestRerunWorker:
         store = ReconStore(root / service.STORE_FILE)
         try:
             closed = store.get_run(run)
+            assert closed is not None
             assert closed["status"] == "interrupted" and closed["finished_at"]
             assert "stopped mid-run" in closed["stats"]["error"]
             assert closed["stats"]["stage"] == "issues"  # where it stopped is kept

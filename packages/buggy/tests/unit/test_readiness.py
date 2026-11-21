@@ -223,6 +223,7 @@ def test_generated_script_runs_for_real_with_sh(tmp_path, monkeypatch):
         stderr=subprocess.PIPE,
         text=True,
     ) as proc:
+        assert proc.stdin is not None and proc.stdout is not None and proc.stderr is not None
         stdout = proc.stdout.read()
         stderr = proc.stderr.read()
         returncode = proc.wait(timeout=60)

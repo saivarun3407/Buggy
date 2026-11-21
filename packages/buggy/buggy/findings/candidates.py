@@ -324,7 +324,8 @@ def _idor(ids: list[str], details: dict[str, Any]) -> list[dict[str, Any] | None
     ]
     open_status = details.get("unauthenticated_status")
     if (
-        _is_status(open_status)
+        isinstance(open_status, int)
+        and _is_status(open_status)
         and 200 <= open_status < 300
         and _number(details.get("unauthenticated_similarity")) >= _IDOR_EXPOSED
     ):

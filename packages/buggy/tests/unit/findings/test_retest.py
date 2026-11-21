@@ -28,6 +28,13 @@ from buggy.cli import retest as retest_cli
 from buggy.findings.retest import NO_CONTROL, STATE_CHANGE_NOT_ALLOWED, UNSTABLE, retest
 from buggy.findings.store import FindingStore
 
+
+def _must[T](value: T | None) -> T:
+    """``value``, asserted present."""
+    assert value is not None
+    return value
+
+
 INVOICE = "https://app.acme.test/api/invoices/5"
 ADMIN = "https://app.acme.test/admin/users"
 COUPON = "https://app.acme.test/api/coupons/apply"
@@ -114,6 +121,7 @@ def verified_idor(env: Env, url: str = ORDER) -> str:
 
 def row(env: Env, finding: str) -> dict:
     stored = env.store.get("acme", finding)
+    assert stored is not None
     return {"status": stored.status, "verification": stored.verification, "at": stored.updated_at}
 
 
@@ -132,7 +140,7 @@ class TestOutcomes:
         assert len(out["attempts"]) == 1 and len(env.site.seen) == 2
         assert len(out["capture_ids"]) == 2
         for capture_id in out["capture_ids"]:
-            assert env.gateway.store.get("acme", capture_id).note == "verifier"
+            assert _must(env.gateway.store.get("acme", capture_id)).note == "verifier"
         assert out["fixed_at"] is None and out["regressed"] is False
         assert row(env, finding) == before  # status, verification, updated_at untouched
         state = env.store.retest_state("acme", finding)
@@ -215,7 +223,7 @@ class TestOutcomes:
         assert names[-2:] == ["regressed", "retest"]
         (regressed,) = [e for e in env.store.events("acme", finding) if e["event"] == "regressed"]
         assert regressed["detail"]["fixed_at"] == fixed["fixed_at"]
-        assert env.store.get("acme", finding).status == "exploit_verified"
+        assert _must(env.store.get("acme", finding)).status == "exploit_verified"
         # Still vulnerable once more: no second regression.
         retest(env.service, "acme", finding)
         assert events(env, finding).count("regressed") == 1
@@ -499,7 +507,7 @@ class TestCli:
         lines = out.strip().splitlines()
         assert len(lines) == 2
         assert {line.split()[0] for line in lines} == {first, second}
-        assert env.store.get("acme", first).status == "exploit_verified"
+        assert _must(env.store.get("acme", first)).status == "exploit_verified"
 
     @pytest.mark.parametrize(("mode", "expected"), [("fixed", 0), ("vulnerable", 10), ("down", 3)])
     def test_one_finding(self, env: Env, cli, mode: str, expected: int) -> None:

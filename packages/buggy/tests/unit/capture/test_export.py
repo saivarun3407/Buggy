@@ -485,7 +485,7 @@ class _Recorder(BaseHTTPRequestHandler):
 
     do_GET = do_HEAD = do_POST = do_PUT = do_PATCH = do_DELETE = do_OPTIONS = _handle
 
-    def log_message(self, *_args) -> None:
+    def log_message(self, format: str, *args: object) -> None:
         pass
 
 

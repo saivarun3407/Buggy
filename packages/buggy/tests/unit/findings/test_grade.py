@@ -41,6 +41,13 @@ from buggy.pipeline.tools.nuclei import Nuclei
 from buggy.program import gate
 from buggy.program.record import BASELINE_BANNED_TECHNIQUES
 
+
+def _must[T](value: T | None) -> T:
+    """``value``, asserted present."""
+    assert value is not None
+    return value
+
+
 ORDER = "https://app.acme.test/api/orders/1001"
 REMEDIATION = "Check that the order belongs to the caller before returning it."
 REASON = re.compile(r"^Rule ([1-8]) \(([a-z ]+)\): [A-Za-z][^\n]*\.$")
@@ -119,7 +126,7 @@ def _grade(finding: Finding | None = None, **inputs) -> Grade:
 
 
 def _rules(outcome: Grade) -> list[int]:
-    return [int(REASON.match(reason).group(1)) for reason in outcome.reasons]
+    return [int(_must(REASON.match(reason)).group(1)) for reason in outcome.reasons]
 
 
 class TestSubmit:
@@ -876,6 +883,7 @@ class TestService:
         json.dumps(out)
 
         stored = env.store.get("acme", finding_id)
+        assert stored is not None
         assert stored.grade == "submit" and list(stored.grade_reasons) == out["grade"]["reasons"]
         assert [f.id for f in env.store.list("acme", grade="submit")] == [finding_id]
         event = env.store.events("acme", finding_id)[-1]
@@ -961,10 +969,10 @@ class TestService:
         assert no_scope["detail"]
 
         assert env.store.events("acme", finding_id) == before
-        assert env.store.get("acme", finding_id).grade is None
+        assert _must(env.store.get("acme", finding_id)).grade is None
 
     def test_a_finding_of_another_engagement_is_not_graded(self, env: Env) -> None:
         finding_id = env.verified()
         out = env.service.grade("globex", finding_id)
         assert (out["ok"], out["code"]) == (False, "UNKNOWN_FINDING")
-        assert env.store.get("acme", finding_id).grade is None
+        assert _must(env.store.get("acme", finding_id)).grade is None

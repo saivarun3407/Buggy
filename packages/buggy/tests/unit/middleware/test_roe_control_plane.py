@@ -233,7 +233,7 @@ class _GuardStub:
         stub = self
 
         class Handler(BaseHTTPRequestHandler):
-            def log_message(self, *_args) -> None:
+            def log_message(self, format: str, *args: object) -> None:
                 return
 
             def do_POST(self) -> None:  # noqa: N802

@@ -36,7 +36,7 @@ class _Origin:
         origin = self
 
         class Handler(BaseHTTPRequestHandler):
-            def log_message(self, *_args) -> None:
+            def log_message(self, format: str, *args: object) -> None:
                 return
 
             def _serve(self) -> None:

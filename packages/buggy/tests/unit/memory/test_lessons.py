@@ -22,6 +22,12 @@ from buggy.memory.lessons import (
 )
 
 
+def _must[T](value: T | None) -> T:
+    """``value``, asserted present."""
+    assert value is not None
+    return value
+
+
 class Clock:
     """A clock the test moves; every reading is later than the one before."""
 
@@ -225,12 +231,12 @@ def test_returned_lessons_count_a_use_and_others_do_not(tmp_path: Path) -> None:
     assert first[0]["last_used_at"] == clock.now
     store.search("cors", include_unverified=True)
 
-    assert store.get(hit)["uses"] == 2
-    assert store.get(hit)["last_used_at"] == clock.now
-    assert store.get(miss)["uses"] == 0 and store.get(miss)["last_used_at"] is None
+    assert _must(store.get(hit))["uses"] == 2
+    assert _must(store.get(hit))["last_used_at"] == clock.now
+    assert _must(store.get(miss))["uses"] == 0 and _must(store.get(miss))["last_used_at"] is None
     # A lesson the default search hides is not counted either.
     store.search("cors")
-    assert store.get(hit)["uses"] == 2
+    assert _must(store.get(hit))["uses"] == 2
 
 
 # ── trust ───────────────────────────────────────────────────────────────
@@ -255,7 +261,7 @@ def test_agent_supplied_trust_is_ignored(tmp_path: Path) -> None:
     for lesson_id in (as_dict, as_object, truthy):
         stored = store.get(lesson_id)
         assert stored is not None and stored["trust"] == "unverified"
-    assert store.get(as_dict)["uses"] == 0 and as_dict != "L-x"
+    assert _must(store.get(as_dict))["uses"] == 0 and as_dict != "L-x"
     assert store.search("trust") == []  # hidden like any unverified lesson
     assert store.stats()["verified"] == 0
 
@@ -267,7 +273,7 @@ def test_only_the_verified_finding_flag_makes_a_lesson_verified(tmp_path: Path) 
         "integrator",
         verified_finding=True,
     )
-    assert store.get(lesson_id)["trust"] == "verified"
+    assert _must(store.get(lesson_id))["trust"] == "verified"
     assert [item["id"] for item in store.search("mass assignment")] == [lesson_id]
 
     with pytest.raises(LessonError, match="finding_id"):
@@ -288,6 +294,7 @@ def test_resaving_cannot_downgrade_or_retag_a_verified_lesson(tmp_path: Path) ->
     )
 
     stored = store.get(lesson_id)
+    assert stored is not None
     assert again == lesson_id and store.count() == 1
     assert stored["trust"] == "verified"
     assert stored["technologies"] == ["express"]
@@ -306,6 +313,7 @@ def test_verified_resave_promotes_an_unverified_lesson(tmp_path: Path) -> None:
         verified_finding=True,
     )
     stored = store.get(lesson_id)
+    assert stored is not None
     assert promoted == lesson_id and store.count() == 1
     assert stored["trust"] == "verified" and stored["finding_id"] == "F-7"
     assert stored["technologies"] == ["express", "angular"]
@@ -549,16 +557,16 @@ def test_body_limit(tmp_path: Path) -> None:
     at_limit = ("technique " * 200)[:-1] + "s"
     assert len(at_limit) == MAX_BODY_CHARS
     exact = store.save(_lesson("at the limit", body=at_limit), "agent")
-    assert store.get(exact)["body"] == at_limit
-    assert len(store.get(exact)["body"]) == MAX_BODY_CHARS == 2000
+    assert _must(store.get(exact))["body"] == at_limit
+    assert len(_must(store.get(exact))["body"]) == MAX_BODY_CHARS == 2000
     with pytest.raises(LessonError, match="2000"):
         store.save(_lesson("over the limit", body=at_limit + "s"), "agent")
     # Scrubbing can lengthen a body ("a.io" -> "<target>"); the stored one still fits.
     grown = store.save(
         _lesson("grows when scrubbed", body="a.io " * 400), "agent", scope_hosts=["a.io"]
     )
-    assert len(store.get(grown)["body"]) <= MAX_BODY_CHARS
-    assert "a.io" not in store.get(grown)["body"]
+    assert len(_must(store.get(grown))["body"]) <= MAX_BODY_CHARS
+    assert "a.io" not in _must(store.get(grown))["body"]
     assert store.count() == 2
 
 
@@ -664,7 +672,7 @@ def test_for_engagement_briefs_on_matching_verified_lessons(tmp_path: Path) -> N
     briefing = store.for_engagement(["GraphQL", "Express"], ["auth_session"])
     assert [item["id"] for item in briefing] == [express, graphql, by_class]
     assert all(item["trust"] == "verified" for item in briefing)
-    assert store.get(graphql)["uses"] == 1
+    assert _must(store.get(graphql))["uses"] == 1
     json.dumps(briefing)
 
     assert store.for_engagement(["express"], limit=1)[0]["id"] == express

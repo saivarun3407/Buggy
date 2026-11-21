@@ -63,7 +63,7 @@ class _Server:
 
 
 class _Target(BaseHTTPRequestHandler):
-    def log_message(self, *_args) -> None:
+    def log_message(self, format: str, *args: object) -> None:
         return
 
     def do_GET(self) -> None:  # noqa: N802

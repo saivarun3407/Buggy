@@ -89,7 +89,7 @@ class Hook:
             do_POST = _take  # noqa: N815
             do_GET = _take  # noqa: N815
 
-            def log_message(self, *_args: Any) -> None:
+            def log_message(self, format: str, *args: object) -> None:
                 pass
 
         self._server = ThreadingHTTPServer(("127.0.0.1", 0), Handler)

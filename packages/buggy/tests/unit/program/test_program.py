@@ -380,15 +380,20 @@ def _finding(**overrides) -> dict:
     return {**base, **overrides}
 
 
-def _verifier(results: dict[str, dict] | None = None):
-    calls: list[tuple[str, str]] = []
+class _Verifier:
+    def __init__(self, results: dict[str, dict] | None) -> None:
+        self.results = results
+        self.calls: list[tuple[str, str]] = []
 
-    def verify(capture_id: str, target: str) -> dict:
-        calls.append((capture_id, target))
-        return (results or {}).get(capture_id, {"valid": True, "method": "GET", "reproduced": True})
+    def __call__(self, capture_id: str, target: str) -> dict:
+        self.calls.append((capture_id, target))
+        return (self.results or {}).get(
+            capture_id, {"valid": True, "method": "GET", "reproduced": True}
+        )
 
-    verify.calls = calls  # type: ignore[attr-defined]
-    return verify
+
+def _verifier(results: dict[str, dict] | None = None) -> _Verifier:
+    return _Verifier(results)
 
 
 class TestFindingRules:
