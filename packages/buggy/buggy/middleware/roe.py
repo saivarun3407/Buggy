@@ -122,6 +122,7 @@ GATED_TOOL_NAMES: frozenset[str] = frozenset(
         "browser_open",
         "probe_run",
         "authz_matrix_run",
+        "surface_crawl",
     }
 )
 
@@ -184,6 +185,18 @@ def _hosts_from_matrix(args: dict[str, Any]) -> list[str]:
     return hosts
 
 
+def _hosts_from_crawl(args: dict[str, Any]) -> list[str]:
+    """The hosts of a surface crawl's seeds (``seeds_json``); it follows no other host."""
+    raw = args.get("seeds_json")
+    try:
+        seeds = json.loads(raw) if isinstance(raw, str) else raw
+    except (json.JSONDecodeError, ValueError):
+        return []
+    if not isinstance(seeds, list):
+        return []
+    return [host for seed in seeds for host in _host_from_url(seed)]
+
+
 def _hosts_from_web_search(_args: dict[str, Any]) -> list[str]:
     """OSINT exemption: web_search hits an allowlisted provider, not a target.
 
@@ -204,6 +217,7 @@ NETWORK_TARGET_EXTRACTORS: dict[str, Callable[[dict[str, Any]], list[str]]] = {
     "browser_open": _hosts_from_url_arg,
     "probe_run": _hosts_from_probe_run,
     "authz_matrix_run": _hosts_from_matrix,
+    "surface_crawl": _hosts_from_crawl,
 }
 
 

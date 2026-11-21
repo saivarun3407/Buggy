@@ -30,7 +30,7 @@ from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
-from buggy.capture import authz_matrix
+from buggy.capture import authz_matrix, crawl
 from buggy.capture import export as evidence
 from buggy.capture.canary import Canary
 from buggy.capture.gateway import CaptureGateway, GatewayRefusal
@@ -73,6 +73,7 @@ WORKBENCH_TOOL_NAMES = (
     "identities_list",
     "authz_matrix_run",
     "owners_infer",
+    "surface_crawl",
     "memory_search",
     "memory_save",
     "fact_add",
@@ -231,7 +232,11 @@ class Workbench:
         ids = queued.get("ids") or []
         if not ids:
             return {**result, "queue": {"queued": False, "errors": queued.get("errors")}}
-        self.probe_runs.record(engagement, ids[0], probe, url, params)
+        # The run's identity is part of how to run it again: the re-run is sent as
+        # the same account (run_probe already put it in the params it was given).
+        identity = str(result.get("identity") or "")
+        recorded = {**params, "identity": identity} if identity else params
+        self.probe_runs.record(engagement, ids[0], probe, url, recorded)
         return {**result, "finding_id": ids[0], "queue": {"queued": True}}
 
     def _prover(self, engagement: str) -> Callable[[Finding], verifier.Verification | None]:
@@ -511,6 +516,35 @@ class Workbench:
 
         return self._guard(run)
 
+    # ── the signed-in surface crawl ──────────────────────────────────
+
+    def surface_crawl(
+        self,
+        engagement: str,
+        seeds_json: str,
+        identity: str = "",
+        max_requests: int = crawl.DEFAULT_MAX_REQUESTS,
+    ) -> dict[str, Any]:
+        def run() -> dict[str, Any]:
+            name = self._engagement(engagement)
+            seeds = _json(seeds_json, "seeds_json", list, [])
+            if not seeds:
+                raise _refuse("BAD_ARGUMENT", "seeds_json must list at least one URL")
+            if not isinstance(identity, str):
+                raise _refuse("BAD_ARGUMENT", "identity must be the name of a test account")
+            return {
+                "ok": True,
+                **crawl.crawl(
+                    self.gateway,
+                    name,
+                    [str(seed) for seed in seeds],
+                    identity=identity,
+                    max_requests=max(1, min(int(max_requests), crawl.MAX_REQUESTS)),
+                ),
+            }
+
+        return self._guard(run)
+
     # ── lessons ──────────────────────────────────────────────────────
 
     def memory_search(
@@ -752,6 +786,15 @@ def register_workbench(mcp: Any, bench: Workbench) -> None:
         crawler's [{identity, urls, pages}]. A URL only one identity reached is a hint of
         ownership; pass those URLs as inferred_json to authz_matrix_run. Sends nothing."""
         return bench.owners_infer(engagement, reached_json)
+
+    @mcp.tool()
+    def surface_crawl(
+        engagement: str, seeds_json: str, identity: str = "", max_requests: int = 120
+    ) -> dict[str, Any]:
+        """Crawl same-host links breadth-first from seed URLs, GET only, optionally signed in
+        as a declared identity. Never requests logout/delete-style URLs; records forms
+        without submitting them. Returns pages (capture ids), URLs, forms and what it skipped."""
+        return bench.surface_crawl(engagement, seeds_json, identity, max_requests)
 
     @mcp.tool()
     def memory_search(

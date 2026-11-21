@@ -488,3 +488,50 @@ def test_the_matrix_tool_is_gated_on_every_url_it_would_request() -> None:
         "b.test",
         "c.test",
     ]
+
+
+def test_a_probe_and_a_surface_crawl_run_as_a_declared_identity(stack) -> None:
+    _lab_scope(stack)
+    secret = "tok-" + "4b8e1d0c7a3f"  # built at runtime: not a real credential
+    folder = stack["secrets"] / "acme"
+    folder.mkdir(parents=True)
+    alice = {"name": "alice", "static": {"headers": {"Authorization": f"Bearer {secret}"}}}
+    (folder / "identities.json").write_text(json.dumps({"identities": [alice]}))
+    assert "identity" in _call(stack_mcp.probe_list)["identity"]
+
+    probe = _call(
+        stack_mcp.probe_run,
+        probe="cors",
+        params_json=json.dumps({"url": stack["target"] + "/", "identity": "alice"}),
+    )
+    assert probe["status"] == "completed" and probe["identity"] == "alice", probe
+    assert secret not in json.dumps(probe)
+    refused = _call(
+        stack_mcp.probe_run,
+        probe="cors",
+        params_json=json.dumps({"url": stack["target"] + "/", "identity": "mallory"}),
+    )
+    assert refused["code"] == "UNKNOWN_IDENTITY"
+
+    crawled = _call(
+        stack_mcp.surface_crawl,
+        seeds_json=json.dumps([stack["target"] + "/", stack["target"] + "/logout"]),
+        identity="alice",
+        max_requests=5,
+    )
+    assert crawled["ok"] and crawled["identity"] == "alice", crawled
+    assert crawled["requested"] == 1 and crawled["pages"][0]["status"] == 200
+    assert crawled["skipped"][0]["url"] == stack["target"] + "/logout"
+    capture = _call(stack_mcp.http_capture, capture_id=crawled["pages"][0]["capture_id"])
+    assert capture["identity"] == "alice" and capture["method"] == "GET"
+    assert secret not in json.dumps(crawled) + json.dumps(capture)
+
+
+def test_the_surface_crawl_is_gated_on_the_hosts_of_its_seeds() -> None:
+    assert "surface_crawl" in GATED_TOOL_NAMES
+    seeds = json.dumps(["https://a.test/", "https://b.test/x?y=1", 7])
+    extract = NETWORK_TARGET_EXTRACTORS["surface_crawl"]
+    assert extract({"seeds_json": seeds}) == ["a.test", "b.test"]
+    assert extract({"seeds_json": "not json"}) == []
+    assert extract({"seeds_json": '{"url": "x"}'}) == []
+    assert "surface_crawl" in {t.name for t in stack_mcp.ALL_STACK_MCP_TOOLS}

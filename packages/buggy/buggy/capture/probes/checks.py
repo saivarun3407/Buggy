@@ -146,7 +146,7 @@ def idor(ctx: Context, params: dict[str, Any]) -> ProbeResult:
         "markers_found": marker_hits,
     }
     if params.get("check_unauthenticated", True):
-        anonymous = ctx.send("GET", url, note="no credentials")
+        anonymous = ctx.send("GET", url, note="no credentials", anonymous=True)
         evidence.append(anonymous.id)
         details["unauthenticated_status"] = anonymous.status
         details["unauthenticated_similarity"] = (
@@ -382,6 +382,7 @@ def graphql_checks(ctx: Context, params: dict[str, Any]) -> ProbeResult:
         anonymous = ctx.send(
             "POST", url, headers={"Content-Type": "application/json"},
             body=json.dumps({"query": str(query)}), note="sensitive query without credentials",
+            anonymous=True,
         )  # fmt: skip
         evidence.append(anonymous.id)
         data = (

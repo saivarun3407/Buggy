@@ -404,7 +404,7 @@ def verify_by_probe(
     entry = {
         "index": 0,
         "capture_id": ids[0] if ids else "",
-        "identity": "",
+        "identity": str(result.get("identity") or ""),
         "outcome": PASSED if result.get("vulnerable") is True else FAILED,
         "replay_capture_id": ids[-1] if ids else "",
         "replay_status": None,

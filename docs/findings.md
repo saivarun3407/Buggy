@@ -180,6 +180,61 @@ response and in the response that should not have it. If the owner declares
 no markers, or its own response contains none, the verdict is `inconclusive`
 and nothing is queued. A declared owner is judged as before.
 
+## Testing as a signed-in account
+
+Most of an application sits behind its login. Two tools reach it as a declared
+test account, without the agent ever holding the account's credentials.
+
+**Probes.** `probe_run` accepts a top-level `"identity": "<name>"` in
+`params_json`. Every request of the run is then sent as that account: the
+gateway attaches its session, logging in first if needed. The result and its
+captures name the identity. A positive result is queued with the identity on
+every assertion, and the recorded run keeps it, so `finding_verify` re-runs the
+probe, or replays the captures, as the same account. The identity is part of
+a state-changing run's approval: an approval for a run as `alice` does not
+cover the same run as `bob`, or the run without an identity. An unknown name
+is refused with `UNKNOWN_IDENTITY` before anything is sent or an approval is
+filed. `idor` and `jwt_alg_none` refuse `identity`: they take each account's
+credentials in their own parameters and compare them, and a run-wide account
+would mix two sources of authentication. A probe's deliberate "without
+credentials" request (in `idor` and `graphql_checks`) never carries the
+identity.
+
+**Surface crawl.** `surface_crawl(seeds_json, identity="", max_requests=120)`
+maps what an account can reach. From the seed URLs it follows links
+breadth-first, on the seeds' hosts only, to depth 3 and at most `max_requests`
+requests (1 to 300). Every request is a `GET` through the gateway, so scope,
+the rate limit and the ledger apply as to any other request. It reads links,
+scripts and frames from HTML, and URLs and rooted paths from JSON. A redirect
+to the same host counts as a link; redirects are never followed by the
+gateway itself. Forms are recorded with their method, action, field names and
+default values, and are never submitted; a password field's value is never
+kept. At most five URLs are requested per path template (numeric, UUID and
+24-hex segments count as one `{id}`), so a long listing cannot use up the
+budget. Static assets (images, fonts, style sheets, scripts, media, archives)
+are listed, not requested. The result lists the pages by capture id, every
+same-host URL seen, the forms, and every URL skipped with the reason. It
+returns no response bodies: read a page with `http_capture`.
+
+**What the crawl never requests.** Applications do act on GETs. A crawler that
+followed every link would sign itself out, or delete or change the data it is
+looking at. So a URL whose path or query contains one of these words (any
+case, as a whole word; a camelCase step counts as a word break) is skipped
+and listed with the reason:
+
+- `logout`, `log-out`, `logoff`, `signout`, `sign-out`: the session would end
+  and the rest of the crawl would run signed out;
+- `delete`, `remove`, `destroy`, `purge`, `drop`: data would be removed;
+- `unsubscribe`, `deactivate`, `disable`, `cancel`, `revoke`, `reset`: the
+  state of an account, a subscription or a credential would change;
+- `export`, `download`: a job or bulk transfer would start that the program
+  did not ask for.
+
+The list is `NEVER_REQUEST_WORDS` in `buggy/capture/crawl.py`. A refusal for
+one URL (out of scope, internal address) is listed and the crawl goes on; a
+refusal that would repeat for every request (no enforced scope, a failed
+login) stops it, with `truncated: true`.
+
 ## Evidence, reports and CI
 
 - `evidence_export` writes a redacted bundle under

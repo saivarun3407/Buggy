@@ -424,14 +424,22 @@ PROBE_LAYOUTS: dict[str, _Layout] = {
 
 
 def probe_assertions(result: dict[str, Any]) -> list[dict[str, Any]]:
-    """The assertions a probe result supports (see the module's table); possibly none."""
+    """The assertions a probe result supports (see the module's table); possibly none.
+
+    A run sent as a declared test account (``result["identity"]``) puts that
+    name on every assertion, so the verifier re-sends them as the same account.
+    """
     layout = PROBE_LAYOUTS.get(_text(result.get("probe")))
     if layout is None:
         return []
+    identity = _text(result.get("identity"))[:MAX_SHORT]
     ids = [_text(value) for value in _as_list(result.get("evidence_capture_ids"))]
     out: list[dict[str, Any]] = []
     for assertion in layout(ids, _as_dict(result.get("details"))):
-        if assertion is not None and assertion not in out:
+        if assertion is None:
+            continue
+        assertion = {**assertion, "identity": identity}
+        if assertion not in out:
             out.append(assertion)
     return out[:MAX_ASSERTIONS]
 
@@ -442,7 +450,8 @@ def from_probe(result: dict, engagement: str, url: str, parameter: str = "") -> 
     ``False`` (not vulnerable) and ``None`` (could not tell) both produce
     nothing, as does anything that is not a result. ``url`` is the endpoint
     the probe was run against; ``parameter`` defaults to the one the result
-    names (``details.parameter``), if any.
+    names (``details.parameter``), if any. A run sent as an identity carries it
+    on every assertion (:func:`probe_assertions`).
     """
     if not isinstance(result, dict) or result.get("vulnerable") is not True:
         return None

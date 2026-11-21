@@ -426,9 +426,10 @@ class CaptureGateway:
 
         A probe uses fresh random markers on every run, so no single request of
         it can be approved in advance. What is approved instead is the run: this
-        probe, on this URL, with these parameters. Returns ``None`` when the
-        engagement does not require approval; otherwise the grant, or a refusal
-        that names the request the operator has to decide. One approval is one
+        probe, on this URL, with these parameters (``identity`` among them, so a
+        run approved as one test account does not cover the same run as another).
+        Returns ``None`` when the engagement does not require approval; otherwise
+        the grant, or a refusal that names the request the operator has to decide. One approval is one
         run: it is used up the moment the grant is issued.
         """
         scope, document = self.scope_for(engagement)
@@ -485,6 +486,7 @@ class CaptureGateway:
                         "what_it_sends": sends,
                         "max_requests": PROBE_RUN_MAX_REQUESTS,
                         "header_names": sorted(str(k) for k in as_dict(params.get("headers"))),
+                        "identity": str(params.get("identity") or ""),
                         "body_preview": "" if body is None else preview[:400],
                         "params_sha256": sha256_hex(canonical.encode()),
                     },
@@ -648,6 +650,23 @@ class CaptureGateway:
                 "the request was not sent",
             ) from exc
 
+    def check_identity(self, engagement: str, identity: str) -> None:
+        """Refuse (``UNKNOWN_IDENTITY`` / ``BAD_IDENTITIES``) unless ``identity`` is declared.
+
+        Nothing is sent and no session is opened: this only reads the operator's file.
+        """
+        try:
+            self.identities.get(engagement, identity)
+        except UnknownIdentity:
+            raise GatewayRefusal(
+                "UNKNOWN_IDENTITY",
+                f"no identity {identity!r} is declared for this engagement; not sent",
+            ) from None
+        except IdentityError as exc:
+            raise GatewayRefusal(
+                "BAD_IDENTITIES", f"the engagement's identities file is invalid ({exc}); not sent"
+            ) from exc
+
     def _refused(self, engagement: str, method: str, url: str, reason: str) -> None:
         self._ledger(engagement).append(
             {
@@ -710,20 +729,16 @@ class CaptureGateway:
 
         # Who is asking. An unknown name stops here, before an approval is filed.
         logins: list[Identity] = []
-        try:
-            if identity:
-                self.identities.get(engagement, identity)
-            if internal is True:
+        if identity:
+            self.check_identity(engagement, identity)
+        if internal is True:
+            try:
                 logins = self.identities.logins_at(engagement, method, url)
-        except UnknownIdentity:
-            raise GatewayRefusal(
-                "UNKNOWN_IDENTITY",
-                f"no identity {identity!r} is declared for this engagement; not sent",
-            ) from None
-        except IdentityError as exc:
-            raise GatewayRefusal(
-                "BAD_IDENTITIES", f"the engagement's identities file is invalid ({exc}); not sent"
-            ) from exc
+            except IdentityError as exc:
+                raise GatewayRefusal(
+                    "BAD_IDENTITIES",
+                    f"the engagement's identities file is invalid ({exc}); not sent",
+                ) from exc
 
         approval_id = ""
         if internal is True and logins:

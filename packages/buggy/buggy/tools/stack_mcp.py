@@ -356,7 +356,9 @@ async def probe_run(probe: str, params_json: str) -> str:
     the requests, compares the outcomes and returns vulnerable true / false / null (null =
     could not tell) with evidence capture ids. params_json is a JSON object (see probe_list).
     A state-changing probe may return APPROVAL_REQUIRED with a request_id: nothing was sent;
-    after the operator allows it, call again with identical params_json (one approval, one run)."""
+    after the operator allows it, call again with identical params_json (one approval, one run).
+    Add "identity": "<name from identities_list>" to params_json to run the whole probe signed in
+    as that test account (not for idor and jwt_alg_none, which take their own credentials)."""
     return await _engagement_call("capture", "probe_run", probe=probe, params_json=params_json)
 
 
@@ -561,6 +563,23 @@ async def authz_matrix_run(
     )
 
 
+@tool
+async def surface_crawl(seeds_json: str, identity: str = "", max_requests: int = 120) -> str:
+    """Map what a page tree exposes, signed in when identity names a test account from
+    identities_list. Follows same-host links breadth-first from seeds_json (a JSON list of
+    absolute URLs), GET only, at most max_requests requests (1-300). It never requests a
+    logout, delete, reset, export or similar URL, and records forms without submitting them.
+    Returns the pages it fetched (capture ids), every same-host URL it saw, the forms, and
+    what it skipped and why."""
+    return await _engagement_call(
+        "capture",
+        "surface_crawl",
+        seeds_json=seeds_json,
+        identity=identity,
+        max_requests=max_requests,
+    )
+
+
 # ── lessons and the shared board ─────────────────────────────────────
 
 
@@ -680,6 +699,7 @@ _BY_SERVER: dict[str, list[Any]] = {
         evidence_export,
         identities_list,
         authz_matrix_run,
+        surface_crawl,
         memory_search,
         memory_save,
         facts_list,

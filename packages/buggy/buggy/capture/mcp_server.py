@@ -18,6 +18,7 @@ from typing import Any
 from buggy.capture.canary import Canary
 from buggy.capture.gateway import CaptureGateway, GatewayRefusal, Roots
 from buggy.capture.probes import describe, run_probe
+from buggy.capture.probes.registry import IDENTITY_NOTE
 from buggy.capture.workbench import WORKBENCH_TOOL_NAMES, Workbench, register_workbench
 from buggy.notify import Notifier, approval_event, finding_event
 
@@ -159,6 +160,7 @@ class CaptureTools:
     def probe_list(self) -> dict[str, Any]:
         return {
             "probes": describe(),
+            "identity": IDENTITY_NOTE,
             "ssrf_callback_available": bool(self.canary and self.canary.available),
         }
 
@@ -227,7 +229,8 @@ def register_tools(mcp: Any, tools: CaptureTools) -> None:
         vulnerable true/false/null (null = could not tell), a summary and evidence capture ids.
         A probe that can change state may return APPROVAL_REQUIRED with a request_id: nothing
         was sent; once the operator allows it, call again with the same params_json (one
-        approval covers one run)."""
+        approval covers one run). A top-level "identity" in params_json names a declared test
+        account the whole run is sent as (not accepted by idor and jwt_alg_none)."""
         return tools.probe_run(engagement, probe, params_json)
 
 

@@ -52,6 +52,9 @@ class Context:
     # The operator's approval of this run (state-changing probes only); see
     # CaptureGateway.probe_grant.
     grant: Any = None
+    # A declared test account the whole run is sent as (``identity`` in the
+    # probe's parameters); the gateway attaches its session. "" = as given.
+    identity: str = ""
 
     def send(
         self,
@@ -61,7 +64,25 @@ class Context:
         headers: dict[str, str] | None = None,
         body: bytes | str | None = None,
         note: str = "",
+        anonymous: bool = False,
     ) -> Capture:
+        """Send one request of the run, as the run's identity unless ``anonymous``.
+
+        ``anonymous`` is for a probe's deliberate "without credentials" request:
+        it must not carry the identity's session.
+        """
+        identity = "" if anonymous else self.identity
+        if not identity:
+            return self.gateway.send(
+                self.engagement,
+                method,
+                url,
+                headers=headers,
+                body=body,
+                note=note,
+                probe=self.probe,
+                grant=self.grant,
+            )
         return self.gateway.send(
             self.engagement,
             method,
@@ -71,6 +92,7 @@ class Context:
             note=note,
             probe=self.probe,
             grant=self.grant,
+            identity=identity,
         )
 
 
@@ -83,6 +105,9 @@ class ProbeSpec:
     params: dict[str, str]
     state_changing: bool
     run: Callable[[Context, dict[str, Any]], ProbeResult]
+    # False for a probe that takes credential headers itself and compares
+    # identities on its own: a run-wide ``identity`` would mix two auth sources.
+    accepts_identity: bool = True
 
 
 def require(params: dict[str, Any], *names: str) -> None:

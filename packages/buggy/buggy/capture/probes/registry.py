@@ -26,7 +26,7 @@ REGISTRY: dict[str, ProbeSpec] = {
                 "claim_overrides": "optional claims to change in the forged token",
                 "headers": "optional extra headers",
             },
-            False, checks.jwt_alg_none,
+            False, checks.jwt_alg_none, accepts_identity=False,
         ),
         ProbeSpec(
             "idor", "access_control", "CWE-639",
@@ -38,7 +38,7 @@ REGISTRY: dict[str, ProbeSpec] = {
                 "markers": "optional strings unique to the owner's data",
                 "check_unauthenticated": "also try with no credentials (default true)",
             },
-            False, checks.idor,
+            False, checks.idor, accepts_identity=False,
         ),
         ProbeSpec(
             "ssrf_canary", "ssrf", "CWE-918",
@@ -217,6 +217,16 @@ REGISTRY: dict[str, ProbeSpec] = {
 }  # fmt: skip
 
 
+#: The one parameter every probe shares. Said once here rather than in each table.
+IDENTITY_PARAM = "identity"
+IDENTITY_NOTE = (
+    "Every probe with accepts_identity true also takes an optional top-level "
+    '"identity": the name of a declared test account (identities_list). The whole run is then '
+    "sent signed in as that account (the gateway attaches its session), the result names it, "
+    "and a re-run by finding_verify uses it again."
+)
+
+
 def describe() -> list[dict[str, Any]]:
     return [
         {
@@ -226,9 +236,32 @@ def describe() -> list[dict[str, Any]]:
             "summary": spec.summary,
             "params": spec.params,
             "state_changing": spec.state_changing,
+            "accepts_identity": spec.accepts_identity,
         }
         for spec in REGISTRY.values()
     ]
+
+
+def split_identity(spec: ProbeSpec, params: dict[str, Any]) -> tuple[str, dict[str, Any]]:
+    """``(identity, the parameters the probe function sees)``; raises on a bad identity.
+
+    The caller's dict is not changed.
+    """
+    if IDENTITY_PARAM not in params:
+        return "", params
+    raw = params[IDENTITY_PARAM]
+    rest = {k: v for k, v in params.items() if k != IDENTITY_PARAM}
+    if raw is None or raw == "":
+        return "", rest
+    if not isinstance(raw, str) or not raw.strip():
+        raise ProbeInputError("identity must be the name of a declared test account (a string)")
+    if not spec.accepts_identity:
+        raise ProbeInputError(
+            f"{spec.name} takes the credentials of each account it compares in its own "
+            "parameters and does not accept identity; pass the header parameters instead "
+            "(or use authz_matrix_run, which compares declared identities)"
+        )
+    return raw.strip(), rest
 
 
 def needs_run_approval(spec: ProbeSpec, params: dict[str, Any]) -> bool:
@@ -250,20 +283,42 @@ def run_probe(
     *,
     canary: Canary | None = None,
 ) -> dict[str, Any]:
-    """Run one probe; refusals and bad input come back as structured results."""
+    """Run one probe; refusals and bad input come back as structured results.
+
+    ``params`` may carry a top-level ``identity`` (a declared test account):
+    it is taken out of what the probe function sees and every request of the
+    run is sent as that account. It is part of the run's approval fingerprint,
+    and a result of such a run names it (``"identity"``).
+    """
     spec = REGISTRY.get(name)
     if spec is None:
         return {"status": "error", "detail": f"unknown probe {name!r}", "probes": sorted(REGISTRY)}
+    named: dict[str, Any] = {}
     try:
+        identity, probe_params = split_identity(spec, params)
+        named = {"identity": identity} if identity else {}
+        if identity:
+            # An unknown name is refused before an approval is filed or a byte is sent.
+            gateway.check_identity(engagement, identity)
         grant = None
-        if needs_run_approval(spec, params):
-            grant = gateway.probe_grant(engagement, name, params, sends=spec.summary)
-        result = spec.run(Context(gateway, engagement, name, canary, grant), params)
+        if needs_run_approval(spec, probe_params):
+            approved = {**probe_params, **named}
+            grant = gateway.probe_grant(engagement, name, approved, sends=spec.summary)
+        context = Context(gateway, engagement, name, canary, grant, identity)
+        result = spec.run(context, probe_params)
     except ProbeInputError as exc:
         return {"status": "error", "probe": name, "detail": str(exc), "params": spec.params}
     except GatewayRefusal as refusal:
-        return {"probe": name, **refusal.to_dict()}
-    return {"status": "completed", **result.to_dict()}
+        return {"probe": name, **named, **refusal.to_dict()}
+    return {"status": "completed", **result.to_dict(), **named}
 
 
-__all__ = ["REGISTRY", "describe", "needs_run_approval", "run_probe"]
+__all__ = [
+    "IDENTITY_NOTE",
+    "IDENTITY_PARAM",
+    "REGISTRY",
+    "describe",
+    "needs_run_approval",
+    "run_probe",
+    "split_identity",
+]
