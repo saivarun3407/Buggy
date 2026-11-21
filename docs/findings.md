@@ -46,6 +46,12 @@ apply). It needs no model key.
 - A positive probe is queued, verified by running the probe again, and graded.
   `hunt` prints each one with its status and grade; `hunt-result.json` carries
   the counts under `probes`.
+- `graphql_checks` sends its queries with POST. Where the engagement requires
+  approval the gateway holds that request like any POST; `hunt` says how many
+  checks are waiting, and one approval of that fixed request lets the next
+  run through.
+- The sweep tests what recon found. A parameter recon did not discover is not
+  probed; `recon_coverage` and the report's leads show what is left.
 - The lite stack has no evidence gateway, so it does not run the sweep.
 
 ## How a finding is verified

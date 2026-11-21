@@ -94,6 +94,7 @@ def test_a_positive_probe_is_verified_and_graded(server: Server) -> None:
         "not_vulnerable": 1,
         "undecided": 0,
         "refused": 0,
+        "held_for_approval": 0,
         "verified": 1,
         "submit": 1,
         "findings": [
@@ -141,6 +142,18 @@ def test_refusals_and_undecided_runs_are_counted_not_followed(monkeypatch) -> No
     out = hunt.run_probe_sweep("acme", RECORDS)
     assert fake.tools() == ["probe_run", "probe_run"]
     assert (out["ran"], out["refused"], out["undecided"], out["vulnerable"]) == (2, 1, 1, 0)
+    assert out["held_for_approval"] == 0
+
+
+def test_a_read_only_check_sent_with_post_is_reported_as_waiting(monkeypatch, capsys) -> None:
+    held = {"status": "refused", "code": "APPROVAL_REQUIRED", "request_id": "apr-1"}
+    fake = Server(vulnerable={"sqli": False, "cors": held})
+    monkeypatch.setattr(hunt, "_capture", fake)
+    args = argparse.Namespace(no_probes=False, probe_budget=None, non_interactive=False)
+    probes = hunt._sweep_stage(args, "acme", RECORDS)  # noqa: SLF001
+    assert probes is not None
+    assert (probes["refused"], probes["held_for_approval"]) == (1, 1)
+    assert "1 waiting for your approval (buggy-cli approvals list acme)" in capsys.readouterr().err
 
 
 def test_the_sweep_stops_when_the_server_is_gone(monkeypatch) -> None:

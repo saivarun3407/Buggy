@@ -65,7 +65,7 @@ make build-images        # builds every image the stack starts (slow the first t
 mkdir -p ~/.buggy/workspace ~/.buggy/control ~/.buggy/audit ~/.buggy/secrets ~/.buggy/telemetry
 for name in SANDBOX_TOKEN EGRESS_GUARD_TOKEN BUGGY_STACK_MCP_TOKEN BUGGY_AUDIT_HMAC_KEY; do echo "$name=$(openssl rand -hex 24)"; done >> .env
 docker compose up -d
-docker compose --profile operator run --rm operator buggy-cli doctor
+docker compose --profile operator run --rm operator buggy-cli doctor --in-container
 docker compose --profile operator run --rm operator buggy-cli hunt https://your-target.example --no-agent
 ```
 

@@ -801,8 +801,10 @@ def run_probe_sweep(
     The plan is fixed rules over the recon records (:mod:`buggy.pipeline.sweep`).
     Every request goes through the capture gateway: scope, rate limit and the
     ledger apply. A positive probe is queued by the server; here it is verified
-    (the probe is run again) and graded. Nothing state-changing is planned, so
-    nothing waits for approval.
+    (the probe is run again) and graded. Nothing state-changing is planned. One
+    planned check, ``graphql_checks``, sends its queries with POST: where the
+    engagement requires approval the gateway holds it like any POST, and it is
+    counted under ``held_for_approval``.
     """
     from buggy.pipeline import sweep  # noqa: PLC0415
 
@@ -815,6 +817,7 @@ def run_probe_sweep(
         "not_vulnerable": 0,
         "undecided": 0,
         "refused": 0,
+        "held_for_approval": 0,
         "verified": 0,
         "submit": 0,
         "findings": [],
@@ -836,6 +839,10 @@ def run_probe_sweep(
         out["ran"] += 1
         if result.get("status") == "refused":
             out["refused"] += 1
+            if result.get("code") == "APPROVAL_REQUIRED":
+                # A read-only check that is sent with POST (a GraphQL query): the gateway
+                # cannot know it is read-only, so it waits for the operator like any POST.
+                out["held_for_approval"] += 1
             continue
         if result.get("vulnerable") is False:
             out["not_vulnerable"] += 1
@@ -1136,7 +1143,7 @@ def recon_outcome(state: str, summary: dict[str, Any] | None) -> dict[str, Any]:
 
 _PROBE_COUNTS = (
     "planned", "left_out", "ran", "vulnerable", "not_vulnerable", "undecided", "refused",
-    "verified", "submit",
+    "held_for_approval", "verified", "submit",
 )  # fmt: skip
 
 
@@ -1227,6 +1234,11 @@ def _sweep_stage(
         f"{probes['ran']} of {probes['planned']} run, {probes['vulnerable']} positive, "
         f"{probes['verified']} re-proven, {probes['submit']} graded submit"
     )
+    if probes["held_for_approval"]:
+        line += (
+            f", {probes['held_for_approval']} waiting for your approval "
+            f"(buggy-cli approvals list {slug})"
+        )
     if probes["left_out"]:
         line += f" ({probes['left_out']} more left out by the budget; --probe-budget)"
     if probes["error"]:
