@@ -335,6 +335,13 @@ Approving still happens with `buggy-cli approvals allow` or in the dashboard.
   each known lab bug is listed as proven, pipeline-only, backlog or excluded.
   Reflected XSS, template injection, path traversal and CORS have no positive
   case in the lab apps; those probes are proven on unit fixtures only.
+- **Signed-in testing has been run on one practice app.** On 2026-11-21
+  `hunt` ran against a local DVWA with two declared accounts and no model:
+  5 minutes 37 seconds, 74 URLs reached behind the login, and six issues
+  found, re-proven and graded: file inclusion, SQL injection (two pages and a
+  login form), reflected XSS and command injection. The same run without
+  accounts found none of them. It has not been run on a real program, and a
+  single-page application gives the crawl much less to read.
 - **One agent run has been measured, and it was small.** On 2026-11-21
   Claude Code ran the agent stage on the two local practice apps through the
   agent bridge ([claude-code-agent.md](claude-code-agent.md)), capped at 45

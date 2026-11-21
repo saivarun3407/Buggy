@@ -519,6 +519,21 @@ def lookup_safe(shell: Shell, *, show_output: bool = True) -> Handler:
 
 
 class TestCommandOutput:
+    def test_a_page_with_a_changing_timing_figure_does_not_stop_the_probe(self, env) -> None:
+        # A ping page prints different round-trip times on every request.
+        shell = Shell(env.clock)
+        inner = lookup_injectable(shell)
+
+        def handler(method, query, headers, body):
+            status, document = inner(method, query, headers, body)
+            jitter = f"64 bytes from 127.0.0.1: icmp_seq=0 ttl=64 time=0.0{env.app.requests} ms"
+            return status, {**document, "ping": jitter}
+
+        env.app.handlers["/lookup"] = handler
+        result = command(env, LOOKUP)
+        assert result["vulnerable"] is True, result
+        assert result["details"]["baseline"]["volatile"] is True
+
     def test_shell_that_prints_its_output_is_found_by_the_arithmetic_echo(self, env) -> None:
         shell = Shell(env.clock)
         env.app.handlers["/lookup"] = lookup_injectable(shell)

@@ -225,6 +225,10 @@ def _guarded(run: _ExecRun, examine: Any, *args: Any) -> ProbeResult:
         )
 
 
+#: Below this similarity two answers to the same request are different pages.
+VOLATILE_SIMILARITY = 0.5
+
+
 def _baseline(run: _ExecRun) -> float | ProbeResult:
     """Send the valid value twice. The slower time in ms, or the "cannot tell" result."""
     value = run.target.value
@@ -242,7 +246,12 @@ def _baseline(run: _ExecRun) -> float | ProbeResult:
         "similarity": stability,
         "elapsed_ms": round(baseline_ms, 1),
     }
-    if _failed(second) or second.status != first.status or stability < STABLE_SIMILARITY:
+    # These probes prove execution by a computed value appearing in the response
+    # (and its absence in a control), not by comparing pages. So a page that
+    # differs a little between two identical requests (a timing figure, a
+    # clock) does not stop them; a page that is a different page each time does.
+    run.info["baseline"]["volatile"] = stability < STABLE_SIMILARITY
+    if _failed(second) or second.status != first.status or stability < VOLATILE_SIMILARITY:
         return run.result(
             None,
             "the page is unstable: two identical requests answered differently "
