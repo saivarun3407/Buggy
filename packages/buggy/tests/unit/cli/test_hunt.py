@@ -817,6 +817,9 @@ class TestExitCodesAndTheResultFile:
         assert _run(tmp_path, *self.BASE, *self.GATE) == hunt.EXIT_OK
         result = _result(tmp_path)
         assert started <= result.pop("finished_at") <= hunt.time.time()
+        # The run says what it did not test: no sweep here, no accounts, no agents.
+        areas = [item["area"] for item in result.pop("not_tested")]
+        assert len(areas) == 4 and "access control between users (IDOR)" in areas
         assert result == {
             "engagement": "acme",
             "recon": {"state": "completed", "records": {"http_service": 1}, "scope_drops": 2},
@@ -825,6 +828,7 @@ class TestExitCodesAndTheResultFile:
             "approvals_pending": 0,
             "agent": {"ran": False, "error": None},
             "probes": {"ran_sweep": False},
+            "access": {"ran": False, "reason": "not run"},
             "complete": True,
         }
         assert "hunt-result.json" in capsys.readouterr().err

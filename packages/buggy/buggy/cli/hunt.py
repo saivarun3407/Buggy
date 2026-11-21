@@ -861,21 +861,116 @@ def run_probe_sweep(
             "status": "candidate",
             "grade": "",
         }
-        verified = _capture("finding_verify", engagement, finding_id=finding_id)
-        raw_finding = verified.get("finding")
-        finding: dict[str, Any] = raw_finding if isinstance(raw_finding, dict) else {}
-        entry["status"] = str(finding.get("status") or entry["status"])
-        if entry["status"] == "exploit_verified":
-            out["verified"] += 1
-            graded = _capture(
-                "finding_grade", engagement, finding_id=finding_id, known_issues_json=known
-            )
-            raw_grade = graded.get("grade")
-            grade: dict[str, Any] = raw_grade if isinstance(raw_grade, dict) else {}
-            entry["grade"] = str(grade.get("decision") or "")
-            if entry["grade"] == "submit":
-                out["submit"] += 1
+        entry["status"], entry["grade"] = _prove(engagement, finding_id, known)
+        out["verified"] += entry["status"] == "exploit_verified"
+        out["submit"] += entry["grade"] == "submit"
         out["findings"].append(entry)
+    return out
+
+
+def _prove(engagement: str, finding_id: str, known: str) -> tuple[str, str]:
+    """Re-prove a queued finding and, if it holds, grade it. Returns ``(status, grade)``."""
+    verified = _capture("finding_verify", engagement, finding_id=finding_id)
+    raw_finding = verified.get("finding")
+    finding: dict[str, Any] = raw_finding if isinstance(raw_finding, dict) else {}
+    status = str(finding.get("status") or "candidate")
+    if status != "exploit_verified":
+        return status, ""
+    graded = _capture("finding_grade", engagement, finding_id=finding_id, known_issues_json=known)
+    raw_grade = graded.get("grade")
+    grade: dict[str, Any] = raw_grade if isinstance(raw_grade, dict) else {}
+    return status, str(grade.get("decision") or "")
+
+
+#: Most object URLs the access-control sweep asks for, and its request budget.
+MAX_ACCESS_URLS = 40
+ACCESS_MAX_REQUESTS = 300
+NO_ACCOUNTS = (
+    "no test accounts are declared; add two in "
+    "~/.buggy/secrets/{engagement}/identities.json (docs/findings.md)"
+)
+NO_OWNED_OBJECTS = (
+    "no declared test account lists an object it owns; add owner_of URLs to "
+    "~/.buggy/secrets/{engagement}/identities.json (docs/findings.md)"
+)
+
+
+def _owned_urls(identities: list[Any]) -> list[str]:
+    """Concrete object URLs the declared accounts own (``owner_of`` without a ``*`` prefix)."""
+    urls: set[str] = set()
+    for identity in identities:
+        owned = identity.get("owner_of") if isinstance(identity, dict) else None
+        for url in owned if isinstance(owned, list) else []:
+            if isinstance(url, str) and url.startswith(("http://", "https://")) and "*" not in url:
+                urls.add(url)
+    return sorted(urls)
+
+
+def run_access_sweep(engagement: str, records: dict[str, list[dict[str, Any]]]) -> dict[str, Any]:
+    """Ask for every object a test account owns as every other account and as nobody. No LLM.
+
+    This is the access-control check (IDOR, broken object-level authorisation)
+    done by code: the operator declares test accounts and what each owns, the
+    gateway logs them in and holds their sessions, and the matrix compares who
+    received whose data. Only GET requests are sent. A mismatch is queued,
+    re-proven and graded like any other finding. Without declared accounts or
+    owned objects nothing is sent and ``reason`` says what is missing.
+    """
+    out: dict[str, Any] = {
+        "ran": False,
+        "reason": None,
+        "accounts": 0,
+        "objects": 0,
+        "left_out": 0,
+        "broken_access": 0,
+        "enforced": 0,
+        "public": 0,
+        "inconclusive": 0,
+        "skipped": 0,
+        "verified": 0,
+        "submit": 0,
+        "findings": [],
+    }
+    listed = _capture("identities_list", engagement)
+    if listed.get("error") or listed.get("ok") is False:
+        out["reason"] = str(listed.get("detail") or listed.get("error") or "identities unreadable")
+        return out
+    identities = [row for row in listed.get("identities") or [] if isinstance(row, dict)]
+    out["accounts"] = len(identities)
+    if not identities:
+        out["reason"] = NO_ACCOUNTS.format(engagement=engagement)
+        return out
+    urls = _owned_urls(identities)
+    if not urls:
+        out["reason"] = NO_OWNED_OBJECTS.format(engagement=engagement)
+        return out
+    out["left_out"] = max(0, len(urls) - MAX_ACCESS_URLS)
+    urls = urls[:MAX_ACCESS_URLS]
+    result = _capture(
+        "authz_matrix_run",
+        engagement,
+        urls_json=json.dumps(urls),
+        max_requests=ACCESS_MAX_REQUESTS,
+    )
+    raw_verdicts = result.get("verdicts")
+    if not isinstance(raw_verdicts, dict):
+        out["reason"] = str(result.get("detail") or result.get("error") or "the matrix did not run")
+        return out
+    out["ran"] = True
+    out["objects"] = len(urls)
+    for verdict in raw_verdicts.values():
+        name = str(verdict.get("verdict") if isinstance(verdict, dict) else "")
+        if name in ("broken_access", "enforced", "public", "inconclusive"):
+            out[name] += 1
+    out["skipped"] = len(result.get("skipped") or [])
+    queue = result.get("queue")
+    ids = queue.get("ids") if isinstance(queue, dict) else None
+    known = _known_issues(records)
+    for finding_id in [str(i) for i in ids or [] if i]:
+        status, grade = _prove(engagement, finding_id, known)
+        out["verified"] += status == "exploit_verified"
+        out["submit"] += grade == "submit"
+        out["findings"].append({"id": finding_id, "status": status, "grade": grade})
     return out
 
 
@@ -1155,6 +1250,20 @@ def _probes_result(probes: Any) -> dict[str, Any]:
     return {"ran_sweep": True, **counts, "error": probes.get("error")}
 
 
+_ACCESS_COUNTS = (
+    "accounts", "objects", "left_out", "broken_access", "enforced", "public", "inconclusive",
+    "skipped", "verified", "submit",
+)  # fmt: skip
+
+
+def _access_result(access: Any) -> dict[str, Any]:
+    """The access-control sweep's counts for the result file."""
+    if not isinstance(access, dict):
+        return {"ran": False, "reason": "not run"}
+    counts = {name: int(access.get(name) or 0) for name in _ACCESS_COUNTS}
+    return {"ran": bool(access.get("ran")), "reason": access.get("reason"), **counts}
+
+
 def build_result(
     slug: str, outcome: dict[str, Any], sections: dict[str, Any], *, now: float
 ) -> dict[str, Any]:
@@ -1174,6 +1283,8 @@ def build_result(
         else 0,
         "agent": {"ran": bool(agent["ran"]), "error": agent["error"]},
         "probes": _probes_result(outcome.get("probes")),
+        "access": _access_result(outcome.get("access")),
+        "not_tested": list(outcome.get("not_tested") or []),
         "complete": recon_is_complete(recon["state"]) and not agent["error"],
     }
 
@@ -1256,6 +1367,92 @@ def _sweep_stage(
     return probes
 
 
+def _access_stage(
+    args: argparse.Namespace, slug: str, records: dict[str, list[dict[str, Any]]]
+) -> dict[str, Any] | None:
+    """Run the access-control sweep unless probes are off; print one summary."""
+    if getattr(args, "no_probes", False):
+        return None
+    access = run_access_sweep(slug, records)
+    if not access["ran"]:
+        print(f"  access control   not run: {access['reason']}", file=sys.stderr)
+    else:
+        line = (
+            f"{access['objects']} owned objects asked as {access['accounts']} accounts and "
+            f"without credentials: {access['broken_access']} readable by a non-owner, "
+            f"{access['enforced']} enforced, {access['inconclusive']} could not tell; "
+            f"{access['verified']} re-proven, {access['submit']} graded submit"
+        )
+        if access["left_out"]:
+            line += f" ({access['left_out']} more objects left out)"
+        print(f"  access control   {line}", file=sys.stderr)
+        for found in access["findings"]:
+            print(
+                f"    {found['id']}  access_control  {found['status']}"
+                + (f"/{found['grade']}" if found["grade"] else ""),
+                file=sys.stderr,
+            )
+    if args.non_interactive:
+        print(json.dumps({"type": "access_sweep", **access}))
+    return access
+
+
+def not_tested(
+    slug: str,
+    args: argparse.Namespace,
+    probes: dict[str, Any] | None,
+    access: dict[str, Any] | None,
+) -> list[dict[str, str]]:
+    """What this run did not test, and what would make it tested. Plain facts for the operator.
+
+    A hunt that only printed scanner results looks finished when it is not;
+    this list says which kinds of testing did not happen and the one thing
+    that enables each.
+    """
+    missing: list[dict[str, str]] = []
+    if probes is None:
+        missing.append(
+            {
+                "area": "injection, redirect, traversal and CORS probes",
+                "reason": "the probe sweep did not run (no evidence gateway here, recon did "
+                "not finish, or --no-probes)",
+                "enable": "run the full stack without --no-probes",
+            }
+        )
+    if access is None or not access.get("ran"):
+        missing.append(
+            {
+                "area": "access control between users (IDOR)",
+                "reason": str(
+                    (access or {}).get("reason") or "the access-control sweep did not run"
+                ),
+                "enable": f"declare two test accounts and what each owns in "
+                f"~/.buggy/secrets/{slug}/identities.json",
+            }
+        )
+    agents_off = bool(getattr(args, "no_agent", False)) or (
+        not getattr(args, "force_agent", False) and not model_configured()
+    )
+    if agents_off:
+        missing.append(
+            {
+                "area": "business logic, authentication flows, request bodies, chained findings",
+                "reason": "these need judgement, which is the agents' job, and no agent run "
+                "started (--no-agent, or no model is configured)",
+                "enable": "configure a model with `buggy onboard` and run "
+                f"`buggy hunt --resume {slug}`",
+            }
+        )
+    missing.append(
+        {
+            "area": "anything that changes state (orders, payments, account changes)",
+            "reason": "state-changing requests and probe runs wait for a person",
+            "enable": f"`buggy-cli approvals list {slug}` then `approvals allow`",
+        }
+    )
+    return missing
+
+
 def run_stages(  # noqa: PLR0912, PLR0915
     args: argparse.Namespace,
     slug: str,
@@ -1269,6 +1466,7 @@ def run_stages(  # noqa: PLR0912, PLR0915
     issues = dict.fromkeys(SEVERITIES, 0)
     agent: dict[str, Any] = {"ran": False, "error": None}
     probes: dict[str, Any] | None = None
+    access: dict[str, Any] | None = None
     state, summary = "skipped", None
     recon_done = False
     if args.mode != "enforce":
@@ -1330,6 +1528,7 @@ def run_stages(  # noqa: PLR0912, PLR0915
                             file=sys.stderr,
                         )
                     probes = _sweep_stage(args, slug, records)
+                    access = _access_stage(args, slug, records)
                 print(f"  knowledge graph  {project_graph(slug)}", file=sys.stderr)
                 if args.non_interactive:
                     print(json.dumps({"type": "recon_report", "path": str(path), **digest}))
@@ -1339,7 +1538,9 @@ def run_stages(  # noqa: PLR0912, PLR0915
         "issues": issues,
         "agent": agent,
         "probes": probes,
+        "access": access,
     }
+    outcome["not_tested"] = not_tested(slug, args, probes, access)
 
     if args.no_agent:
         print("\n[4/4] agents skipped (--no-agent)", file=sys.stderr)
@@ -1521,6 +1722,12 @@ def main(argv: list[str] | None = None) -> int:  # noqa: PLR0911, PLR0912, PLR09
             )
         for problem in reports.get("errors", []):
             print(f"  findings report  not written: {problem}", file=sys.stderr)
+    if result.get("not_tested"):
+        print("\n  not tested in this run", file=sys.stderr)
+        for item in result["not_tested"]:
+            print(f"    - {item['area']}", file=sys.stderr)
+            print(f"        why: {item['reason']}", file=sys.stderr)
+            print(f"        to enable: {item['enable']}", file=sys.stderr)
     if not result["complete"]:
         reasons = []
         if not recon_is_complete(result["recon"]["state"]):

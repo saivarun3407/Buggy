@@ -54,6 +54,26 @@ apply). It needs no model key.
   probed; `recon_coverage` and the report's leads show what is left.
 - The lite stack has no evidence gateway, so it does not run the sweep.
 
+## The automatic access-control check
+
+When test accounts are declared (see *Test accounts* below) and at least one
+lists an object it owns (`owner_of`), `hunt` asks for every owned object as
+its owner, as every other account and with no credentials, and compares who
+received whose data. Only GET requests are sent; logins go through the
+gateway. An object a non-owner could read is queued, re-proven and graded
+like any other finding. No model is involved.
+
+Without declared accounts nothing is sent, and `hunt` says so:
+
+```
+access control   not run: no test accounts are declared; add two in ~/.buggy/secrets/<engagement>/identities.json
+```
+
+At the end of every run `hunt` lists what was **not tested** and the one thing
+that enables each (accounts, a model, your approval). The same list is in
+`hunt-result.json` under `not_tested`. A run that only shows scanner results
+is a run where those things were missing.
+
 ## How a finding is verified
 
 - **A finding that came from a probe** is verified by running that probe
