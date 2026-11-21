@@ -4,6 +4,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"strings"
 	"testing"
 )
 
@@ -297,5 +298,81 @@ func TestComposeImageTag(t *testing.T) {
 	}
 	if got := c.ImageTag(map[string]string{"BUGGY_VERSION": "1.2.3"}); got != "3.1.4" {
 		t.Errorf("the .version marker wins: ImageTag = %q, want 3.1.4", got)
+	}
+}
+
+// envValue returns the last value of key in a child environment (later
+// entries win, as in exec.Cmd), and whether the key is present at all.
+func envValue(env []string, key string) (string, bool) {
+	value, found := "", false
+	for _, kv := range env {
+		if k, v, ok := strings.Cut(kv, "="); ok && k == key {
+			value, found = v, true
+		}
+	}
+	return value, found
+}
+
+// unsetImagePrefix removes BUGGY_IMAGE_PREFIX for the rest of the test and
+// restores the caller's value afterwards.
+func unsetImagePrefix(t *testing.T) {
+	t.Helper()
+	t.Setenv("BUGGY_IMAGE_PREFIX", "") // registers the restore
+	os.Unsetenv("BUGGY_IMAGE_PREFIX")
+}
+
+func TestImagePrefix(t *testing.T) {
+	prev := DefaultImagePrefix
+	t.Cleanup(func() { DefaultImagePrefix = prev })
+	DefaultImagePrefix = "ghcr.io/default/"
+
+	// The shell wins, even when it is explicitly empty.
+	t.Setenv("BUGGY_IMAGE_PREFIX", "ghcr.io/shell/")
+	if got := ImagePrefix(map[string]string{"BUGGY_IMAGE_PREFIX": "ghcr.io/dotenv/"}); got != "ghcr.io/shell/" {
+		t.Errorf("shell value: got %q", got)
+	}
+	t.Setenv("BUGGY_IMAGE_PREFIX", "")
+	if got := ImagePrefix(nil); got != "" {
+		t.Errorf("explicit empty: got %q", got)
+	}
+
+	unsetImagePrefix(t)
+	if got := ImagePrefix(map[string]string{"BUGGY_IMAGE_PREFIX": "ghcr.io/dotenv/"}); got != "ghcr.io/dotenv/" {
+		t.Errorf(".env value: got %q", got)
+	}
+	if got := ImagePrefix(map[string]string{"BUGGY_IMAGE_PREFIX": ""}); got != "" {
+		t.Errorf(".env empty: got %q", got)
+	}
+	if got := ImagePrefix(nil); got != "ghcr.io/default/" {
+		t.Errorf("default: got %q", got)
+	}
+}
+
+func TestComposeEnv_ImagePrefix(t *testing.T) {
+	prev := DefaultImagePrefix
+	t.Cleanup(func() { DefaultImagePrefix = prev })
+	home := t.TempDir()
+	t.Setenv("BUGGY_HOME", home)
+	unsetImagePrefix(t)
+	c := &Compose{Home: home, EnvFile: filepath.Join(home, ".env")}
+
+	// A development build adds nothing: compose resolves the bare names.
+	DefaultImagePrefix = ""
+	if _, ok := envValue(c.composeEnv(), "BUGGY_IMAGE_PREFIX"); ok {
+		t.Errorf("development build set BUGGY_IMAGE_PREFIX")
+	}
+
+	// A release build supplies its registry when nothing else does.
+	DefaultImagePrefix = "ghcr.io/owner/"
+	if v, _ := envValue(c.composeEnv(), "BUGGY_IMAGE_PREFIX"); v != "ghcr.io/owner/" {
+		t.Errorf("release default: got %q", v)
+	}
+
+	// ...but never over the operator's .env, which compose reads itself.
+	if err := os.WriteFile(c.EnvFile, []byte("BUGGY_IMAGE_PREFIX=\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := envValue(c.composeEnv(), "BUGGY_IMAGE_PREFIX"); ok {
+		t.Errorf("overrode the .env value")
 	}
 }

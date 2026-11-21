@@ -29,6 +29,8 @@ func stackHome(t *testing.T) string {
 	t.Setenv("BUGGY_STACK_NAME", "")
 	t.Setenv("BUGGY_OPSCONTROL_SOCK_HOST", "")
 	t.Setenv("BUGGY_STARTUP_TIMEOUT_SECONDS", "")
+	// Explicitly empty: the bare local image names, whatever the shell says.
+	t.Setenv("BUGGY_IMAGE_PREFIX", "")
 	return home
 }
 

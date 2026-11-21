@@ -37,7 +37,7 @@ services:
   # Deterministic recon worker. Runs the pinned scanners as plain
   # subprocesses when it sees a new or changed scope under /control.
   pipeline:
-    image: buggy-pipeline:${BUGGY_VERSION:-stable}
+    image: ${BUGGY_IMAGE_PREFIX:-}buggy-pipeline:${BUGGY_VERSION:-stable}
     build:
       context: .
       dockerfile: containers/pipeline.Dockerfile
@@ -76,7 +76,7 @@ services:
   # asset (queue volume), which the worker re-checks against the enforced
   # scope before doing anything.
   pipeline-mcp:
-    image: buggy-pipeline:${BUGGY_VERSION:-stable}
+    image: ${BUGGY_IMAGE_PREFIX:-}buggy-pipeline:${BUGGY_VERSION:-stable}
     container_name: buggy${BUGGY_STACK_NAME:+-${BUGGY_STACK_NAME}}-pipeline-mcp
     entrypoint: ["python", "-m", "buggy.pipeline.mcp_server"]
     command: []
@@ -124,7 +124,7 @@ services:
   # allows writing those bind mounts (the same arrangement as capture-mcp in
   # docker-compose.yml).
   operator:
-    image: buggy-pipeline:${BUGGY_VERSION:-stable}
+    image: ${BUGGY_IMAGE_PREFIX:-}buggy-pipeline:${BUGGY_VERSION:-stable}
     container_name: buggy${BUGGY_STACK_NAME:+-${BUGGY_STACK_NAME}}-operator
     entrypoint: []
     command: ["python", "-m", "buggy.cli", "--help"]

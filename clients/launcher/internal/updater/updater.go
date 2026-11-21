@@ -19,6 +19,7 @@ import (
 
 	"github.com/saivarun3407/buggy/clients/launcher/internal/compose"
 	"github.com/saivarun3407/buggy/clients/launcher/internal/config"
+	"github.com/saivarun3407/buggy/clients/launcher/internal/project"
 	"github.com/saivarun3407/buggy/clients/launcher/internal/ui"
 )
 
@@ -33,8 +34,10 @@ const ConfigManifestAsset = "config-checksums.txt"
 // "<hex>  <name>" format as ConfigManifestAsset.
 const BinaryChecksumsAsset = "checksums.txt"
 
-const (
-	Repo       = "PurpleAILAB/Buggy"
+// Repo is the "owner/name" releases and config files come from: this fork
+// by default, BUGGY_REPO to override (see internal/project).
+var (
+	Repo       = project.Repo()
 	RawBaseURL = "https://raw.githubusercontent.com/" + Repo
 )
 

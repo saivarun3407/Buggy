@@ -20,6 +20,7 @@ import (
 	"github.com/saivarun3407/buggy/clients/launcher/internal/health"
 	"github.com/saivarun3407/buggy/clients/launcher/internal/migrate"
 	"github.com/saivarun3407/buggy/clients/launcher/internal/platform"
+	"github.com/saivarun3407/buggy/clients/launcher/internal/project"
 	"github.com/saivarun3407/buggy/clients/launcher/internal/starprompt"
 	"github.com/saivarun3407/buggy/clients/launcher/internal/ui"
 	"github.com/saivarun3407/buggy/clients/launcher/internal/updater"
@@ -289,6 +290,19 @@ func prepareStackFor(cmd *cobra.Command, skipModelAuth bool) (string, map[string
 		env["BUGGY_HOME"] = home
 		if err := config.AppendEnvLine(config.EnvPath(), "BUGGY_HOME", home); err != nil {
 			ui.Warning("Could not set BUGGY_HOME in .env: " + err.Error())
+		}
+	}
+
+	// Record the registry an installed launcher pulls its images from, so
+	// every compose caller that reads .env (the opscontrol daemon among
+	// them) resolves the same image names. Development builds have no
+	// default prefix and leave .env alone; an existing value always wins.
+	if compose.DefaultImagePrefix != "" {
+		if _, ok := env[project.ImagePrefixEnv]; !ok {
+			env[project.ImagePrefixEnv] = compose.DefaultImagePrefix
+			if err := config.AppendEnvLine(config.EnvPath(), project.ImagePrefixEnv, compose.DefaultImagePrefix); err != nil {
+				ui.Warning("Could not set " + project.ImagePrefixEnv + " in .env: " + err.Error())
+			}
 		}
 	}
 

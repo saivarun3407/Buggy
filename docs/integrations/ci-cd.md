@@ -33,7 +33,7 @@ jobs:
         with:
           fetch-depth: 0     # required for diff-scope resolution
 
-      - uses: PurpleAILAB/Buggy/.github/actions/buggy-scan@main
+      - uses: saivarun3407/Buggy/.github/actions/buggy-scan@main
         with:
           target: "./"
           scan-mode: "quick"

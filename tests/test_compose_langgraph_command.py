@@ -20,16 +20,13 @@ COMPOSE = REPO_ROOT / "docker-compose.yml"
 
 
 @pytest.fixture(autouse=True)
-def _ensure_dotenv():
-    """``docker compose config`` needs a .env to satisfy env_file refs."""
-    env_file = REPO_ROOT / ".env"
-    created = False
-    if not env_file.exists():
-        env_file.write_text("")
-        created = True
-    yield
-    if created:
-        env_file.unlink(missing_ok=True)
+def _ensure_dotenv(repo_dotenv):
+    """``docker compose config`` needs a .env to satisfy env_file refs.
+
+    ``repo_dotenv`` (tests/conftest.py) keeps the file in place while any
+    parallel test worker still renders.
+    """
+    return repo_dotenv
 
 
 def _langgraph_command(env_overrides: dict[str, str]) -> str:

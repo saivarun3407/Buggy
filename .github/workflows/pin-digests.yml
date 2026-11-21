@@ -8,7 +8,9 @@
 # released version, and uploads image-digests.txt to the release. Consumers
 # pin with:
 #
-#   ghcr.io/purpleailab/buggy-litellm@sha256:<digest>
+#   ghcr.io/<owner>/buggy-litellm@sha256:<digest>
+#
+# where <owner> is this repository's owner in lower case.
 #
 # or by substituting the tag in docker-compose.yml with the digest form.
 name: Publish digest-pinned manifest
@@ -33,10 +35,12 @@ jobs:
           set -euo pipefail
           # GITHUB_REF_NAME is the tag (e.g. v1.1.42) for a release event.
           version="${GITHUB_REF_NAME#v}"
-          images="buggy-litellm buggy-langgraph buggy-cli buggy-skillogy buggy-egress-guard buggy-pipeline buggy-browser buggy-sandbox buggy-c2-sliver buggy-web"
+          # This repository's registry namespace, lower-cased for ghcr.io.
+          registry="ghcr.io/${GITHUB_REPOSITORY_OWNER,,}"
+          images="buggy-litellm buggy-langgraph buggy-cli buggy-skillogy buggy-egress-guard buggy-pipeline buggy-browser buggy-sandbox buggy-c2-sliver buggy-web buggy-solver"
           : > image-digests.txt
           for image in ${images}; do
-            ref="ghcr.io/purpleailab/${image}:${version}"
+            ref="${registry}/${image}:${version}"
             digest="$(docker buildx imagetools inspect "${ref}" --format '{{.Manifest.Digest}}')"
             printf '%s@%s\n' "${ref}" "${digest}" >> image-digests.txt
           done

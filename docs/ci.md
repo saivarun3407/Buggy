@@ -141,7 +141,7 @@ jobs:
 ```
 
 Outside this repository, use the action as
-`PurpleAILAB/Buggy/.github/actions/buggy-gate@<commit sha>`. Pin third-party
+`saivarun3407/Buggy/.github/actions/buggy-gate@<commit sha>`. Pin third-party
 actions to a commit SHA in your own workflows.
 
 Run the gate by hand on the same files:

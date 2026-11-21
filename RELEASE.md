@@ -1,6 +1,8 @@
 # Release Process
 
-How Buggy is versioned and released.
+How Buggy is versioned and released. For the one-time GitHub setup, where each
+artifact is published and how to turn on PyPI, see
+[docs/releasing.md](docs/releasing.md).
 
 ## Versioning
 
@@ -74,12 +76,13 @@ flow above also still works for out-of-band releases.
 
 | Job | Output |
 |-----|--------|
-| `publish-pypi` | Builds the wheel + sdist and publishes the `buggy` package to PyPI via Trusted Publishing (OIDC — no API token). |
+| `publish-pypi` | Opt-in (repository variable `PUBLISH_PYPI=true`): builds the wheels + sdists and publishes `buggy`, `buggy-core` and `buggy-sdk` to PyPI via Trusted Publishing (OIDC — no API token). Nothing else waits for it. |
 | `launcher` | Builds the Go launcher binaries with GoReleaser (which drafts the GitHub release) and uploads `config-checksums.txt`, a SHA-256 integrity manifest for `docker-compose.yml`, `config/litellm.yaml`, and `.env.example`. |
-| `docker` | Builds and pushes the multi-arch `litellm`, `langgraph`, `cli`, and `skillogy` images. |
-| `docker-heavy` / `docker-heavy-merge` | Builds `sandbox` and `c2-sliver` on native amd64/arm64 runners (the Kali base is too slow under QEMU), then merges the per-arch digests into manifests. |
+| `docker` | Builds and pushes the multi-arch `litellm`, `langgraph`, `cli`, `skillogy`, `egress-guard` and `browser` images. |
+| `docker-heavy` / `docker-heavy-merge` | Builds `sandbox`, `c2-sliver` and `pipeline` on native amd64/arm64 runners (too slow under QEMU), then merges the per-arch digests into manifests. |
 | `docker-web` / `docker-web-merge` | Builds and merges the `web` image the same way. |
-| `publish-release` | Verifies all seven `:<version>` images exist on GHCR, promotes them to `:latest`, and flips the GitHub release from draft to published. |
+| `docker-derived` | Builds `solver` on the release's own `buggy-langgraph:<version>`. |
+| `publish-release` | Verifies all eleven `:<version>` images exist on GHCR, promotes them to `:latest`, and flips the GitHub release from draft to published. |
 
 Every image is signed with Cosign (keyless OIDC) and ships a CycloneDX SBOM.
 The `:latest` tag and the published release appear only *after* every image is
@@ -88,13 +91,13 @@ verified, so a half-finished release never moves the `:latest` tag.
 ## Digest pinning
 
 `pin-digests.yml` runs on every published release and uploads
-`image-digests.txt` — one line per image, `ghcr.io/purpleailab/<image>:<version>@sha256:<digest>` —
+`image-digests.txt` — one line per image, `ghcr.io/<owner>/<image>:<version>@sha256:<digest>` —
 as a release asset. Operators who want immutable, tamper-evident deploys pin
 their compose stack to the digest form instead of the moving `:stable` /
 `:latest` channel tags:
 
 ```yaml
-image: ghcr.io/purpleailab/buggy-litellm@sha256:<digest>
+image: ghcr.io/<owner>/buggy-litellm@sha256:<digest>
 ```
 
 The digest is the manifest-list digest, so it covers all published platforms.

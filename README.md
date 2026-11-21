@@ -70,7 +70,7 @@ Supported on macOS (Apple Silicon + Intel), Linux (amd64 + arm64), and Windows (
 
 **macOS / Linux / WSL2**
 ```bash
-curl -fsSL https://buggy.red/install | bash
+curl -fsSL https://raw.githubusercontent.com/saivarun3407/Buggy/main/scripts/install.sh | bash
 buggy onboard   # Interactive setup wizard (provider, API key, model profile)
 buggy hunt https://example.com   # One command: scope, recon, report, then agents
 buggy bounty             # Pick a HackerOne/Bugcrowd program and hunt it
@@ -83,7 +83,7 @@ The default start brings up the core management plane (LiteLLM, PostgreSQL, Neo4
 
 **Windows (PowerShell, native)**
 ```powershell
-irm https://buggy.red/install.ps1 | iex
+irm https://raw.githubusercontent.com/saivarun3407/Buggy/main/scripts/install.ps1 | iex
 buggy onboard
 buggy
 ```

@@ -41,6 +41,8 @@ jobs:
           VERSION: ${{ inputs.version }}
         run: |
           set -euo pipefail
+          # This repository's registry namespace, lower-cased for ghcr.io.
+          registry="ghcr.io/${GITHUB_REPOSITORY_OWNER,,}"
           images=(
             buggy-litellm
             buggy-langgraph
@@ -52,9 +54,10 @@ jobs:
             buggy-browser
             buggy-c2-sliver
             buggy-web
+            buggy-solver
           )
           for img in "${images[@]}"; do
-            ref="ghcr.io/purpleailab/${img}:${VERSION}"
+            ref="${registry}/${img}:${VERSION}"
             echo "Verifying ${ref}"
             docker buildx imagetools inspect "${ref}" >/dev/null
           done
@@ -65,6 +68,8 @@ jobs:
           VERSION: ${{ inputs.version }}
         run: |
           set -euo pipefail
+          # This repository's registry namespace, lower-cased for ghcr.io.
+          registry="ghcr.io/${GITHUB_REPOSITORY_OWNER,,}"
           images=(
             buggy-litellm
             buggy-langgraph
@@ -76,10 +81,11 @@ jobs:
             buggy-browser
             buggy-c2-sliver
             buggy-web
+            buggy-solver
           )
           for img in "${images[@]}"; do
-            src="ghcr.io/purpleailab/${img}:${VERSION}"
-            dst="ghcr.io/purpleailab/${img}:latest"
+            src="${registry}/${img}:${VERSION}"
+            dst="${registry}/${img}:latest"
             echo "Promoting ${src} -> ${dst}"
             docker buildx imagetools create --tag "${dst}" "${src}"
           done

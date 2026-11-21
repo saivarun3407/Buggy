@@ -10,20 +10,30 @@ permissions:
   id-token: write   # cosign keyless OIDC
   attestations: write
 
+# Everything this workflow publishes goes to THIS repository: the GitHub
+# release of the pushed tag, and images under ghcr.io/<owner>/ where <owner>
+# is github.repository_owner in lower case (registry paths must be lower
+# case). Each job derives that namespace in its "Extract version from tag"
+# step; nothing names an organisation. See docs/releasing.md.
 jobs:
   # Publish all three workspace wheels (buggy-core, buggy,
   # buggy-sdk) to PyPI via Trusted Publishing (OIDC). Lockstep
   # release per spec §13.1 — all three share one version string and
   # publish in one job so the dependency closure is consistent.
   #
-  # PyPI side requires a Trusted Publisher config per project on
-  # pypi.org before the first successful publish:
-  #   - buggy-core  -> repo PurpleAILAB/Buggy, workflow release.yml
+  # OPT-IN: runs only when the repository variable PUBLISH_PYPI is "true".
+  # The PyPI names must belong to whoever owns this repository, and each
+  # needs a Trusted Publisher on pypi.org before the first publish:
+  #   - buggy-core  -> this repository, workflow release.yml,
+  #                    environment pypi-release
   #   - buggy       -> same
   #   - buggy-sdk   -> same
   # See: https://docs.pypi.org/trusted-publishers/
+  # No other job needs this one, so a skipped PyPI publish never skips
+  # (or fails) the images, the launcher or the GitHub release.
   publish-pypi:
     name: Publish three workspace wheels to PyPI
+    if: vars.PUBLISH_PYPI == 'true'
     runs-on: ubuntu-latest
     environment: pypi-release
     permissions:
@@ -104,6 +114,12 @@ jobs:
           workdir: clients/launcher
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # .goreleaser.yml reads these: the release is created in the
+          # repository the tag was pushed to, and the launcher is stamped
+          # with it so it updates from (and pulls images of) the same place.
+          BUGGY_RELEASE_OWNER: ${{ github.repository_owner }}
+          BUGGY_RELEASE_NAME: ${{ github.event.repository.name }}
+          BUGGY_REPO_SLUG: ${{ github.repository }}
 
       # Configuration-file integrity manifest. The OSS installer and
       # launcher self-update download docker-compose.yml /
@@ -156,7 +172,7 @@ jobs:
           # so multi-arch under QEMU is cheap like cli/langgraph. The compose
           # `skillogy` service has no `profiles:`, so it is ALWAYS started by
           # `buggy start` — it MUST be published or every start fails to
-          # pull ghcr.io/purpleailab/buggy-skillogy:<version>.
+          # pull ghcr.io/<owner>/buggy-skillogy:<version>.
           - image: buggy-skillogy
             dockerfile: containers/skillogy.Dockerfile
             platforms: linux/amd64,linux/arm64
@@ -166,11 +182,10 @@ jobs:
           - image: buggy-egress-guard
             dockerfile: containers/egress-guard.Dockerfile
             platforms: linux/amd64,linux/arm64
-          # Recon pipeline: pinned Go scanners + stdlib Python. Always started
-          # (`pipeline`, `pipeline-mcp`), so it must be published.
-          - image: buggy-pipeline
-            dockerfile: containers/pipeline.Dockerfile
-            platforms: linux/amd64,linux/arm64
+          # buggy-pipeline (always started: `pipeline`, `pipeline-mcp`, and
+          # the whole lite stack) compiles its pinned Go scanners with CGO,
+          # which under QEMU is as slow as the Kali images, so it is built
+          # in docker-heavy on native runners instead of here.
           # Scoped browser (`browser-mcp`): Playwright Chromium + MCP server.
           - image: buggy-browser
             dockerfile: containers/browser.Dockerfile
@@ -193,6 +208,8 @@ jobs:
         run: |
           version="${GITHUB_REF_NAME#v}"
           echo "version=${version}" >> "$GITHUB_OUTPUT"
+          # This repository's registry namespace, lower-cased for ghcr.io.
+          echo "registry=ghcr.io/${GITHUB_REPOSITORY_OWNER,,}" >> "$GITHUB_OUTPUT"
           if [[ "${version}" == *-* ]]; then
             echo "prerelease=true" >> "$GITHUB_OUTPUT"
           else
@@ -222,7 +239,7 @@ jobs:
           # publish-release job AFTER every image has been verified on GHCR,
           # so a half-finished release never updates the moving tag.
           tags: |
-            ghcr.io/purpleailab/${{ matrix.image }}:${{ steps.version.outputs.version }}
+            ${{ steps.version.outputs.registry }}/${{ matrix.image }}:${{ steps.version.outputs.version }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
@@ -230,14 +247,15 @@ jobs:
         env:
           COSIGN_EXPERIMENTAL: "true"
           DIGEST: ${{ steps.build.outputs.digest }}
+          IMAGE: ${{ steps.version.outputs.registry }}/${{ matrix.image }}
         run: |
           cosign sign --yes \
-            "ghcr.io/purpleailab/${{ matrix.image }}@${DIGEST}"
+            "${IMAGE}@${DIGEST}"
 
       - name: Generate CycloneDX SBOM
         uses: anchore/sbom-action@e22c389904149dbc22b58101806040fa8d37a610 # v0.24.0
         with:
-          image: ghcr.io/purpleailab/${{ matrix.image }}:${{ steps.version.outputs.version }}
+          image: ${{ steps.version.outputs.registry }}/${{ matrix.image }}:${{ steps.version.outputs.version }}
           format: cyclonedx-json
           output-file: sbom-${{ matrix.image }}.cdx.json
 
@@ -261,12 +279,14 @@ jobs:
         env:
           COSIGN_EXPERIMENTAL: "true"
           DIGEST: ${{ steps.build.outputs.digest }}
+          REGISTRY: ${{ steps.version.outputs.registry }}
+          IMAGE_NAME: ${{ matrix.image }}
         run: |
           set -uo pipefail
-          target="ghcr.io/purpleailab/${{ matrix.image }}@${DIGEST}"
-          predicate="sbom-${{ matrix.image }}.cdx.json"
+          target="${REGISTRY}/${IMAGE_NAME}@${DIGEST}"
+          predicate="sbom-${IMAGE_NAME}.cdx.json"
           extra=()
-          if [ "${{ matrix.image }}" = "buggy-sandbox" ]; then
+          if [ "${IMAGE_NAME}" = "buggy-sandbox" ]; then
             extra+=(--tlog-upload=false)
             echo "buggy-sandbox: SBOM exceeds Rekor entry size cap; attaching attestation to OCI only (--tlog-upload=false)."
           fi
@@ -323,6 +343,18 @@ jobs:
             dockerfile: containers/c2-sliver.Dockerfile
             platform: arm64
             runs-on: ubuntu-24.04-arm
+          # Recon pipeline: pinned Go scanners (CGO) + stdlib Python. Always
+          # started (`pipeline`, `pipeline-mcp`, the lite stack), so it must
+          # be published. Native runners for the same reason as sandbox:
+          # compiling the scanners under QEMU is the slowest build here.
+          - image: buggy-pipeline
+            dockerfile: containers/pipeline.Dockerfile
+            platform: amd64
+            runs-on: ubuntu-latest
+          - image: buggy-pipeline
+            dockerfile: containers/pipeline.Dockerfile
+            platform: arm64
+            runs-on: ubuntu-24.04-arm
     runs-on: ${{ matrix.runs-on }}
     steps:
       - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
@@ -337,7 +369,10 @@ jobs:
 
       - name: Extract version from tag
         id: version
-        run: echo "version=${GITHUB_REF_NAME#v}" >> "$GITHUB_OUTPUT"
+        run: |
+          echo "version=${GITHUB_REF_NAME#v}" >> "$GITHUB_OUTPUT"
+          # This repository's registry namespace, lower-cased for ghcr.io.
+          echo "registry=ghcr.io/${GITHUB_REPOSITORY_OWNER,,}" >> "$GITHUB_OUTPUT"
 
       - name: Build & push by digest
         id: build
@@ -348,7 +383,7 @@ jobs:
           platforms: linux/${{ matrix.platform }}
           provenance: mode=max
           sbom: ${{ matrix.image != 'buggy-sandbox' }}
-          outputs: type=image,name=ghcr.io/purpleailab/${{ matrix.image }},push-by-digest=true,name-canonical=true,push=true
+          outputs: type=image,name=${{ steps.version.outputs.registry }}/${{ matrix.image }},push-by-digest=true,name-canonical=true,push=true
           cache-from: type=gha,scope=${{ matrix.image }}-${{ matrix.platform }}
           cache-to: type=gha,mode=max,scope=${{ matrix.image }}-${{ matrix.platform }}
 
@@ -376,7 +411,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        image: [buggy-sandbox, buggy-c2-sliver]
+        image: [buggy-sandbox, buggy-c2-sliver, buggy-pipeline]
     runs-on: ubuntu-latest
     environment: pypi-release
     steps:
@@ -392,7 +427,10 @@ jobs:
 
       - name: Extract version from tag
         id: version
-        run: echo "version=${GITHUB_REF_NAME#v}" >> "$GITHUB_OUTPUT"
+        run: |
+          echo "version=${GITHUB_REF_NAME#v}" >> "$GITHUB_OUTPUT"
+          # This repository's registry namespace, lower-cased for ghcr.io.
+          echo "registry=ghcr.io/${GITHUB_REPOSITORY_OWNER,,}" >> "$GITHUB_OUTPUT"
 
       - name: Install cosign
         uses: sigstore/cosign-installer@398d4b0eeef1380460a10c8013a76f728fb906ac # v3.9.1
@@ -407,13 +445,20 @@ jobs:
       - name: Create multi-arch manifest
         id: manifest
         working-directory: ${{ runner.temp }}/digests
+        env:
+          IMAGE: ${{ steps.version.outputs.registry }}/${{ matrix.image }}
+          VERSION: ${{ steps.version.outputs.version }}
         run: |
-          # shellcheck disable=SC2046  # intentional word-split: one image ref arg per digest file
+          # One image ref per digest file (each file is named by its digest).
+          refs=()
+          for digest_file in *; do
+            refs+=("${IMAGE}@sha256:${digest_file}")
+          done
           docker buildx imagetools create \
-            --tag ghcr.io/purpleailab/${{ matrix.image }}:${{ steps.version.outputs.version }} \
-            $(printf 'ghcr.io/purpleailab/${{ matrix.image }}@sha256:%s ' *)
+            --tag "${IMAGE}:${VERSION}" \
+            "${refs[@]}"
           digest=$(docker buildx imagetools inspect \
-            ghcr.io/purpleailab/${{ matrix.image }}:${{ steps.version.outputs.version }} \
+            "${IMAGE}:${VERSION}" \
             --format '{{json .Manifest}}' | jq -r '.digest')
           echo "digest=$digest" >> "$GITHUB_OUTPUT"
 
@@ -421,14 +466,15 @@ jobs:
         env:
           COSIGN_EXPERIMENTAL: "true"
           DIGEST: ${{ steps.manifest.outputs.digest }}
+          IMAGE: ${{ steps.version.outputs.registry }}/${{ matrix.image }}
         run: |
           cosign sign --yes \
-            "ghcr.io/purpleailab/${{ matrix.image }}@${DIGEST}"
+            "${IMAGE}@${DIGEST}"
 
       - name: Generate CycloneDX SBOM
         uses: anchore/sbom-action@e22c389904149dbc22b58101806040fa8d37a610 # v0.24.0
         with:
-          image: ghcr.io/purpleailab/${{ matrix.image }}:${{ steps.version.outputs.version }}
+          image: ${{ steps.version.outputs.registry }}/${{ matrix.image }}:${{ steps.version.outputs.version }}
           format: cyclonedx-json
           output-file: sbom-${{ matrix.image }}.cdx.json
 
@@ -436,12 +482,14 @@ jobs:
         env:
           COSIGN_EXPERIMENTAL: "true"
           DIGEST: ${{ steps.manifest.outputs.digest }}
+          REGISTRY: ${{ steps.version.outputs.registry }}
+          IMAGE_NAME: ${{ matrix.image }}
         run: |
           set -uo pipefail
-          target="ghcr.io/purpleailab/${{ matrix.image }}@${DIGEST}"
-          predicate="sbom-${{ matrix.image }}.cdx.json"
+          target="${REGISTRY}/${IMAGE_NAME}@${DIGEST}"
+          predicate="sbom-${IMAGE_NAME}.cdx.json"
           extra=()
-          if [ "${{ matrix.image }}" = "buggy-sandbox" ]; then
+          if [ "${IMAGE_NAME}" = "buggy-sandbox" ]; then
             extra+=(--tlog-upload=false)
             echo "buggy-sandbox: SBOM exceeds Rekor entry size cap; attaching attestation to OCI only (--tlog-upload=false)."
           fi
@@ -498,7 +546,10 @@ jobs:
 
       - name: Extract version from tag
         id: version
-        run: echo "version=${GITHUB_REF_NAME#v}" >> "$GITHUB_OUTPUT"
+        run: |
+          echo "version=${GITHUB_REF_NAME#v}" >> "$GITHUB_OUTPUT"
+          # This repository's registry namespace, lower-cased for ghcr.io.
+          echo "registry=ghcr.io/${GITHUB_REPOSITORY_OWNER,,}" >> "$GITHUB_OUTPUT"
 
       - name: Build & push by digest
         id: build
@@ -513,7 +564,7 @@ jobs:
           # time (web image embeds clients/cli for the terminal-server PTY).
           build-args: |
             VERSION=${{ steps.version.outputs.version }}
-          outputs: type=image,name=ghcr.io/purpleailab/buggy-web,push-by-digest=true,name-canonical=true,push=true
+          outputs: type=image,name=${{ steps.version.outputs.registry }}/buggy-web,push-by-digest=true,name-canonical=true,push=true
           cache-from: type=gha,scope=web-${{ matrix.platform }}
           cache-to: type=gha,mode=max,scope=web-${{ matrix.platform }}
 
@@ -549,7 +600,10 @@ jobs:
 
       - name: Extract version from tag
         id: version
-        run: echo "version=${GITHUB_REF_NAME#v}" >> "$GITHUB_OUTPUT"
+        run: |
+          echo "version=${GITHUB_REF_NAME#v}" >> "$GITHUB_OUTPUT"
+          # This repository's registry namespace, lower-cased for ghcr.io.
+          echo "registry=ghcr.io/${GITHUB_REPOSITORY_OWNER,,}" >> "$GITHUB_OUTPUT"
 
       - name: Install cosign
         uses: sigstore/cosign-installer@398d4b0eeef1380460a10c8013a76f728fb906ac # v3.9.1
@@ -564,15 +618,22 @@ jobs:
       - name: Create multi-arch manifest
         id: manifest
         working-directory: ${{ runner.temp }}/digests
+        env:
+          IMAGE: ${{ steps.version.outputs.registry }}/buggy-web
+          VERSION: ${{ steps.version.outputs.version }}
         run: |
           # Same rule as the docker matrix: only the version tag here.
           # `:latest` is promoted by publish-release after verification.
-          # shellcheck disable=SC2046  # intentional word-split: one image ref arg per digest file
+          # One image ref per digest file (each file is named by its digest).
+          refs=()
+          for digest_file in *; do
+            refs+=("${IMAGE}@sha256:${digest_file}")
+          done
           docker buildx imagetools create \
-            --tag ghcr.io/purpleailab/buggy-web:${{ steps.version.outputs.version }} \
-            $(printf 'ghcr.io/purpleailab/buggy-web@sha256:%s ' *)
+            --tag "${IMAGE}:${VERSION}" \
+            "${refs[@]}"
           digest=$(docker buildx imagetools inspect \
-            ghcr.io/purpleailab/buggy-web:${{ steps.version.outputs.version }} \
+            "${IMAGE}:${VERSION}" \
             --format '{{json .Manifest}}' | jq -r '.digest')
           echo "digest=$digest" >> "$GITHUB_OUTPUT"
 
@@ -580,14 +641,15 @@ jobs:
         env:
           COSIGN_EXPERIMENTAL: "true"
           DIGEST: ${{ steps.manifest.outputs.digest }}
+          IMAGE: ${{ steps.version.outputs.registry }}/buggy-web
         run: |
           cosign sign --yes \
-            "ghcr.io/purpleailab/buggy-web@${DIGEST}"
+            "${IMAGE}@${DIGEST}"
 
       - name: Generate CycloneDX SBOM
         uses: anchore/sbom-action@e22c389904149dbc22b58101806040fa8d37a610 # v0.24.0
         with:
-          image: ghcr.io/purpleailab/buggy-web:${{ steps.version.outputs.version }}
+          image: ${{ steps.version.outputs.registry }}/buggy-web:${{ steps.version.outputs.version }}
           format: cyclonedx-json
           output-file: sbom-buggy-web.cdx.json
 
@@ -596,9 +658,10 @@ jobs:
         env:
           COSIGN_EXPERIMENTAL: "true"
           DIGEST: ${{ steps.manifest.outputs.digest }}
+          IMAGE: ${{ steps.version.outputs.registry }}/buggy-web
         run: |
           set -uo pipefail
-          target="ghcr.io/purpleailab/buggy-web@${DIGEST}"
+          target="${IMAGE}@${DIGEST}"
           predicate="sbom-buggy-web.cdx.json"
           for attempt in 1 2 3 4 5; do
             echo "Attestation attempt ${attempt}/5 for ${target}"
@@ -623,6 +686,120 @@ jobs:
           name: sbom-buggy-web
           path: sbom-buggy-web.cdx.json
 
+  # Images built FROM another Buggy image of the same release. They wait
+  # for the docker matrix (which publishes their base) and pass the base's
+  # registry name in, so a release image never builds on a local or older
+  # tag. Otherwise identical to the docker matrix: same platforms, context,
+  # cache, signing, SBOM and attestation.
+  #
+  # buggy-solver: the web-blind devin solver (FROM buggy-langgraph). The
+  # compose `solver` service has no `profiles:`, so `buggy start` starts it
+  # and `up --no-build` fails on an install without it.
+  docker-derived:
+    name: Build & push ${{ matrix.image }}
+    needs: docker
+    runs-on: ubuntu-latest
+    environment: pypi-release
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - image: buggy-solver
+            dockerfile: containers/solver.Dockerfile
+            platforms: linux/amd64,linux/arm64
+            base-arg: LANGGRAPH_IMAGE
+            base-image: buggy-langgraph
+    steps:
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+
+      - uses: docker/setup-qemu-action@06116385d9baf250c9f4dcb4858b16962ea869c3 # v4.1.0
+
+      - uses: docker/setup-buildx-action@d7f5e7f509e45cec5c76c4d5afdd7de93d0b3df5 # v4.1.0
+
+      - uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9 # v3.7.0
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Extract version from tag
+        id: version
+        run: |
+          echo "version=${GITHUB_REF_NAME#v}" >> "$GITHUB_OUTPUT"
+          # This repository's registry namespace, lower-cased for ghcr.io.
+          echo "registry=ghcr.io/${GITHUB_REPOSITORY_OWNER,,}" >> "$GITHUB_OUTPUT"
+
+      - name: Install cosign
+        uses: sigstore/cosign-installer@398d4b0eeef1380460a10c8013a76f728fb906ac # v3.9.1
+
+      - name: Build & push image
+        id: build
+        uses: docker/build-push-action@f9f3042f7e2789586610d6e8b85c8f03e5195baf # v7.2.0
+        with:
+          context: .
+          file: ${{ matrix.dockerfile }}
+          platforms: ${{ matrix.platforms }}
+          push: true
+          provenance: mode=max
+          sbom: true
+          build-args: |
+            VERSION=${{ steps.version.outputs.version }}
+            ${{ matrix.base-arg }}=${{ steps.version.outputs.registry }}/${{ matrix.base-image }}:${{ steps.version.outputs.version }}
+          tags: |
+            ${{ steps.version.outputs.registry }}/${{ matrix.image }}:${{ steps.version.outputs.version }}
+          cache-from: type=gha,scope=${{ matrix.image }}
+          cache-to: type=gha,mode=max,scope=${{ matrix.image }}
+
+      - name: Cosign sign image (keyless)
+        env:
+          COSIGN_EXPERIMENTAL: "true"
+          DIGEST: ${{ steps.build.outputs.digest }}
+          IMAGE: ${{ steps.version.outputs.registry }}/${{ matrix.image }}
+        run: |
+          cosign sign --yes \
+            "${IMAGE}@${DIGEST}"
+
+      - name: Generate CycloneDX SBOM
+        uses: anchore/sbom-action@e22c389904149dbc22b58101806040fa8d37a610 # v0.24.0
+        with:
+          image: ${{ steps.version.outputs.registry }}/${{ matrix.image }}:${{ steps.version.outputs.version }}
+          format: cyclonedx-json
+          output-file: sbom-${{ matrix.image }}.cdx.json
+
+      # Same retry+warning policy as the docker matrix attest step.
+      - name: Attest SBOM with cosign
+        env:
+          COSIGN_EXPERIMENTAL: "true"
+          DIGEST: ${{ steps.build.outputs.digest }}
+          REGISTRY: ${{ steps.version.outputs.registry }}
+          IMAGE_NAME: ${{ matrix.image }}
+        run: |
+          set -uo pipefail
+          target="${REGISTRY}/${IMAGE_NAME}@${DIGEST}"
+          predicate="sbom-${IMAGE_NAME}.cdx.json"
+          for attempt in 1 2 3 4 5; do
+            echo "Attestation attempt ${attempt}/5 for ${target}"
+            if cosign attest --yes \
+                --predicate "${predicate}" \
+                --type cyclonedx \
+                "${target}"; then
+              echo "Attestation succeeded on attempt ${attempt}."
+              exit 0
+            fi
+            if [ "${attempt}" -lt 5 ]; then
+              delay=$((30 * attempt))
+              echo "Attestation attempt ${attempt} failed; sleeping ${delay}s..."
+              sleep "${delay}"
+            fi
+          done
+          echo "::warning title=SBOM attestation skipped::cosign attest failed after 5 retries (Sigstore Rekor unavailable). Image is signed and SBOM artifact uploaded; transparency-log entry for the SBOM is missing and can be re-attested manually."
+
+      - name: Upload SBOM artifact
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: sbom-${{ matrix.image }}
+          path: sbom-${{ matrix.image }}.cdx.json
+
   # Atomic release gate. Waits until every Docker image AND the launcher
   # binaries are pushed, verifies each :<version> manifest exists on GHCR,
   # then promotes :<version> → channel tags (:stable for finals, :latest
@@ -634,7 +811,9 @@ jobs:
   #     fallback keeps resolving to the previous (working) release.
   publish-release:
     name: Verify images & publish release
-    needs: [launcher, docker, docker-heavy-merge, docker-web-merge]
+    # publish-pypi is deliberately absent: PyPI is opt-in (vars.PUBLISH_PYPI)
+    # and a skipped or failed wheel upload must not hold back the release.
+    needs: [launcher, docker, docker-heavy-merge, docker-web-merge, docker-derived]
     runs-on: ubuntu-latest
     environment: pypi-release
     steps:
@@ -653,6 +832,8 @@ jobs:
         run: |
           version="${GITHUB_REF_NAME#v}"
           echo "version=${version}" >> "$GITHUB_OUTPUT"
+          # This repository's registry namespace, lower-cased for ghcr.io.
+          echo "registry=ghcr.io/${GITHUB_REPOSITORY_OWNER,,}" >> "$GITHUB_OUTPUT"
           if [[ "${version}" == *-* ]]; then
             echo "prerelease=true" >> "$GITHUB_OUTPUT"
           else
@@ -662,6 +843,7 @@ jobs:
       - name: Verify all version-tagged images exist on GHCR
         env:
           VERSION: ${{ steps.version.outputs.version }}
+          REGISTRY: ${{ steps.version.outputs.registry }}
         run: |
           set -euo pipefail
           images=(
@@ -675,9 +857,10 @@ jobs:
             buggy-browser
             buggy-c2-sliver
             buggy-web
+            buggy-solver
           )
           for img in "${images[@]}"; do
-            ref="ghcr.io/purpleailab/${img}:${VERSION}"
+            ref="${REGISTRY}/${img}:${VERSION}"
             echo "Verifying ${ref}"
             docker buildx imagetools inspect "${ref}" >/dev/null
           done
@@ -694,6 +877,7 @@ jobs:
         if: steps.version.outputs.prerelease != 'true'
         env:
           VERSION: ${{ steps.version.outputs.version }}
+          REGISTRY: ${{ steps.version.outputs.registry }}
         run: |
           set -euo pipefail
           images=(
@@ -707,10 +891,11 @@ jobs:
             buggy-browser
             buggy-c2-sliver
             buggy-web
+            buggy-solver
           )
           for img in "${images[@]}"; do
-            src="ghcr.io/purpleailab/${img}:${VERSION}"
-            dst="ghcr.io/purpleailab/${img}:latest"
+            src="${REGISTRY}/${img}:${VERSION}"
+            dst="${REGISTRY}/${img}:latest"
             echo "Promoting ${src} → ${dst}"
             docker buildx imagetools create --tag "${dst}" "${src}"
           done
@@ -718,7 +903,9 @@ jobs:
       - name: Publish GitHub release (undraft)
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          VERSION: ${{ steps.version.outputs.version }}
+          PRERELEASE: ${{ steps.version.outputs.prerelease }}
         run: |
-          gh release edit "v${{ steps.version.outputs.version }}" \
+          gh release edit "v${VERSION}" \
             --draft=false \
-            --prerelease=${{ steps.version.outputs.prerelease }}
+            --prerelease="${PRERELEASE}"

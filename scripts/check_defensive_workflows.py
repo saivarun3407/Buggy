@@ -9,7 +9,7 @@ Run from the repository root with an already available sandbox image:
       --mount "type=bind,src=$PWD/packages/buggy/buggy/sandbox_kernel,dst=/opt/buggy/sandbox_kernel,readonly" \
       --mount "type=bind,src=$PWD/packages/buggy-core/buggy_core,dst=/opt/buggy_core,readonly" \
       --mount "type=bind,src=$PWD/scripts/check_defensive_workflows.py,dst=/opt/check_defensive_workflows.py,readonly" \
-      --entrypoint python3 ghcr.io/purpleailab/buggy-sandbox:dev \
+      --entrypoint python3 buggy-sandbox:dev \
       /opt/check_defensive_workflows.py --run
 
 The certificate, private key, assessment, and evidence exist only in /tmp.

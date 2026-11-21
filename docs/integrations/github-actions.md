@@ -25,7 +25,7 @@ jobs:
     steps:
       - uses: actions/checkout@v6
         with: { fetch-depth: 0 }
-      - uses: PurpleAILAB/Buggy/.github/actions/buggy-scan@main
+      - uses: saivarun3407/Buggy/.github/actions/buggy-scan@main
         with:
           fail-on: high
         env:

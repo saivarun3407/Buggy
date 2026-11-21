@@ -5,19 +5,29 @@
 # Windows PowerShell 5.1; this script also runs unchanged under PowerShell 7+.
 #
 # Usage:
-#   irm https://buggy.red/install.ps1 | iex
+#   irm https://raw.githubusercontent.com/saivarun3407/Buggy/main/scripts/install.ps1 | iex
 #
 # Environment variables:
 #   BUGGY_VERSION   — install a specific version (default: latest)
 #   BUGGY_HOME      — install directory (default: %USERPROFILE%\.buggy)
 #   SKIP_PULL            — set to "true" to skip the Docker image pull
 #   BUGGY_SKIP_VERIFY — set to "1" to opt out of checksum verification
+#   BUGGY_REPO      — GitHub "owner/name" to install from
+#                     (default: saivarun3407/Buggy)
 # ─────────────────────────────────────────────────────────────────────
 
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
 
-$Repo        = 'PurpleAILAB/Buggy'
+# The repository releases, config files and the launcher come from, and
+# whose GitHub Container Registry namespace the images are pulled from.
+$Repo        = if ($env:BUGGY_REPO) { $env:BUGGY_REPO } else { 'saivarun3407/Buggy' }
+if ($Repo -notmatch '^[A-Za-z0-9][A-Za-z0-9-]*/[A-Za-z0-9._-]+$') {
+    Write-Host "Error: BUGGY_REPO must be a GitHub owner/name, got: $Repo" -ForegroundColor Red
+    exit 1
+}
+# Registry paths must be lower case; GitHub owners need not be.
+$ImagePrefix = 'ghcr.io/' + ($Repo.Split('/')[0]).ToLowerInvariant() + '/'
 $Branch      = if ($env:BRANCH) { $env:BRANCH } else { 'main' }
 $RawBase     = "https://raw.githubusercontent.com/$Repo/$Branch"
 $ReleaseBase = "https://github.com/$Repo/releases/download"
@@ -193,6 +203,8 @@ function Main {
         Push-Location $installDir
         $env:BUGGY_VERSION = $version
         $env:BUGGY_HOME    = $installDir
+        # Pull this release's registry images (an operator's own value wins).
+        if ($null -eq $env:BUGGY_IMAGE_PREFIX) { $env:BUGGY_IMAGE_PREFIX = $ImagePrefix }
         try { docker compose --profile cli pull } catch { Write-Warn 'Warning: failed to pull some images - run "buggy update" later.' }
         Pop-Location
     }

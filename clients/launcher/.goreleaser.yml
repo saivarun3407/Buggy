@@ -25,6 +25,10 @@ builds:
     ldflags:
       - -s -w
       - -X github.com/saivarun3407/buggy/clients/launcher/cmd.version={{.Version}}
+      # The repository this launcher updates from and pulls images of. The
+      # release workflow sets BUGGY_REPO_SLUG to github.repository; a local
+      # snapshot build falls back to this fork.
+      - -X github.com/saivarun3407/buggy/clients/launcher/internal/project.DefaultRepo={{ envOrDefault "BUGGY_REPO_SLUG" "saivarun3407/Buggy" }}
 
 archives:
   - id: binaries
@@ -35,9 +39,11 @@ checksum:
   name_template: "checksums.txt"
 
 release:
+  # The repository the tag was pushed to (set by .github/workflows/release.yml
+  # from the GitHub context), never a hard-coded organisation.
   github:
-    owner: PurpleAILAB
-    name: Buggy
+    owner: '{{ envOrDefault "BUGGY_RELEASE_OWNER" "saivarun3407" }}'
+    name: '{{ envOrDefault "BUGGY_RELEASE_NAME" "Buggy" }}'
   # Publish as draft so the GitHub `releases/latest` endpoint (used by the
   # launcher's update notice and explicit `buggy update`) does NOT see
   # this version until every Docker image is verified on GHCR. The publish-release job in

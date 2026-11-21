@@ -291,12 +291,14 @@ func doctorCompose(profile string) *compose.Compose {
 
 // doctorOperatorImage is the image of the operator service of the profile's
 // stack: the slim pipeline image in the lite file, the agent image in the
-// full one.
-func doctorOperatorImage(profile, tag string) string {
+// full one. prefix is what ${BUGGY_IMAGE_PREFIX:-} resolves to (empty for a
+// source build, "ghcr.io/<owner>/" for an installed one), so the name is
+// exactly the one compose runs.
+func doctorOperatorImage(profile, prefix, tag string) string {
 	if profile == doctorProfileLite {
-		return "buggy-pipeline:" + tag
+		return prefix + "buggy-pipeline:" + tag
 	}
-	return "buggy-langgraph:" + tag
+	return prefix + "buggy-langgraph:" + tag
 }
 
 // doctorOperatorCommand is the container half of the preflight: secrets,
@@ -349,7 +351,7 @@ func runDoctor(cmd *cobra.Command, args []string) error {
 	env, _ := config.LoadEnv(config.EnvPath())
 
 	c := doctorCompose(doctorProfile)
-	image := doctorOperatorImage(doctorProfile, c.ImageTag(env))
+	image := doctorOperatorImage(doctorProfile, compose.ImagePrefix(env), c.ImageTag(env))
 	files := append(c.Files(), c.EnvFile)
 	checks, inContainer := doctorPreflight(doctorHostFn(), image, files)
 	if inContainer {

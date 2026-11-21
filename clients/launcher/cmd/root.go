@@ -4,6 +4,8 @@ import (
 	"fmt"
 	"os"
 
+	"github.com/saivarun3407/buggy/clients/launcher/internal/compose"
+	"github.com/saivarun3407/buggy/clients/launcher/internal/project"
 	"github.com/saivarun3407/buggy/clients/launcher/internal/ui"
 	"github.com/saivarun3407/buggy/clients/launcher/internal/updater"
 	"github.com/spf13/cobra"
@@ -31,6 +33,12 @@ func Execute() {
 }
 
 func init() {
+	// An installed (release) launcher pulls its images from the registry of
+	// the repository it was released from; a development build keeps the
+	// bare local names a source build tags.
+	if version != "dev" && version != "" {
+		compose.DefaultImagePrefix = project.ImagePrefix()
+	}
 	rootCmd.Version = version
 	rootCmd.SetVersionTemplate(fmt.Sprintf("Buggy %s\n", version))
 }

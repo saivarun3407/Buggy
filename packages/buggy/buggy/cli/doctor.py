@@ -182,9 +182,17 @@ def home_dir(env: Mapping[str, str]) -> Path:
 
 
 def required_images(profile: str, env: Mapping[str, str]) -> list[str]:
+    """The images the profile's stack runs, named as compose resolves them.
+
+    ``BUGGY_IMAGE_PREFIX`` (empty for a source build, ``ghcr.io/<owner>/`` on
+    an installed machine) and ``BUGGY_VERSION`` fill the same
+    ``${BUGGY_IMAGE_PREFIX:-}buggy-<name>:${BUGGY_VERSION:-stable}`` the
+    compose files use.
+    """
     tag = _value(env, "BUGGY_VERSION") or DEFAULT_IMAGE_TAG
+    prefix = _value(env, "BUGGY_IMAGE_PREFIX")
     names = LITE_IMAGES if profile == "lite" else LITE_IMAGES + FULL_ONLY_IMAGES
-    return [f"{name}:{tag}" for name in names]
+    return [f"{prefix}{name}:{tag}" for name in names]
 
 
 # ── real side effects (the defaults) ─────────────────────────────────

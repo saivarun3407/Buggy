@@ -259,8 +259,11 @@ func TestDoctorOperatorArgv(t *testing.T) {
 		if !reflect.DeepEqual(got, want) {
 			t.Errorf("%s argv:\n got %v\nwant %v", tc.profile, got, want)
 		}
-		if got := doctorOperatorImage(tc.profile, "1.2.3"); got != tc.image {
+		if got := doctorOperatorImage(tc.profile, "", "1.2.3"); got != tc.image {
 			t.Errorf("%s image = %q, want %q", tc.profile, got, tc.image)
+		}
+		if got, want := doctorOperatorImage(tc.profile, "ghcr.io/owner/", "1.2.3"), "ghcr.io/owner/"+tc.image; got != want {
+			t.Errorf("%s prefixed image = %q, want %q", tc.profile, got, want)
 		}
 	}
 }
@@ -375,9 +378,17 @@ func TestDoctorOperatorImage_MatchesTheComposeFiles(t *testing.T) {
 		if !strings.HasSuffix(declared, ":${BUGGY_VERSION:-stable}") {
 			t.Fatalf("%s: operator image %q is not tagged ${BUGGY_VERSION:-stable}", file, declared)
 		}
-		want := strings.TrimSuffix(declared, "${BUGGY_VERSION:-stable}") + "9.9.9"
-		if got := doctorOperatorImage(profile, "9.9.9"); got != want {
-			t.Errorf("%s: doctor looks for %q, the operator runs %q", profile, got, want)
+		if !strings.HasPrefix(declared, "${BUGGY_IMAGE_PREFIX:-}") {
+			t.Fatalf("%s: operator image %q has no ${BUGGY_IMAGE_PREFIX:-} prefix", file, declared)
+		}
+		for _, prefix := range []string{"", "ghcr.io/owner/"} {
+			want := strings.NewReplacer(
+				"${BUGGY_IMAGE_PREFIX:-}", prefix,
+				"${BUGGY_VERSION:-stable}", "9.9.9",
+			).Replace(declared)
+			if got := doctorOperatorImage(profile, prefix, "9.9.9"); got != want {
+				t.Errorf("%s: doctor looks for %q, the operator runs %q", profile, got, want)
+			}
 		}
 	}
 }
@@ -487,6 +498,22 @@ func TestRunDoctor_MissingImageIsReportedByName(t *testing.T) {
 	// The files it asks about are the lite stack's, in this Buggy home.
 	if !strings.Contains(out, "missing: "+filepath.Join(home, "docker-compose.lite.yml")+"  fix:") {
 		t.Errorf("missing stack file not reported:\n%s", out)
+	}
+}
+
+// An install whose .env names a registry prefix is checked for the
+// prefixed image, the one compose pulls and runs.
+func TestRunDoctor_HonoursTheImagePrefix(t *testing.T) {
+	home := stackHome(t)
+	t.Setenv("BUGGY_VERSION", "")
+	if err := os.WriteFile(filepath.Join(home, ".version"), []byte("v4.5.6\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("BUGGY_IMAGE_PREFIX", "ghcr.io/owner/")
+	fake := healthyHost()
+	_, _, _ = runDoctorOn(t, fake, "lite", false)
+	if !slices.Contains(fake.calls, "docker image inspect --format {{.Id}} ghcr.io/owner/buggy-pipeline:4.5.6") {
+		t.Errorf("inspected the wrong image: %v", fake.calls)
 	}
 }
 

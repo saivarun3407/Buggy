@@ -27,6 +27,7 @@ import (
 	"golang.org/x/term"
 
 	"github.com/saivarun3407/buggy/clients/launcher/internal/config"
+	"github.com/saivarun3407/buggy/clients/launcher/internal/project"
 	"github.com/saivarun3407/buggy/clients/launcher/internal/ui"
 )
 
@@ -37,11 +38,13 @@ const (
 	// `touch ~/.buggy/.starred` and re-enable it with `rm` of the
 	// same path.
 	AckFileName = ".starred"
+)
 
-	// RepoSlug is the canonical "owner/repo" used for every gh API
-	// call and the browser URL. Hardcoded — no scenario justifies
-	// targeting a different repository.
-	RepoSlug = "PurpleAILAB/Buggy"
+// RepoSlug is the canonical "owner/repo" used for every gh API call and
+// the browser URL: the repository this launcher installs from (see
+// internal/project), so the prompt never points at another project.
+var (
+	RepoSlug = project.Repo()
 	RepoURL  = "https://github.com/" + RepoSlug
 )
 

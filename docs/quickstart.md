@@ -5,13 +5,17 @@ The fastest path from zero to a running hunt. If you want the full tour
 
 ## 1. Install
 
+The installer downloads this repository's latest release and pulls its images
+from `ghcr.io/saivarun3407/`. Set `BUGGY_REPO=<owner>/<name>` to install from
+another fork; see [Releasing](releasing.md) for what a release contains.
+
 **macOS / Linux / WSL2**
 ```bash
-curl -fsSL https://buggy.red/install | bash
+curl -fsSL https://raw.githubusercontent.com/saivarun3407/Buggy/main/scripts/install.sh | bash
 ```
 **Windows (PowerShell)**
 ```powershell
-irm https://buggy.red/install.ps1 | iex
+irm https://raw.githubusercontent.com/saivarun3407/Buggy/main/scripts/install.ps1 | iex
 ```
 
 ## 1b. Try it without a model key

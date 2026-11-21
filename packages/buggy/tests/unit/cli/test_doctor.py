@@ -318,6 +318,14 @@ class TestEachFailureInIsolation:
         world.images = {image.replace(":stable", ":1.4.2") for image in FULL_IMAGES}
         assert _failed(world.checks()) == []
 
+    def test_images_use_the_registry_prefix(self, world: World) -> None:
+        # An installed machine pulls ghcr.io/<owner>/buggy-*: the bare local
+        # names a source build tags are not what its stack runs.
+        world.env["BUGGY_IMAGE_PREFIX"] = "ghcr.io/owner/"
+        assert _failed(world.checks()) == [f"image ghcr.io/owner/{image}" for image in FULL_IMAGES]
+        world.images = {f"ghcr.io/owner/{image}" for image in FULL_IMAGES}
+        assert _failed(world.checks()) == []
+
     @pytest.mark.parametrize(("variable", "port"), list(PORTS.items()))
     def test_each_busy_port(self, world: World, variable: str, port: int) -> None:
         world.busy_ports = {port}

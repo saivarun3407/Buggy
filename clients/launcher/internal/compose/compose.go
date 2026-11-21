@@ -12,6 +12,7 @@ import (
 
 	"github.com/saivarun3407/buggy/clients/launcher/internal/config"
 	"github.com/saivarun3407/buggy/clients/launcher/internal/opscontrol"
+	"github.com/saivarun3407/buggy/clients/launcher/internal/project"
 	"github.com/saivarun3407/buggy/clients/launcher/internal/runtime"
 )
 
@@ -236,6 +237,7 @@ func (c *Compose) composeEnv() []string {
 	if v := c.readVersion(); v != "" {
 		env = append(env, "BUGGY_VERSION="+imageTag(v))
 	}
+	env = append(env, c.imagePrefixEnv()...)
 	// Inject DOCKER_HOST for Podman so nested Docker-API clients in
 	// containers (testcontainers, kubectl-with-docker-shim) find the
 	// Podman socket. No-op for Docker.
@@ -371,6 +373,46 @@ func (c *Compose) ImageTag(env map[string]string) string {
 		return v
 	}
 	return "stable"
+}
+
+// DefaultImagePrefix is the registry prefix an installed launcher's images
+// are pulled from when neither the process environment nor .env sets
+// BUGGY_IMAGE_PREFIX. Release builds set it (cmd/root.go) to
+// project.ImagePrefix(); development builds leave it empty, so compose
+// resolves the bare local names a source build tags (`buggy-<name>:<tag>`).
+var DefaultImagePrefix = ""
+
+// ImagePrefix returns what compose resolves ${BUGGY_IMAGE_PREFIX:-} to for
+// this install: the process environment when it sets the variable (even to
+// empty), else env (the loaded .env) when it has the key, else
+// DefaultImagePrefix.
+func ImagePrefix(env map[string]string) string {
+	if v, ok := os.LookupEnv(project.ImagePrefixEnv); ok {
+		return strings.TrimSpace(v)
+	}
+	if v, ok := env[project.ImagePrefixEnv]; ok {
+		return strings.TrimSpace(v)
+	}
+	return DefaultImagePrefix
+}
+
+// imagePrefixEnv returns the BUGGY_IMAGE_PREFIX entry to add to a compose
+// child's environment: DefaultImagePrefix, but only when neither the
+// process environment nor the stack's .env sets the variable, so an
+// operator's own value (including an explicit empty one) always wins.
+func (c *Compose) imagePrefixEnv() []string {
+	if DefaultImagePrefix == "" {
+		return nil
+	}
+	if _, ok := os.LookupEnv(project.ImagePrefixEnv); ok {
+		return nil
+	}
+	if dotenv, err := config.LoadEnv(c.EnvFile); err == nil {
+		if _, ok := dotenv[project.ImagePrefixEnv]; ok {
+			return nil
+		}
+	}
+	return []string{project.ImagePrefixEnv + "=" + DefaultImagePrefix}
 }
 
 // Ps shows service status.

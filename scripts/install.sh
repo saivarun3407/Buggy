@@ -3,7 +3,7 @@
 # Buggy — One-line installer
 #
 # Usage:
-#   curl -fsSL https://buggy.red/install | bash
+#   curl -fsSL https://raw.githubusercontent.com/saivarun3407/Buggy/main/scripts/install.sh | bash
 #
 # Environment variables:
 #   CHANNEL              — Update channel (default: stable):
@@ -13,12 +13,23 @@
 #   VERSION              — Install a specific version (overrides CHANNEL)
 #   BUGGY_HOME      — Install directory (default: ~/.buggy)
 #   SKIP_PULL            — Skip Docker image pull (default: false)
+#   BUGGY_REPO           — GitHub "owner/name" to install from
+#                          (default: saivarun3407/Buggy)
 # ─────────────────────────────────────────────────────────────────────
 
 set -euo pipefail
 
 # ── Constants ─────────────────────────────────────────────────────
-REPO="PurpleAILAB/Buggy"
+# The repository releases, config files and the launcher come from, and
+# whose GitHub Container Registry namespace the images are pulled from.
+REPO="${BUGGY_REPO:-saivarun3407/Buggy}"
+if [[ ! "$REPO" =~ ^[A-Za-z0-9][A-Za-z0-9-]*/[A-Za-z0-9._-]+$ ]]; then
+    echo "Error: BUGGY_REPO must be a GitHub owner/name, got: $REPO" >&2
+    exit 1
+fi
+# Registry paths must be lower case; GitHub owners need not be.
+REPO_OWNER="${REPO%%/*}"
+IMAGE_PREFIX="ghcr.io/$(printf '%s' "$REPO_OWNER" | tr '[:upper:]' '[:lower:]')/"
 BRANCH="${BRANCH:-main}"
 
 # Update channel (Claude-Code-style soak model; both are final-only):
@@ -262,6 +273,13 @@ download_files() {
         if ! grep -q "^BUGGY_CHANNEL=" "$install_dir/.env" 2>/dev/null; then
             echo "BUGGY_CHANNEL=$CHANNEL" >> "$install_dir/.env"
         fi
+        # Where the compose files pull Buggy images from. An existing value
+        # is preserved (an operator's own registry or mirror wins). A fresh
+        # install has no .env yet; the launcher records the same prefix on
+        # its first `buggy start`.
+        if ! grep -q "^BUGGY_IMAGE_PREFIX=" "$install_dir/.env" 2>/dev/null; then
+            echo "BUGGY_IMAGE_PREFIX=$IMAGE_PREFIX" >> "$install_dir/.env"
+        fi
         info ".env already exists, preserving your configuration."
     else
         info "No .env yet — run 'buggy onboard' to create one."
@@ -357,7 +375,7 @@ create_launcher() {
         error "Could not resolve a release version automatically."
         error "Set VERSION explicitly with a tag from:"
         error "  https://github.com/$REPO/releases"
-        error "Example: VERSION=<x.y.z> curl -fsSL https://buggy.red/install | bash"
+        error "Example: VERSION=<x.y.z> curl -fsSL https://raw.githubusercontent.com/$REPO/main/scripts/install.sh | bash"
         exit 1
     fi
 
@@ -505,10 +523,13 @@ pull_images() {
     info "Pulling Docker images (this may take a few minutes)..."
     # No --env-file: .env doesn't exist yet (onboard hasn't run). All
     # ${VAR} interpolations in docker-compose.yml have :-defaults, and we
-    # inject BUGGY_VERSION/HOME explicitly so the image tags resolve.
+    # inject BUGGY_VERSION/HOME explicitly so the image tags resolve, and
+    # BUGGY_IMAGE_PREFIX so the names point at this release's registry
+    # (an operator's own value in the shell wins).
     (cd "$install_dir" && \
         BUGGY_VERSION="$BUGGY_VERSION" \
         BUGGY_HOME="$install_dir" \
+        BUGGY_IMAGE_PREFIX="${BUGGY_IMAGE_PREFIX-$IMAGE_PREFIX}" \
         docker compose --profile cli pull) || {
         warn "Warning: Failed to pull some images."
         info "You can pull them manually later: buggy update"
