@@ -40,6 +40,47 @@
 
 <br/>
 
+## Status of this repository
+
+This repository (`saivarun3407/Buggy`) is a fork that is being turned into an
+**authorized bug-bounty testing system for web apps and APIs**. Tools run as
+plain code and write structured results; a model is only used to choose what
+to test, chain findings and judge results. Last checked 2026-11-21.
+
+| Part | State |
+|---|---|
+| Scope enforcement, recon pipeline, recon report | Works, no model needed. Run on local practice targets. |
+| Automatic read-only probe sweep, re-proof, grading, reports (Markdown, HTML, JSON, SARIF) | Works, no model needed. See [findings](docs/findings.md). |
+| Approval before anything state-changing, including one approval per probe run | Works. Approving is always a person's step. |
+| Agents (choosing tests, chaining) | Need a model key (`buggy onboard`). **No agent run has been measured here yet.** |
+| Releases and the one-line installer | The workflows publish from this repository, but **no release has been cut yet**. Until the first tag, run from source (below). See [releasing](docs/releasing.md). |
+| CI | Lint, type check, 10,900+ tests, dependency audit and compose validation pass locally on this branch. |
+
+Run from source until a release exists:
+
+```bash
+git clone https://github.com/saivarun3407/Buggy.git
+cd Buggy
+make build-images        # builds every image the stack starts (slow the first time)
+mkdir -p ~/.buggy/workspace ~/.buggy/control ~/.buggy/audit ~/.buggy/secrets ~/.buggy/telemetry
+for name in SANDBOX_TOKEN EGRESS_GUARD_TOKEN BUGGY_STACK_MCP_TOKEN BUGGY_AUDIT_HMAC_KEY; do echo "$name=$(openssl rand -hex 24)"; done >> .env
+docker compose up -d
+docker compose --profile operator run --rm operator buggy-cli doctor
+docker compose --profile operator run --rm operator buggy-cli hunt https://your-target.example --no-agent
+```
+
+`--no-agent` stops after recon, the probe sweep and the reports; drop it once
+a model is configured.
+
+The hosted app, website, Discord, sponsor link and PyPI packages named further
+down belong to the upstream project this fork came from, not to this
+repository.
+
+Only test systems you are authorized to test. Scope is enforced from the
+program's own scope data, and state-changing requests wait for your approval.
+
+---
+
 <div align="center">
   <video src="https://github.com/user-attachments/assets/b3fd40d8-e859-4a39-97f4-bd825694ad96" width="800" controls></video>
 </div>
