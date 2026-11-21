@@ -156,7 +156,11 @@ class TestNotTested:
     def test_what_ran_is_not_listed(self, monkeypatch) -> None:
         monkeypatch.setattr(hunt, "model_configured", lambda: True)
         items = hunt.not_tested(
-            "acme", self.args(no_agent=False), {"ran": 3}, {"ran": True, "reason": None}
+            "acme",
+            self.args(no_agent=False),
+            {"ran": 3},
+            {"ran": True, "reason": None},
+            signed_in={"ran": True},
         )
         assert self.areas(items) == [
             "anything that changes state (orders, payments, account changes)"
@@ -173,3 +177,10 @@ class TestNotTested:
         items = hunt.not_tested("acme", self.args(no_agent=False), {"ran": 1}, {"ran": True})
         listed = any(item["area"].startswith("business logic") for item in items)
         assert listed is (not configured)
+
+    def test_a_run_without_accounts_says_the_login_was_not_crossed(self) -> None:
+        signed_in = {"ran": False, "reason": "no test accounts are declared; add two"}
+        items = hunt.not_tested("acme", self.args(), {"ran": 1}, {"ran": True}, signed_in=signed_in)
+        (entry,) = [i for i in items if i["area"] == "everything behind the login"]
+        assert entry["reason"] == "no test accounts are declared; add two"
+        assert "identities.json" in entry["enable"]

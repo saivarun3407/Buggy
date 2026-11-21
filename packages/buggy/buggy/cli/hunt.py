@@ -235,6 +235,13 @@ def _build_parser() -> argparse.ArgumentParser:
         help="Do not run the automatic read-only probe sweep after recon.",
     )
     p.add_argument(
+        "--state-probe-budget",
+        type=int,
+        default=None,
+        help="Most state-changing probe runs planned per run (default 15; 0 plans none). "
+        "Each one waits for your approval.",
+    )
+    p.add_argument(
         "--probe-budget",
         type=int,
         default=None,
@@ -923,6 +930,233 @@ def _prove(engagement: str, finding_id: str, known: str) -> tuple[str, str]:
     return status, str(grade.get("decision") or "")
 
 
+#: Signed-in testing: how many declared accounts are used, and each one's crawl budget.
+MAX_ACCOUNTS = 3
+MAX_SEEDS = 10
+CRAWL_REQUESTS = 120
+SOURCE_CRAWL = "surface_crawl"
+
+
+def _service_urls(records: dict[str, list[dict[str, Any]]]) -> list[str]:
+    """Where a crawl starts: the live services recon found."""
+    urls: set[str] = set()
+    for record in records.get("http_service", []):
+        raw = record.get("attrs")
+        attrs: dict[str, Any] = raw if isinstance(raw, dict) else {}
+        for value in (attrs.get("url"), record.get("value")):
+            if isinstance(value, str) and value.startswith(("http://", "https://")):
+                urls.add(value)
+                break
+    return sorted(urls)[:MAX_SEEDS]
+
+
+def crawl_records(crawl: dict[str, Any]) -> list[dict[str, Any]]:
+    """What a crawl discovered, as the ``url`` records the parameter extractor reads.
+
+    A form that is sent with GET becomes the URL it would request, so its
+    fields are query parameters. A form that posts stays a form on its page.
+    """
+    from urllib.parse import urlencode  # noqa: PLC0415
+
+    out: list[dict[str, Any]] = [
+        {"type": "url", "value": url, "source_tool": SOURCE_CRAWL}
+        for url in crawl.get("urls") or []
+        if isinstance(url, str)
+    ]
+    for form in crawl.get("forms") or []:
+        if not isinstance(form, dict) or not isinstance(form.get("action"), str):
+            continue
+        fields = [f for f in form.get("fields") or [] if isinstance(f, dict) and f.get("name")]
+        method = str(form.get("method") or "GET").upper()
+        if method == "GET":
+            action = form["action"].partition("?")[0].partition("#")[0]
+            pairs = [(str(f["name"]), str(f.get("value") or "")) for f in fields]
+            value = f"{action}?{urlencode(pairs)}" if pairs else action
+            out.append({"type": "url", "value": value, "source_tool": SOURCE_CRAWL})
+        else:
+            out.append(
+                {
+                    "type": "url",
+                    "value": str(form.get("page") or form["action"]),
+                    "source_tool": SOURCE_CRAWL,
+                    "attrs": {
+                        "form": [{"action": form["action"], "method": method, "parameters": fields}]
+                    },
+                }
+            )
+    return out
+
+
+def _new_parameters(found: list[dict[str, Any]], known: set[str]) -> list[dict[str, Any]]:
+    """Parameter records of a crawl that neither recon nor an earlier account produced."""
+    from buggy.pipeline.tools import params  # noqa: PLC0415
+
+    fresh: list[dict[str, Any]] = []
+    for record in params.extract(found):
+        if record.value in known:
+            continue
+        known.add(record.value)
+        fresh.append({"type": "parameter", "value": record.value, "attrs": dict(record.attrs)})
+    return fresh
+
+
+def _add_counts(total: dict[str, Any], part: dict[str, Any]) -> None:
+    for name, value in part.items():
+        if isinstance(value, bool) or name == "error":
+            continue
+        if isinstance(value, int):
+            total[name] = int(total.get(name) or 0) + value
+        elif isinstance(value, list):
+            total.setdefault(name, []).extend(value)
+    total["error"] = total.get("error") or part.get("error")
+
+
+def _empty_counts() -> dict[str, Any]:
+    return {
+        "planned": 0, "left_out": 0, "ran": 0, "vulnerable": 0, "not_vulnerable": 0,
+        "undecided": 0, "refused": 0, "held_for_approval": 0, "verified": 0, "submit": 0,
+        "findings": [], "error": None,
+    }  # fmt: skip
+
+
+def run_signed_in(
+    engagement: str,
+    records: dict[str, list[dict[str, Any]]],
+    *,
+    budget: int | None = None,
+    state_budget: int | None = None,
+) -> dict[str, Any]:
+    """Test what is behind the login, as the operator's declared test accounts. No LLM.
+
+    For each account (three at most) the gateway signs in and the crawler
+    walks the application with GET requests, never following a link that
+    could sign out or change something. The inputs found there that recon did
+    not know are probed as that account (read-only probes), and the write
+    operations found there are handed to the gateway as state-changing runs,
+    which wait for approval. What each account could reach is then compared:
+    an object only one account reached is asked for as the others, and counts
+    as broken access only when the owner's own marker comes back to a
+    non-owner. Without declared accounts nothing is sent.
+    """
+    from buggy.pipeline import sweep  # noqa: PLC0415
+
+    out: dict[str, Any] = {
+        "ran": False,
+        "reason": None,
+        "accounts": [],
+        "urls_reached": 0,
+        "new_inputs": 0,
+        "probes": _empty_counts(),
+        "state": _empty_counts(),
+        "inferred": {"objects": 0, "broken_access": 0, "enforced": 0, "inconclusive": 0,
+                     "verified": 0, "submit": 0, "findings": [], "without_markers": []},
+    }  # fmt: skip
+    listed = _capture("identities_list", engagement)
+    identities = [row for row in listed.get("identities") or [] if isinstance(row, dict)]
+    names = [str(row.get("name")) for row in identities if row.get("name")][:MAX_ACCOUNTS]
+    if not names:
+        out["reason"] = str(
+            listed.get("detail") or listed.get("error") or NO_ACCOUNTS.format(engagement=engagement)
+        )
+        return out
+    seeds = _service_urls(records)
+    if not seeds:
+        out["reason"] = "recon found no live service to start from"
+        return out
+
+    known = {str(r.get("value")) for r in records.get("parameter", []) if r.get("value")}
+    known_issues = _known_issues(records)
+    reached: dict[str, list[str]] = {}
+    probe_budget = sweep.DEFAULT_BUDGET if budget is None else max(0, budget)
+    write_budget = sweep.DEFAULT_STATE_BUDGET if state_budget is None else max(0, state_budget)
+    for name in names:
+        crawl = _capture(
+            "surface_crawl",
+            engagement,
+            seeds_json=json.dumps(seeds),
+            identity=name,
+            max_requests=CRAWL_REQUESTS,
+        )
+        urls = crawl.get("urls")
+        if not isinstance(urls, list):
+            out["accounts"].append(
+                {
+                    "name": name,
+                    "error": str(crawl.get("detail") or crawl.get("error") or crawl)[:200],
+                }
+            )
+            continue
+        out["ran"] = True
+        reached[name] = [u for u in urls if isinstance(u, str)]
+        fresh = _new_parameters(crawl_records(crawl), known)
+        out["accounts"].append(
+            {
+                "name": name,
+                "requested": int(crawl.get("requested") or 0),
+                "urls": len(reached[name]),
+                "forms": len(crawl.get("forms") or []),
+                "new_inputs": len(fresh),
+                "truncated": bool(crawl.get("truncated")),
+            }
+        )
+        out["urls_reached"] += len(reached[name])
+        out["new_inputs"] += len(fresh)
+
+        planned = sweep.plan({"parameter": fresh}, budget=probe_budget)
+        for step in planned["steps"]:
+            step["params"]["identity"] = name
+        done = _run_steps(engagement, planned, known_issues)
+        probe_budget = max(0, probe_budget - done["planned"])
+        _add_counts(out["probes"], done)
+
+        writes = sweep.plan_state_changing({"parameter": fresh}, budget=write_budget, identity=name)
+        done = _run_steps(engagement, writes, known_issues)
+        write_budget = max(0, write_budget - done["planned"])
+        _add_counts(out["state"], done)
+
+    if len(reached) >= 2:
+        _inferred_access(engagement, reached, known_issues, out["inferred"])
+    if not out["ran"]:
+        out["reason"] = "no declared account could be used (see the accounts list)"
+    return out
+
+
+def _inferred_access(
+    engagement: str, reached: dict[str, list[str]], known: str, out: dict[str, Any]
+) -> None:
+    """Compare what the accounts reached: objects only one of them saw, asked for as the others."""
+    inferred = _capture("owners_infer", engagement, reached_json=json.dumps(reached))
+    owners = inferred.get("owners")
+    out["without_markers"] = [str(n) for n in inferred.get("identities_without_markers") or []]
+    if not isinstance(owners, dict) or not owners:
+        return
+    urls = sorted(str(url) for url in owners)[:MAX_ACCESS_URLS]
+    owners = {url: str(owners[url]) for url in urls}
+    result = _capture(
+        "authz_matrix_run",
+        engagement,
+        urls_json=json.dumps(urls),
+        owners_json=json.dumps(owners),
+        inferred_json=json.dumps(urls),
+        max_requests=ACCESS_MAX_REQUESTS,
+    )
+    verdicts = result.get("verdicts")
+    if not isinstance(verdicts, dict):
+        return
+    out["objects"] = len(urls)
+    for verdict in verdicts.values():
+        name = str(verdict.get("verdict") if isinstance(verdict, dict) else "")
+        if name in ("broken_access", "enforced", "inconclusive"):
+            out[name] += 1
+    queue = result.get("queue")
+    ids = queue.get("ids") if isinstance(queue, dict) else None
+    for finding_id in [str(i) for i in ids or [] if i]:
+        status, grade = _prove(engagement, finding_id, known)
+        out["verified"] += status == "exploit_verified"
+        out["submit"] += grade == "submit"
+        out["findings"].append({"id": finding_id, "status": status, "grade": grade})
+
+
 #: Most object URLs the access-control sweep asks for, and its request budget.
 MAX_ACCESS_URLS = 40
 ACCESS_MAX_REQUESTS = 300
@@ -1297,6 +1531,23 @@ _ACCESS_COUNTS = (
 )  # fmt: skip
 
 
+def _signed_in_result(signed_in: Any) -> dict[str, Any]:
+    """The signed-in stage for the result file: counts only, no finding lists."""
+    if not isinstance(signed_in, dict):
+        return {"ran": False, "reason": "not run"}
+    inferred = signed_in.get("inferred") if isinstance(signed_in.get("inferred"), dict) else {}
+    return {
+        "ran": bool(signed_in.get("ran")),
+        "reason": signed_in.get("reason"),
+        "accounts": [a for a in signed_in.get("accounts") or [] if isinstance(a, dict)],
+        "urls_reached": int(signed_in.get("urls_reached") or 0),
+        "new_inputs": int(signed_in.get("new_inputs") or 0),
+        "probes": _probes_result(signed_in.get("probes")),
+        "state": _probes_result(signed_in.get("state")),
+        "inferred": {k: v for k, v in inferred.items() if k != "findings"},
+    }
+
+
 def _access_result(access: Any) -> dict[str, Any]:
     """The access-control sweep's counts for the result file."""
     if not isinstance(access, dict):
@@ -1329,6 +1580,8 @@ def build_result(
         },
         "probes": _probes_result(outcome.get("probes")),
         "access": _access_result(outcome.get("access")),
+        "signed_in": _signed_in_result(outcome.get("signed_in")),
+        "state": _probes_result(outcome.get("state")),
         "not_tested": list(outcome.get("not_tested") or []),
         "complete": recon_is_complete(recon["state"]) and not agent["error"],
     }
@@ -1442,6 +1695,109 @@ def _access_stage(
     return access
 
 
+def _held(counts: dict[str, Any], slug: str) -> str:
+    waiting = int(counts.get("held_for_approval") or 0)
+    return (
+        f", {waiting} waiting for your approval (buggy-cli approvals list {slug})"
+        if waiting
+        else ""
+    )
+
+
+def _signed_in_stage(
+    args: argparse.Namespace, slug: str, records: dict[str, list[dict[str, Any]]]
+) -> dict[str, Any] | None:
+    """Test behind the login as the declared accounts; print what happened."""
+    if getattr(args, "no_probes", False):
+        return None
+    result = run_signed_in(
+        slug,
+        records,
+        budget=getattr(args, "probe_budget", None),
+        state_budget=getattr(args, "state_probe_budget", None),
+    )
+    if not result["ran"]:
+        print(f"  signed-in        not run: {result['reason']}", file=sys.stderr)
+    else:
+        used = [a for a in result["accounts"] if "error" not in a]
+        probes, state, inferred = result["probes"], result["state"], result["inferred"]
+        print(
+            f"  signed-in        {len(used)} accounts crawled: {result['urls_reached']} URLs "
+            f"reached, {result['new_inputs']} inputs recon had not seen",
+            file=sys.stderr,
+        )
+        for account in result["accounts"]:
+            if "error" in account:
+                print(f"    {account['name']}: not usable ({account['error']})", file=sys.stderr)
+        print(
+            f"    read-only probes  {probes['ran']} run, {probes['vulnerable']} positive, "
+            f"{probes['verified']} re-proven, {probes['submit']} graded submit"
+            + _held(probes, slug),
+            file=sys.stderr,
+        )
+        print(
+            f"    write operations  {state['planned']} runs planned, "
+            f"{state['ran'] - state['refused']} sent, {state['vulnerable']} positive, "
+            f"{state['verified']} re-proven" + _held(state, slug),
+            file=sys.stderr,
+        )
+        if inferred["objects"]:
+            print(
+                f"    objects one account reached and another did not: {inferred['objects']} "
+                f"asked for as the others: {inferred['broken_access']} readable by a "
+                f"non-owner, {inferred['enforced']} enforced, {inferred['inconclusive']} could "
+                f"not tell; {inferred['verified']} re-proven",
+                file=sys.stderr,
+            )
+        if inferred["without_markers"]:
+            print(
+                "    no markers declared for: "
+                + ", ".join(inferred["without_markers"])
+                + " (an inferred object is only reported when the owner's marker leaks; add "
+                "`markers` to identities.json)",
+                file=sys.stderr,
+            )
+        for found in [*probes["findings"], *state["findings"], *inferred["findings"]]:
+            print(
+                f"    {found['id']}  {found.get('probe', 'access_control')}  {found['status']}"
+                + (f"/{found['grade']}" if found["grade"] else ""),
+                file=sys.stderr,
+            )
+    if args.non_interactive:
+        print(json.dumps({"type": "signed_in", **result}))
+    return result
+
+
+def _state_stage(
+    args: argparse.Namespace,
+    slug: str,
+    records: dict[str, list[dict[str, Any]]],
+    signed_in: dict[str, Any] | None,
+) -> dict[str, Any] | None:
+    """Hand the write operations recon knows to the gateway as state-changing runs."""
+    budget = getattr(args, "state_probe_budget", None)
+    if getattr(args, "no_probes", False) or (budget is not None and budget <= 0):
+        return None
+    usable = [a["name"] for a in (signed_in or {}).get("accounts") or [] if "error" not in a]
+    state = run_state_sweep(slug, records, budget=budget, identity=usable[0] if usable else "")
+    if state["planned"]:
+        print(
+            f"  write operations {state['planned']} state-changing runs planned from the API "
+            f"description: {state['ran'] - state['refused']} sent, {state['vulnerable']} "
+            f"positive, {state['verified']} re-proven" + _held(state, slug),
+            file=sys.stderr,
+        )
+        for found in state["findings"]:
+            print(
+                f"    {found['id']}  {found['probe']}  {found['status']}"
+                + (f"/{found['grade']}" if found["grade"] else ""),
+                file=sys.stderr,
+            )
+    if args.non_interactive:
+        print(json.dumps({"type": "state_sweep", **state}))
+    return state
+
+
 def not_tested(
     slug: str,
     args: argparse.Namespace,
@@ -1449,6 +1805,7 @@ def not_tested(
     access: dict[str, Any] | None,
     *,
     agents_ran: bool = False,
+    signed_in: dict[str, Any] | None = None,
 ) -> list[dict[str, str]]:
     """What this run did not test, and what would make it tested. Plain facts for the operator.
 
@@ -1475,6 +1832,14 @@ def not_tested(
                 ),
                 "enable": f"declare two test accounts and what each owns in "
                 f"~/.buggy/secrets/{slug}/identities.json",
+            }
+        )
+    if probes is not None and not (signed_in or {}).get("ran"):
+        missing.append(
+            {
+                "area": "everything behind the login",
+                "reason": str((signed_in or {}).get("reason") or "no signed-in crawl or probe ran"),
+                "enable": f"declare test accounts in ~/.buggy/secrets/{slug}/identities.json",
             }
         )
     agents_off = bool(getattr(args, "no_agent", False)) or (
@@ -1515,6 +1880,8 @@ def run_stages(  # noqa: PLR0912, PLR0915
     agent: dict[str, Any] = {"ran": False, "error": None}
     probes: dict[str, Any] | None = None
     access: dict[str, Any] | None = None
+    signed_in: dict[str, Any] | None = None
+    state: dict[str, Any] | None = None
     state, summary = "skipped", None
     recon_done = False
     if args.mode != "enforce":
@@ -1577,6 +1944,8 @@ def run_stages(  # noqa: PLR0912, PLR0915
                         )
                     probes = _sweep_stage(args, slug, records)
                     access = _access_stage(args, slug, records)
+                    signed_in = _signed_in_stage(args, slug, records)
+                    state = _state_stage(args, slug, records, signed_in)
                 print(f"  knowledge graph  {project_graph(slug)}", file=sys.stderr)
                 if args.non_interactive:
                     print(json.dumps({"type": "recon_report", "path": str(path), **digest}))
@@ -1587,8 +1956,10 @@ def run_stages(  # noqa: PLR0912, PLR0915
         "agent": agent,
         "probes": probes,
         "access": access,
+        "signed_in": signed_in,
+        "state": state,
     }
-    outcome["not_tested"] = not_tested(slug, args, probes, access)
+    outcome["not_tested"] = not_tested(slug, args, probes, access, signed_in=signed_in)
 
     if args.no_agent:
         print("\n[4/4] agents skipped (--no-agent)", file=sys.stderr)

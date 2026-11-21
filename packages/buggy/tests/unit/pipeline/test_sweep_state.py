@@ -143,3 +143,26 @@ def test_budget_order_and_determinism() -> None:
     )
     assert again["steps"] == full["steps"]
     assert sweep.plan_state_changing({"parameter": records}, budget=0)["steps"] == []
+
+
+def test_a_posting_form_is_probed_as_a_form() -> None:
+    def form_field(name: str, example: str = "") -> dict:
+        return {
+            "attrs": {
+                "name": name,
+                "location": "form",
+                "method": "POST",
+                "url": "https://app.test/ping",
+                "example": example,
+                "hints": [],
+            }
+        }
+
+    plan = steps(form_field("ip"), form_field("Submit", "Submit"), budget=sweep.MAX_BUDGET)
+    probes = {(s["probe"], s["params"]["parameter"]) for s in plan}
+    assert ("command_injection", "ip") in probes and ("sqli", "ip") in probes
+    # JSON-only checks are not planned for a form, and the form is sent as the page gave it.
+    assert not {"mass_assignment", "numeric_boundary"} & {s["probe"] for s in plan}
+    for step in plan:
+        assert step["params"]["location"] == "form"
+        assert step["params"]["body"] == {"Submit": "Submit", "ip": "localhost"}

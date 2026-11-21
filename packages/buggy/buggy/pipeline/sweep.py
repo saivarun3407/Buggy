@@ -238,9 +238,11 @@ def _body_value(parameter: dict[str, Any]) -> Any:
             return int(example)
         except ValueError:
             return example
-    hints = parameter["hints"]
-    if "numeric" in hints or "id-like" in hints or _name_words(parameter["name"]) & QUANTITY_WORDS:
+    hints, words = parameter["hints"], _name_words(parameter["name"])
+    if "numeric" in hints or "id-like" in hints or words & QUANTITY_WORDS:
         return 1
+    if words & COMMAND_WORDS:
+        return "localhost"  # a value the feature accepts, so the probe has a working baseline
     return "test"
 
 
@@ -268,18 +270,25 @@ def _put(body: dict[str, Any], name: str, value: Any) -> None:
             cursor = nxt
 
 
-def _body_operations(records: list[dict[str, Any]]) -> dict[tuple[str, str], list[dict[str, Any]]]:
-    """Body fields by ``(method, url)`` for the methods that write."""
-    operations: dict[tuple[str, str], list[dict[str, Any]]] = defaultdict(list)
+def _body_operations(
+    records: list[dict[str, Any]],
+) -> dict[tuple[str, str, str], list[dict[str, Any]]]:
+    """Fields by ``(method, url, kind)`` for the methods that write.
+
+    ``kind`` is ``json`` for a body described by an API specification and
+    ``form`` for the fields of an HTML form.
+    """
+    operations: dict[tuple[str, str, str], list[dict[str, Any]]] = defaultdict(list)
     for record in records:
         attrs = _attrs(record)
         url = _http_url(attrs.get("url"))
         name = str(attrs.get("name") or "")
         method = str(attrs.get("method") or "").upper()
-        if not url or not name or attrs.get("location") != "body" or method not in STATE_METHODS:
+        kind = {"body": "json", "form": "form"}.get(str(attrs.get("location") or ""))
+        if not url or not name or kind is None or method not in STATE_METHODS:
             continue
         hints = [str(h) for h in attrs.get("hints") or [] if isinstance(h, str)]
-        operations[(method, url)].append(
+        operations[(method, url, kind)].append(
             {"name": name, "example": str(attrs.get("example") or ""), "hints": hints}
         )
     return operations
@@ -308,9 +317,9 @@ def plan_state_changing(
     """Probe runs on request bodies of write operations. Each needs the operator's approval.
 
     Read from ``parameter`` records whose location is ``body`` (API
-    specifications and contracts). For every write operation a JSON body is
-    built from the fields recon knows, with their examples or a value their
-    name implies. Planned per operation: one ``mass_assignment`` run, and per
+    specifications and contracts) or ``form`` (HTML forms that post). For
+    every write operation a body is built from the fields recon knows, with
+    their examples or a value their name implies. Planned per operation: one ``mass_assignment`` run, and per
     field ``numeric_boundary`` (a business quantity), ``command_injection``
     (a field that names a host or a command) or the injection probes.
 
@@ -321,11 +330,18 @@ def plan_state_changing(
     """
     budget = max(0, min(int(budget), MAX_BUDGET))
     steps: list[dict[str, Any]] = []
-    for (method, url), fields in sorted(_body_operations(records.get("parameter", [])).items()):
+    operations = _body_operations(records.get("parameter", []))
+    for (method, url, kind), fields in sorted(operations.items()):
         fields = sorted(fields, key=lambda f: f["name"])
         body: dict[str, Any] = {}
         for parameter in fields:
-            if parameter["example"] != REDACTED and "auth-like" not in parameter["hints"]:
+            if parameter["example"] == REDACTED or "auth-like" in parameter["hints"]:
+                continue
+            if kind == "form":
+                # A form field keeps the value the page gave it (a submit button's
+                # label, a hidden field), so the server sees the form it sent.
+                body[parameter["name"]] = parameter["example"] or str(_body_value(parameter))
+            else:
                 _put(body, parameter["name"], _body_value(parameter))
         if not body:
             continue
@@ -333,21 +349,24 @@ def plan_state_changing(
         common: dict[str, Any] = {"url": url, "method": method, "body": body}
         if identity:
             common["identity"] = identity
-        steps.append(
-            {
-                "probe": "mass_assignment",
-                "host": host,
-                "params": {**common, "extra_fields": dict(PRIVILEGED_FIELDS)},
-                "why": f"{method} operation that stores an object",
-            }
-        )
+        if kind == "json":
+            steps.append(
+                {
+                    "probe": "mass_assignment",
+                    "host": host,
+                    "params": {**common, "extra_fields": dict(PRIVILEGED_FIELDS)},
+                    "why": f"{method} operation that stores an object",
+                }
+            )
         for parameter in fields:
             for probe in _field_probes(parameter):
                 params = dict(common)
                 if probe == "numeric_boundary":
+                    if kind == "form":
+                        continue  # the boundary probe sends JSON
                     params.update({"field": parameter["name"], "values": [-1, 0]})
                 else:
-                    params.update({"parameter": parameter["name"], "location": "json"})
+                    params.update({"parameter": parameter["name"], "location": kind})
                     if probe == "sqli":
                         params["allow_time"] = False
                 steps.append(
