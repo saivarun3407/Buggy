@@ -206,3 +206,17 @@ def test_result_file_section() -> None:
     )
     assert section["ran_sweep"] is True and section["submit"] == 1 and "findings" not in section
     assert section["left_out"] == 0 and section["error"] is None
+
+
+def test_agents_are_told_what_the_sweep_already_covered() -> None:
+    scope = {"targets": ["https://app.test"], "enforcement_extra": {"sandbox_egress": "blocked"}}
+    plain = hunt.kickoff_text("acme", scope, recon_done=True, instruction="")
+    assert "probe sweep" not in plain
+    told = hunt.kickoff_text(
+        "acme", scope, recon_done=True, instruction="", probes={"ran": 12, "verified": 2}
+    )
+    assert "A read-only probe sweep already ran (12 runs" in told and "2 findings re-proven" in told
+    skipped = hunt.kickoff_text(
+        "acme", scope, recon_done=True, instruction="", probes={"ran": 0, "verified": 0}
+    )
+    assert skipped == plain

@@ -55,17 +55,67 @@ _MIME = re.compile(
 )
 
 
+# A template literal that interpolates: `${base}/rest/search?q=${term}`.
+_TEMPLATE = re.compile(r"`((?:\\.|[^`\\\n]){3,600})`")
+_INTERPOLATION = re.compile(r"\$\{[^{}`]{1,120}\}")
+_TEMPLATE_PATH = re.compile(r"^/(?!/)[A-Za-z0-9_\-.~%/]{1,300}$")
+_TEMPLATE_QUERY_NAME = re.compile(r"^[A-Za-z0-9_\-.\[\]]{1,100}$")
+_MAX_TEMPLATE_PARAMETERS = 20
+
+
+def _template_path(body: str) -> str | None:
+    """The rooted path a template literal builds, or ``None`` when it cannot be told.
+
+    Only what the text states is kept. A leading interpolation is the base URL
+    and is dropped (the result resolves against the script's own origin). A
+    query value that is interpolated is left empty, so the parameter's name is
+    known and no value is invented. A template that interpolates inside the
+    path itself is skipped: its real path is not in the text.
+    """
+    if "${" not in body:
+        return None
+    lead = _INTERPOLATION.match(body)
+    if lead is not None:
+        body = body[lead.end() :]
+    path, question, query = body.partition("?")
+    if "${" in path or not _TEMPLATE_PATH.match(path):
+        return None
+    if not question:
+        return path
+    pairs: list[str] = []
+    for part in query.split("&")[:_MAX_TEMPLATE_PARAMETERS]:
+        name, _, value = part.partition("=")
+        if not _TEMPLATE_QUERY_NAME.match(name):
+            return None
+        value = "" if "${" in value else value
+        if not re.fullmatch(r"[A-Za-z0-9_\-.~%+,:@/]{0,200}", value):
+            return None
+        pairs.append(f"{name}={value}")
+    return f"{path}?{'&'.join(pairs)}" if pairs else path
+
+
 def extract_literals(script: str, *, limit: int = 5000) -> list[str]:
-    """Distinct path / URL literals in ``script``, in first-seen order."""
+    """Distinct path / URL literals in ``script``, in first-seen order.
+
+    Plain string literals first, then the paths of interpolated template
+    literals (:func:`_template_path`).
+    """
     found: dict[str, None] = {}
-    for match in _LITERAL.finditer(script):
-        value = match.group("v")
+
+    def keep(value: str) -> bool:
         if _STATIC.search(value) or _NOISE.search(value) or _MIME.match(value):
-            continue
+            return len(found) < limit
         if value.startswith("/") and not value.startswith("//") and len(value) < 3:
-            continue
+            return len(found) < limit
         found.setdefault(value, None)
-        if len(found) >= limit:
+        return len(found) < limit
+
+    for match in _LITERAL.finditer(script):
+        if not keep(match.group("v")):
+            return list(found)
+    for match in _TEMPLATE.finditer(script):
+        value = _template_path(match.group(1))
+        if value is not None and not keep(value):
             break
     return list(found)
 

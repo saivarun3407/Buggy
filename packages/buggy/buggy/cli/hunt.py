@@ -985,7 +985,14 @@ def model_configured(env: dict[str, str] | None = None) -> bool:
     return False
 
 
-def kickoff_text(slug: str, scope: dict[str, Any], *, recon_done: bool, instruction: str) -> str:
+def kickoff_text(
+    slug: str,
+    scope: dict[str, Any],
+    *,
+    recon_done: bool,
+    instruction: str,
+    probes: dict[str, Any] | None = None,
+) -> str:
     blocked = scope["enforcement_extra"]["sandbox_egress"] == "blocked"
     parts = [
         f"Begin authorized engagement '{slug}'. Targets: {', '.join(scope['targets'])}.",
@@ -1023,6 +1030,14 @@ def kickoff_text(slug: str, scope: dict[str, Any], *, recon_done: bool, instruct
         "with report_record_finding. No denial of service, no social engineering, no data "
         "beyond what proves the issue.",
     ]
+    if probes and probes.get("ran"):
+        parts.append(
+            f"A read-only probe sweep already ran ({probes['ran']} runs: sqli, xss_reflected, "
+            "ssti, open_redirect and path_traversal on GET query parameters, cors on each "
+            f"service, graphql_checks; {probes.get('verified', 0)} findings re-proven, see "
+            "findings_list). Do not repeat those runs. Use probes where the sweep cannot go: "
+            "request bodies, authenticated endpoints, test accounts, and state-changing probes."
+        )
     if instruction.strip():
         parts.append(f"Operator instruction: {instruction.strip()}")
     return " ".join(parts)
@@ -1335,7 +1350,9 @@ def run_stages(  # noqa: PLR0912, PLR0915
             langgraph_url=args.langgraph_url,
             assistant=args.assistant or os.getenv("BUGGY_LANGGRAPH_ASSISTANT", "buggy"),
             engagement_name=slug,
-            kickoff=kickoff_text(slug, scope, recon_done=recon_done, instruction=args.instruction),
+            kickoff=kickoff_text(
+                slug, scope, recon_done=recon_done, instruction=args.instruction, probes=probes
+            ),
             timeout_seconds=args.timeout,
             non_interactive=args.non_interactive,
         )
