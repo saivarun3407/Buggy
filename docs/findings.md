@@ -233,8 +233,15 @@ Approving still happens with `buggy-cli approvals allow` or in the dashboard.
   each known lab bug is listed as proven, pipeline-only, backlog or excluded.
   Reflected XSS, template injection, path traversal and CORS have no positive
   case in the lab apps; those probes are proven on unit fixtures only.
-- **No agent run has been measured.** The agent stage needs a model key; the
-  benchmark contract in `benchmark/RESULTS_POLICY.md` is ready, the results
-  are not.
+- **One agent run has been measured, and it was small.** On 2026-11-21
+  Claude Code ran the agent stage on the two local practice apps through the
+  agent bridge ([claude-code-agent.md](claude-code-agent.md)), capped at 45
+  tool calls: 115 seconds, the two findings of the probe sweep confirmed, one
+  held request left for the operator, and eight further observations (exposed
+  password hashes, a readable admin configuration, a confidential file) that
+  it captured but did not submit before the cap. Nothing has been measured on
+  a real program, and Buggy's built-in agents (which need a model key) have
+  not been run; the benchmark contract in `benchmark/RESULTS_POLICY.md` is
+  ready, the results are not.
 - Scanner hits with no recognisable class are not queued; `hunt` prints how
   many were left out.
