@@ -6,18 +6,23 @@ import io
 import json
 import urllib.error
 from pathlib import Path
+from typing import Any
 
 import pytest
 
+from buggy.capture import mcp_server as capture_server
 from buggy.capture.authz_matrix import (
     ANONYMOUS,
+    MAX_INFERRED,
     PROBE,
     SAME,
     finding_id,
+    infer_owners,
     normalized_endpoint,
     run_matrix,
 )
 from buggy.capture.gateway import CaptureGateway, Roots
+from buggy.capture.workbench import WORKBENCH_TOOL_NAMES, Workbench
 
 BASE = "https://app.acme.test"
 USERS = ("alice", "bob", "carol")
@@ -620,3 +625,286 @@ class TestCandidateShape:
         uuid_url = "HTTPS://App.Acme.Test/api/files/123e4567-e89b-12d3-a456-426614174000/raw"
         assert normalized_endpoint(uuid_url) == f"{BASE}/api/files/{{id}}/raw"
         assert normalized_endpoint(f"{BASE}/api/v2/users/alice") == f"{BASE}/api/v2/users/alice"
+
+
+# ── owners inferred from crawls, and the marker they need ───────────
+
+
+def _with_markers(roots: Roots, **markers: list[str]) -> None:
+    """The ``env`` identities again, with ``markers`` declared for some of them."""
+    entries = [
+        _static("alice", [ORDER, f"{BASE}/api/invoices/*"]),
+        _static("bob", [BOB_ORDER]),
+        _static("carol"),
+    ]
+    for entry in entries:
+        if entry["name"] in markers:
+            entry["markers"] = markers[entry["name"]]
+    _write_identities(roots, entries)
+
+
+class TestInferOwners:
+    def test_an_object_only_one_identity_reached_is_given_to_it(self) -> None:
+        result = infer_owners(
+            {
+                "alice": [ORDER, INVOICE, CATALOG, f"{BASE}/api/notes/9#top"],
+                "bob": [BOB_ORDER, INVOICE, CATALOG],
+            }
+        )
+        assert result["owners"] == {
+            ORDER: "alice",
+            f"{BASE}/api/notes/9": "alice",  # the fragment is not part of the URL
+            BOB_ORDER: "bob",
+        }
+        assert result["shared"] == [INVOICE]  # reached by both: nobody's
+        assert result["per_identity"] == {"alice": 2, "bob": 1}
+        assert result["considered"] == 4  # the catalog is not an object
+
+    def test_only_object_urls_count(self) -> None:
+        reached = {
+            "alice": [
+                f"{BASE}/",
+                f"{BASE}/10",  # a bare number is not after a named collection
+                f"{BASE}/api/dashboard/alice",  # a name, not an identifier
+                f"{BASE}/static/app/123/main.js",  # a static asset
+                f"{BASE}/img/7.png",
+                "ftp://app.acme.test/files/1",
+                "not a url",
+                f"{BASE}/api/users/507f1f77bcf86cd799439011",  # 24 hex characters
+                f"{BASE}/api/files/123e4567-e89b-12d3-a456-426614174000/raw",
+                f"{BASE}/api/view?order_id=55&page=2",  # an id-like query parameter
+                f"{BASE}/api/view?accountId=56",
+                f"{BASE}/api/view?uuid=123e4567-e89b-12d3-a456-426614174000",
+                f"{BASE}/api/search?q=12",  # not an id-like name
+                f"{BASE}/api/view?id=abc",  # not an identifier value
+            ]
+        }
+        owners = infer_owners(reached)["owners"]
+        assert sorted(owners) == [
+            f"{BASE}/api/files/123e4567-e89b-12d3-a456-426614174000/raw",
+            f"{BASE}/api/users/507f1f77bcf86cd799439011",
+            f"{BASE}/api/view?accountId=56",
+            f"{BASE}/api/view?order_id=55&page=2",
+            f"{BASE}/api/view?uuid=123e4567-e89b-12d3-a456-426614174000",
+        ]
+        assert set(owners.values()) == {"alice"}
+
+    def test_crawler_pages_count_only_when_they_were_read(self) -> None:
+        pages: list[Any] = [
+            {"url": ORDER, "status": 200, "content_type": "application/json", "capture_id": "c1"},
+            {"url": BOB_ORDER, "status": 403, "content_type": "", "capture_id": "c2"},
+        ]
+        assert infer_owners({"alice": pages})["owners"] == {ORDER: "alice"}
+
+    def test_every_identity_and_template_comes_before_a_second_url(self) -> None:
+        alice = [f"{BASE}/api/orders/{n}" for n in range(1, 101)]
+        alice += [f"{BASE}/api/invoices/{n}" for n in range(1, 101)]
+        alice += [f"{BASE}/api/tickets/{n}" for n in range(1, 3)]
+        bob = [f"{BASE}/api/orders/{n}" for n in range(500, 600)]  # same template as alice's
+        carol = [f"{BASE}/api/notes/{n}" for n in range(7, 9)]
+        result = infer_owners({"alice": alice, "bob": bob, "carol": carol, "dave": []})
+        owners = result["owners"]
+        assert len(owners) == MAX_INFERRED
+        assert set(owners.values()) == {"alice", "bob", "carol"}  # dave reached nothing
+        assert result["per_identity"] == {"alice": 202, "bob": 100, "carol": 2, "dave": 0}
+
+        def template(url: str) -> str:
+            return url.rsplit("/", 1)[0]
+
+        assert {template(u) for u in owners} == {
+            f"{BASE}/api/{kind}" for kind in ("orders", "invoices", "tickets", "notes")
+        }
+        # The small templates are taken whole; the rest is split between the large ones,
+        # and within orders between its two identities.
+        counts: dict[str, int] = {}
+        for url in owners:
+            counts[template(url)] = counts.get(template(url), 0) + 1
+        assert counts[f"{BASE}/api/tickets"] == counts[f"{BASE}/api/notes"] == 2
+        assert counts[f"{BASE}/api/orders"] == counts[f"{BASE}/api/invoices"] == 28
+        orders = [n for u, n in owners.items() if template(u) == f"{BASE}/api/orders"]
+        assert orders.count("alice") == orders.count("bob") == 14
+
+    def test_the_cap_reaches_every_identity_first(self) -> None:
+        reached = {f"user{i:02d}": [f"{BASE}/api/orders/{i}"] for i in range(70)}
+        reached["user00"] = [f"{BASE}/api/orders/{n}" for n in range(1000, 1100)]
+        owners = infer_owners(reached)["owners"]
+        assert len(owners) == MAX_INFERRED
+        assert len(set(owners.values())) == MAX_INFERRED  # one URL each, not 60 of user00's
+
+    def test_identities_with_markers_are_preferred(self) -> None:
+        reached = {f"user{i:02d}": [f"{BASE}/api/orders/{i}"] for i in range(70)}
+        markers = {"user65": ["User Sixty-Five"], "user69": ["User Sixty-Nine"], "user00": []}
+        owners = infer_owners(reached, markers)["owners"]
+        assert len(owners) == MAX_INFERRED
+        # Without the preference user65 and user69 would be cut by the cap.
+        assert {"user65", "user69"} <= set(owners.values())
+        assert "user00" in infer_owners(reached)["owners"].values()
+
+    def test_the_result_is_deterministic(self) -> None:
+        alice = [f"{BASE}/api/orders/{n}" for n in range(200)]
+        bob = [f"{BASE}/api/invoices/{n}" for n in range(200)]
+        first = infer_owners({"alice": alice, "bob": bob})
+        again = infer_owners({"bob": list(reversed(bob)), "alice": list(reversed(alice))})
+        assert first == again
+        assert list(first["owners"]) == sorted(first["owners"])
+
+    def test_empty_and_odd_input(self) -> None:
+        empty = {"owners": {}, "shared": [], "per_identity": {}, "considered": 0, "shared_total": 0}
+        assert infer_owners({}) == empty
+        assert infer_owners({"alice": []}) == {**empty, "per_identity": {"alice": 0}}
+        odd: dict[str, Any] = {
+            "alice": [None, 7, "", {"no": "url"}, ORDER],
+            "": [BOB_ORDER],
+            "bob": 5,
+        }
+        odd_markers: dict[str, Any] = {"alice": "not a list"}
+        result = infer_owners(odd, odd_markers)
+        assert result["owners"] == {ORDER: "alice"}
+        assert result["per_identity"] == {"alice": 1, "bob": 0}
+        single: dict[str, Any] = {"alice": ORDER}  # one URL instead of a list
+        assert infer_owners(single)["owners"] == {ORDER: "alice"}
+
+
+class TestInferredOwnersNeedAMarker:
+    def test_a_leaked_object_with_the_owners_marker_is_broken_access(self, env) -> None:
+        gateway, _site, roots = env
+        _with_markers(roots, alice=[EMAIL["alice"]])
+        result = _run(gateway, [INVOICE], owners=_alice_owns(INVOICE), require_marker_for=[INVOICE])
+        verdict = result["verdicts"][INVOICE]
+        assert verdict["verdict"] == "broken_access" and verdict["exposed_to"] == ["bob", "carol"]
+        (candidate,) = result["candidates"]
+        owner, bob, _carol = candidate["assertions"]
+        assert owner["expect"]["body_contains"] == [EMAIL["alice"]]
+        assert bob["expect"]["body_contains"] == [EMAIL["alice"]]
+        # The declared markers were used without being passed in.
+        assert result["matrix"][INVOICE]["bob"]["markers_found"] == [EMAIL["alice"]]
+
+    def test_a_public_page_only_the_owner_crawled_is_not_reported(self, env) -> None:
+        gateway, _site, roots = env
+        _with_markers(roots, alice=[EMAIL["alice"]])
+        result = _run(gateway, [CATALOG], owners=_alice_owns(CATALOG), require_marker_for=[CATALOG])
+        verdict = result["verdicts"][CATALOG]
+        assert verdict["verdict"] == "inconclusive" and verdict["owner"] == "alice"
+        assert "markers" in verdict["reason"] and "inferred" in verdict["reason"]
+        assert result["candidates"] == [] and result["public"] == []
+        # The control: declared rather than inferred, the same page is "broken_access".
+        declared = _run(gateway, [CATALOG], owners=_alice_owns(CATALOG))
+        assert declared["verdicts"][CATALOG]["verdict"] == "broken_access"
+
+    def test_an_owner_without_markers_is_inconclusive(self, env) -> None:
+        gateway, _site, _roots = env  # env declares no markers
+        result = _run(gateway, [INVOICE], owners=_alice_owns(INVOICE), require_marker_for=[INVOICE])
+        verdict = result["verdicts"][INVOICE]
+        assert verdict["verdict"] == "inconclusive" and result["candidates"] == []
+        assert "declares no markers" in verdict["reason"]
+        assert "markers field of identities.json" in verdict["reason"]
+
+    def test_the_marker_argument_replaces_the_declared_markers(self, env) -> None:
+        gateway, _site, roots = env
+        _with_markers(roots, alice=[EMAIL["alice"]])
+        result = _run(
+            gateway,
+            [INVOICE],
+            owners=_alice_owns(INVOICE),
+            markers={"alice": ["nowhere-in-the-page"]},
+            require_marker_for=[INVOICE],
+        )
+        verdict = result["verdicts"][INVOICE]
+        assert verdict["verdict"] == "inconclusive"
+        assert "contains none of the owner's markers" in verdict["reason"]
+
+    def test_an_inferred_object_the_server_protects_is_enforced(self, env) -> None:
+        gateway, _site, roots = env
+        _with_markers(roots, alice=[EMAIL["alice"]])
+        urls = [ORDER, SUMMARY]
+        result = _run(gateway, urls, owners=_alice_owns(*urls), require_marker_for=urls)
+        assert result["verdicts"][ORDER]["verdict"] == "enforced"
+        assert result["verdicts"][SUMMARY]["verdict"] == "enforced"
+        assert result["candidates"] == []
+
+    def test_a_declared_owner_is_judged_as_before(self, env) -> None:
+        gateway, _site, roots = env
+        urls = [INVOICE, ORDER, NOTE, CATALOG, EXPORT]
+        owners = _alice_owns(NOTE, CATALOG, EXPORT)
+        before = _run(gateway, urls, owners=owners)
+        _with_markers(roots, bob=["Bob Fixture-Admin"])  # markers of another account
+        after = _run(gateway, urls, owners=owners, require_marker_for=[f"{BASE}/elsewhere/1"])
+        assert after["verdicts"] == before["verdicts"]
+        assert [c["endpoint"] for c in after["candidates"]] == [
+            c["endpoint"] for c in before["candidates"]
+        ]
+
+
+class TestWorkbench:
+    @pytest.fixture
+    def bench(self, env):
+        gateway, site, roots = env
+        wb = Workbench(gateway, None, lambda engagement: engagement)
+        yield wb, gateway, site, roots
+        wb.close()
+
+    def test_inferred_owners_queue_only_the_sound_mismatch(self, bench) -> None:
+        wb, _gateway, _site, roots = bench
+        _with_markers(roots, alice=[EMAIL["alice"]])
+        urls = [INVOICE, CATALOG, ORDER]
+        result = wb.authz_matrix_run(
+            "acme",
+            json.dumps(urls),
+            owners_json=json.dumps(_alice_owns(*urls)),
+            inferred_json=json.dumps([INVOICE, CATALOG]),
+        )
+        verdicts = {url: v["verdict"] for url, v in result["verdicts"].items()}
+        assert verdicts == {INVOICE: "broken_access", CATALOG: "inconclusive", ORDER: "enforced"}
+        assert result["queue"]["queued"] == 1
+        assert [c["endpoint"] for c in result["candidates"]] == [INVOICE]
+
+    def test_inferred_json_must_be_a_list_of_urls(self, bench) -> None:
+        wb, _gateway, site, _roots = bench
+        bad = wb.authz_matrix_run("acme", json.dumps([INVOICE]), inferred_json='{"a": 1}')
+        assert bad["code"] == "BAD_ARGUMENT"
+        bad = wb.authz_matrix_run("acme", json.dumps([INVOICE]), inferred_json="[1]")
+        assert bad["code"] == "BAD_ARGUMENT"
+        assert site.seen == []
+
+    def test_owners_infer_round_trip(self, bench) -> None:
+        wb, _gateway, site, roots = bench
+        _with_markers(roots, alice=[EMAIL["alice"]])
+        crawl = [
+            {"identity": "alice", "urls": [INVOICE, CATALOG], "pages": []},
+            {
+                "identity": "bob",
+                "urls": [CATALOG],
+                "pages": [{"url": BOB_ORDER, "status": 200, "content_type": "", "capture_id": ""}],
+            },
+        ]
+        inferred = wb.owners_infer("acme", json.dumps(crawl))
+        assert inferred["ok"] is True
+        assert inferred["owners"] == {INVOICE: "alice", BOB_ORDER: "bob"}
+        assert inferred["identities_without_markers"] == ["bob", "carol"]
+        assert site.seen == []  # inferring sends nothing
+        by_name = wb.owners_infer("acme", json.dumps({"alice": [INVOICE], "bob": [INVOICE]}))
+        assert by_name["owners"] == {} and by_name["shared"] == [INVOICE]
+
+        owners = inferred["owners"]
+        result = wb.authz_matrix_run(
+            "acme",
+            json.dumps(list(owners)),
+            owners_json=json.dumps(owners),
+            inferred_json=json.dumps(list(owners)),
+        )
+        assert result["verdicts"][INVOICE]["verdict"] == "broken_access"
+        # bob declares no markers, so his inferred order cannot be reported either way.
+        assert result["verdicts"][BOB_ORDER]["verdict"] == "inconclusive"
+        assert "declares no markers" in result["verdicts"][BOB_ORDER]["reason"]
+
+    def test_owners_infer_refuses_bad_input(self, bench) -> None:
+        wb, _gateway, _site, _roots = bench
+        assert wb.owners_infer("acme", "not json")["code"] == "BAD_ARGUMENT"
+        assert wb.owners_infer("acme", '"a string"')["code"] == "BAD_ARGUMENT"
+        assert wb.owners_infer("acme", '[{"urls": []}]')["code"] == "BAD_ARGUMENT"
+        empty = wb.owners_infer("acme", "")
+        assert empty["owners"] == {} and empty["considered"] == 0
+
+    def test_owners_infer_is_a_registered_tool(self) -> None:
+        assert {"authz_matrix_run", "owners_infer"} <= set(WORKBENCH_TOOL_NAMES)
+        assert {"authz_matrix_run", "owners_infer"} <= set(capture_server.TOOL_NAMES)

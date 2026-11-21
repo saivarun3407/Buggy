@@ -51,6 +51,10 @@ _NAME = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.-]{0,63}$")
 _PLACEHOLDER = re.compile(r"\{([A-Za-z_][A-Za-z0-9_]*)\}")
 _HEADER_NAME = re.compile(r"^[A-Za-z0-9!#$%&'*+.^_`|~-]+$")
 _COOKIE_NAME = re.compile(r"^[^\s;=,]+$")
+# Strings unique to one account's private data. Shorter ones would match by accident.
+MAX_MARKERS = 20
+MARKER_MIN = 3
+MARKER_MAX = 200
 
 
 class IdentityError(ValueError):
@@ -135,6 +139,9 @@ class Identity:
     name: str
     role: str = ""
     owner_of: tuple[str, ...] = ()
+    # Strings that appear only in this account's private data (an email address,
+    # a display name, an account number). Never shown to an agent.
+    markers: tuple[str, ...] = ()
     static_headers: dict[str, str] = field(default_factory=dict)
     static_cookies: dict[str, str] = field(default_factory=dict)
     login: Login | None = None
@@ -163,6 +170,7 @@ class Identity:
         return tuple(sorted(names | {"cookie", "set-cookie"}))
 
     def public(self) -> dict[str, Any]:
+        # ``markers`` are left out: an agent does not need them.
         return {
             "name": self.name,
             "role": self.role,
@@ -343,8 +351,35 @@ def _parse_login(raw: Any, path: str) -> Login:
     )
 
 
+def _parse_markers(raw: Any, path: str) -> tuple[str, ...]:
+    """``markers``: 1-20 strings of 3-200 characters. The messages never repeat one."""
+    if raw is None:
+        return ()
+    if not isinstance(raw, list):
+        raise IdentityError(path, "must be a list of strings")
+    if not 1 <= len(raw) <= MAX_MARKERS:
+        raise IdentityError(path, f"must list 1-{MAX_MARKERS} strings")
+    out: list[str] = []
+    for index, item in enumerate(raw):
+        item_path = f"{path}[{index}]"
+        if not isinstance(item, str):
+            raise IdentityError(item_path, "must be a string")
+        if not item.strip():
+            raise IdentityError(item_path, "must not be empty")
+        if len(item) < MARKER_MIN:
+            raise IdentityError(
+                item_path,
+                f"must be at least {MARKER_MIN} characters (a shorter one matches by accident)",
+            )
+        if len(item) > MARKER_MAX:
+            raise IdentityError(item_path, f"must be at most {MARKER_MAX} characters")
+        if item not in out:
+            out.append(item)
+    return tuple(out)
+
+
 def _parse_identity(raw: Any, path: str) -> Identity:
-    doc = _obj(raw, path, ("name", "role", "owner_of", "static", "login"))
+    doc = _obj(raw, path, ("name", "role", "owner_of", "markers", "static", "login"))
     name = _str(doc.get("name"), f"{path}.name")
     if not _NAME.match(name):
         raise IdentityError(f"{path}.name", "must be 1-64 characters of A-Z a-z 0-9 . _ -")
@@ -354,6 +389,7 @@ def _parse_identity(raw: Any, path: str) -> Identity:
         owner_of = []
     if not isinstance(owner_of, list) or not all(isinstance(x, str) and x for x in owner_of):
         raise IdentityError(f"{path}.owner_of", "must be a list of non-empty strings")
+    markers = _parse_markers(doc.get("markers"), f"{path}.markers")
 
     static_headers: dict[str, str] = {}
     static_cookies: dict[str, str] = {}
@@ -370,6 +406,7 @@ def _parse_identity(raw: Any, path: str) -> Identity:
         name=name,
         role=role,
         owner_of=tuple(owner_of),
+        markers=markers,
         static_headers=static_headers,
         static_cookies=static_cookies,
         login=login,
@@ -387,6 +424,15 @@ def parse_identities(document: Any) -> dict[str, Identity]:
         identity = _parse_identity(raw, f"identities[{index}]")
         if identity.name in out:
             raise IdentityError(f"identities[{index}].name", "is declared twice")
+        for position, marker in enumerate(identity.markers):
+            holder = next((o.name for o in out.values() if marker in o.markers), "")
+            if holder:
+                # A shared marker cannot tell the two accounts apart.
+                raise IdentityError(
+                    f"identities[{index}].markers[{position}]",
+                    f"is also a marker of identity {holder!r}; a marker must be unique "
+                    "to one account",
+                )
         out[identity.name] = identity
     return out
 
@@ -432,6 +478,13 @@ class IdentityStore:
     def public(self, engagement: str) -> list[dict[str, Any]]:
         """What an agent may know: name, role, owned objects, kind. No secret, no token."""
         return [identity.public() for identity in self.load(engagement).values()]
+
+    def markers(self, engagement: str) -> dict[str, tuple[str, ...]]:
+        """Every identity's declared markers by name (``()`` when it declares none).
+
+        Operator side only: markers are not part of :meth:`public`.
+        """
+        return {name: identity.markers for name, identity in self.load(engagement).items()}
 
     def logins_at(self, engagement: str, method: str, url: str) -> list[Identity]:
         """The identities whose declared login request is exactly ``method url``."""
@@ -636,6 +689,7 @@ __all__ = [
     "EXTRACT_SOURCES",
     "IDENTITIES_FILE",
     "LOGIN_PROBE",
+    "MAX_MARKERS",
     "Extract",
     "Identity",
     "IdentityError",

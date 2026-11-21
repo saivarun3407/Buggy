@@ -121,6 +121,7 @@ operator declares the accounts once, in
       "name": "alice",
       "role": "user",
       "owner_of": ["https://app.example.com/api/orders/1001"],
+      "markers": ["alice@example.com", "Alice Example", "ACC-100234"],
       "login": {
         "request": {
           "method": "POST",
@@ -152,6 +153,32 @@ operator declares the accounts once, in
 `authz_matrix_run` requests each URL (GET/HEAD only) as every identity and as
 nobody, and reports per URL: `enforced`, `broken_access`, `public` or
 `inconclusive`. No object ids are guessed; the caller supplies the URLs.
+
+`markers` lists 1-20 strings, 3-200 characters each, that appear only in that
+account's private data: its email address, its display name, an account
+number. Two identities may not share a marker, and shorter strings are
+refused because they would match by accident. The matrix looks for the
+owner's markers in every response; a non-owner response that contains one is
+the owner's data even when the page looks different. Markers are not shown
+by `identities_list`.
+
+An owner can be declared (`owner_of`, or the URL-to-identity map passed to
+the matrix) or inferred. `owners_infer` takes the URLs each identity reached
+while signed in, for example from a signed-in crawl, and gives an object URL
+(an identifier after a named collection such as `/orders/1001`, or an id-like
+query parameter such as `?order_id=1001`) to the one identity that reached
+it. A URL that two or more identities reached is shared and gets no owner.
+At most 60 owners are returned, with every identity and every path template
+covered before any template gets a second URL. The result also names the
+identities that declare no markers.
+
+Being reached by one account only is a hint of ownership, not proof: a public
+page that only one account happened to crawl looks the same. The URLs whose
+owner was inferred are passed to `authz_matrix_run` as `inferred_json`. For
+those, `broken_access` requires one of the owner's markers in the owner's own
+response and in the response that should not have it. If the owner declares
+no markers, or its own response contains none, the verdict is `inconclusive`
+and nothing is queued. A declared owner is judged as before.
 
 ## Evidence, reports and CI
 

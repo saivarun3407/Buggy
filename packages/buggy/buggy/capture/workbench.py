@@ -72,6 +72,7 @@ WORKBENCH_TOOL_NAMES = (
     "evidence_export",
     "identities_list",
     "authz_matrix_run",
+    "owners_infer",
     "memory_search",
     "memory_save",
     "fact_add",
@@ -201,8 +202,9 @@ class Workbench:
             return {"error": "EXPORT_REFUSED", "detail": str(exc)}
         except KeyError as exc:
             return {"error": "UNKNOWN_CAPTURE", "detail": f"no capture {exc.args[0]!r} here"}
-        except ValueError as exc:
-            # LessonError and input validation: the message names the field.
+        except (ValueError, TypeError) as exc:
+            # LessonError and input validation: the message names the field. A wrong
+            # argument shape (a number where a list of URLs belongs) is the caller's too.
             return {"error": "INVALID", "detail": str(exc)}
 
     def _scope_document(self, engagement: str) -> dict[str, Any]:
@@ -445,13 +447,20 @@ class Workbench:
         identities_json: str = "",
         owners_json: str = "",
         max_requests: int = 120,
+        inferred_json: str = "",
     ) -> dict[str, Any]:
+        """``inferred_json`` lists the URLs whose owner in ``owners_json`` was inferred
+        (``owners_infer``), not declared: those need an owner marker to be reported."""
+
         def run() -> dict[str, Any]:
             name = self._engagement(engagement)
             urls = _json(urls_json, "urls_json", list, [])
             names = _json(identities_json, "identities_json", list, [])
             if not names:
                 names = [row["name"] for row in self.gateway.identities.public(name)]
+            inferred = _json(inferred_json, "inferred_json", list, [])
+            if not all(isinstance(url, str) for url in inferred):
+                raise _refuse("BAD_ARGUMENT", "inferred_json must be a JSON list of URLs")
             result = authz_matrix.run_matrix(
                 self.gateway,
                 self.gateway.sessions,
@@ -460,10 +469,45 @@ class Workbench:
                 identities=names,
                 owners=_json(owners_json, "owners_json", dict, None),
                 max_requests=max(1, min(int(max_requests), MAX_MATRIX_REQUESTS)),
+                require_marker_for=inferred,
             )
             found = [c for c in result.get("candidates") or [] if isinstance(c, dict)]
             queued = candidates.enqueue(self.findings, found, "probe:authz_matrix") if found else {}
             return {**result, "queue": {"queued": len(queued.get("ids") or []), **queued}}
+
+        return self._guard(run)
+
+    def owners_infer(self, engagement: str, reached_json: str) -> dict[str, Any]:
+        """Owners inferred from signed-in crawls. ``reached_json`` is ``{identity: [url]}``
+        or the crawler's list of ``{"identity", "urls", "pages"}``. No request is sent."""
+
+        def run() -> dict[str, Any]:
+            name = self._engagement(engagement)
+            raw = _json(reached_json, "reached_json", object, {})
+            if not isinstance(raw, (dict, list)):
+                raise _refuse("BAD_ARGUMENT", "reached_json must be a JSON object or list")
+            reached: dict[str, list[Any]] = {}
+            if isinstance(raw, dict):
+                for who, urls in raw.items():
+                    reached[str(who)] = urls if isinstance(urls, list) else []
+            else:
+                for entry in raw:
+                    if not isinstance(entry, dict) or not isinstance(entry.get("identity"), str):
+                        raise _refuse(
+                            "BAD_ARGUMENT",
+                            "each entry of reached_json must be an object with an identity",
+                        )
+                    found = reached.setdefault(entry["identity"], [])
+                    for key in ("urls", "pages"):
+                        if isinstance(entry.get(key), list):
+                            found.extend(entry[key])
+            markers = self.gateway.identities.markers(name)
+            result = authz_matrix.infer_owners(reached, markers)
+            return {
+                "ok": True,
+                **result,
+                "identities_without_markers": sorted(n for n, m in markers.items() if not m),
+            }
 
         return self._guard(run)
 
@@ -693,12 +737,21 @@ def register_workbench(mcp: Any, bench: Workbench) -> None:
         identities_json: str = "",
         owners_json: str = "",
         max_requests: int = 120,
+        inferred_json: str = "",
     ) -> dict[str, Any]:
         """Request each URL (GET/HEAD only) as every identity and as nobody, and report
-        which objects are readable by someone who does not own them."""
+        which objects are readable by someone who does not own them. inferred_json lists
+        URLs whose owner in owners_json was inferred: those need an owner marker."""
         return bench.authz_matrix_run(
-            engagement, urls_json, identities_json, owners_json, max_requests
+            engagement, urls_json, identities_json, owners_json, max_requests, inferred_json
         )
+
+    @mcp.tool()
+    def owners_infer(engagement: str, reached_json: str) -> dict[str, Any]:
+        """Owners of object URLs inferred from signed-in crawls: {identity: [url]} or the
+        crawler's [{identity, urls, pages}]. A URL only one identity reached is a hint of
+        ownership; pass those URLs as inferred_json to authz_matrix_run. Sends nothing."""
+        return bench.owners_infer(engagement, reached_json)
 
     @mcp.tool()
     def memory_search(

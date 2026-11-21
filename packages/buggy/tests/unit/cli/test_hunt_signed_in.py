@@ -156,9 +156,12 @@ def test_objects_one_account_reached_are_asked_for_as_the_other(monkeypatch) -> 
     server = use(monkeypatch, Server())
     out = hunt.run_signed_in("acme", RECORDS)
     inferred = out["inferred"]
-    assert inferred["objects"] == 2 and inferred["broken_access"] == 1
-    assert inferred["inconclusive"] == 1 and inferred["verified"] == 1
+    # Bob declared no markers, so his object could never be reported and is not asked for.
+    assert inferred["objects"] == 1 and inferred["broken_access"] == 1
+    assert inferred["inconclusive"] == 0 and inferred["verified"] == 1
     assert inferred["without_markers"] == ["bob"]
+    (matrix,) = [a for tool, a in server.calls if tool == "authz_matrix_run"]
+    assert json.loads(matrix["urls_json"]) == [f"{APP}/orders/1001"]
     assert "authz_matrix_run" in [tool for tool, _a in server.calls]
 
 

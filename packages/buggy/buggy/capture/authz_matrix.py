@@ -34,6 +34,15 @@ Verdict per URL:
     request budget ran out, or nobody is known to own the URL and it is not
     public. Never reported as a pass or a fail.
 
+An owner may be *inferred* rather than declared: :func:`infer_owners` turns the
+URLs each identity reached while signed in into ``{url: identity}``, giving an
+object URL to the one identity that reached it. That is a hint, not proof: a
+public page only one account happened to crawl looks the same. For a URL in
+``require_marker_for``, ``broken_access`` therefore also needs one of the
+owner's markers (``markers`` in ``identities.json``) in the owner's own response
+and in the response of the one who should not have it; otherwise the verdict is
+``inconclusive``.
+
 Standard library only; no model or agent library is imported here.
 """
 
@@ -45,7 +54,7 @@ import time
 from collections.abc import Iterable, Mapping
 from dataclasses import dataclass, field
 from typing import Any
-from urllib.parse import urlsplit
+from urllib.parse import parse_qsl, urlsplit
 
 from buggy.capture.gateway import CaptureGateway, GatewayRefusal
 from buggy.capture.identities import (
@@ -81,6 +90,23 @@ _IDENTITY_REFUSALS = frozenset({"UNKNOWN_IDENTITY", "BAD_IDENTITIES", "LOGIN_FAI
 _ID_SEGMENT = re.compile(
     r"^(?:\d+|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$"
 )
+# Copied from buggy.pipeline.tools.params (_IDENTIFIER, _COLLECTION, _ID_NAME and
+# _STATIC): an object reference is an identifier after a named collection
+# (/orders/123), or an id-like query parameter with an identifier value.
+_IDENTIFIER = re.compile(
+    r"^(?:[0-9]+|[0-9a-f]{24}|[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})$",
+    re.IGNORECASE,
+)
+_COLLECTION = re.compile(r"^[a-z][\w-]*$", re.IGNORECASE)
+_ID_NAME = re.compile(r"^(?:(?i:id|.*[_-]id|uuid)|.*Id)$")
+_STATIC = re.compile(
+    r"\.(?:js|mjs|css|map|png|jpe?g|gif|svg|ico|webp|bmp|avif|tiff?|woff2?|ttf|eot|otf)$",
+    re.IGNORECASE,
+)
+#: At most this many inferred owners are returned by :func:`infer_owners`.
+MAX_INFERRED = 60
+# How many shared (nobody's) URLs are listed back; the count is always given.
+MAX_SHARED = 200
 
 
 class _BudgetSpent(Exception):
@@ -326,7 +352,10 @@ def _judge_owned(
     repeat: Capture | None,
     strings: tuple[str, ...],
     complete: bool,
+    owner_markers: tuple[str, ...] | None = None,
 ) -> dict[str, Any]:
+    """``owner_markers`` is set when the owner was inferred: then only one of those
+    strings, in the owner's response and in the other one, shows an exposure."""
     verdict: dict[str, Any] = {
         "verdict": "inconclusive",
         "owner": owner,
@@ -353,6 +382,23 @@ def _judge_owned(
         )
         return verdict
 
+    inferred = owner_markers is not None
+    needed: tuple[str, ...] = ()
+    if owner_markers is not None:
+        needed = tuple(_hits(mine, owner_markers))
+        if not needed:
+            verdict["reason"] = (
+                f"the owner {owner!r} is inferred (only that account reached the URL), and an "
+                "inferred owner needs a marker: "
+                + (
+                    "the owner's own response contains none of the owner's markers"
+                    if owner_markers
+                    else f"{owner!r} declares no markers"
+                )
+                + " (the markers field of identities.json), so the page may simply be public"
+            )
+            return verdict
+
     comparable = mine.response_bytes > 0
     unclear: list[str] = []
     compared = 0
@@ -365,7 +411,8 @@ def _judge_owned(
             continue
         score = similarity(mine, capture)
         hits = _hits(capture, strings)
-        if ok(capture) and (hits or (comparable and score >= SAME)):
+        proof = _hits(capture, needed) if inferred else hits
+        if ok(capture) and (proof or (not inferred and comparable and score >= SAME)):
             verdict["exposed_to"].append(who)
         elif not hits and (capture.status in DENIED or score < DIFFERENT):
             continue
@@ -373,6 +420,11 @@ def _judge_owned(
             unclear.append(f"{_describe(who, capture)} with an owner marker in the body")
         elif not comparable:
             unclear.append(f"{_describe(who, capture)} and the owner's response has no body")
+        elif inferred and score >= SAME:
+            unclear.append(
+                f"{_describe(who, capture)}, like the owner's ({score}) but without the "
+                "owner's marker that the owner's response has"
+            )
         else:
             unclear.append(f"{_describe(who, capture)}, partly like the owner's ({score})")
     if verdict["exposed_to"]:
@@ -434,6 +486,164 @@ def _judge_unowned(
     else:
         verdict["reason"] = "nobody is known to own this URL, so there is nothing to compare with"
     return verdict
+
+
+# ── owners inferred from what each identity reached ─────────────────
+
+
+def _object_template(url: str) -> str:
+    """The URL's path template if it names an object (``""`` otherwise).
+
+    Identifier segments after a named collection become ``{id}``; id-like query
+    parameters with an identifier value are kept by name as ``name={id}``.
+    """
+    try:
+        parts = urlsplit(url)
+    except ValueError:
+        return ""
+    if parts.scheme not in ("http", "https") or not parts.hostname:
+        return ""
+    if _STATIC.search(parts.path):
+        return ""
+    segments = parts.path.split("/")
+    found = False
+    out: list[str] = []
+    for index, segment in enumerate(segments):
+        previous = segments[index - 1] if index else ""
+        if index > 1 and _COLLECTION.match(previous) and _IDENTIFIER.match(segment):
+            out.append("{id}")
+            found = True
+        else:
+            out.append(segment)
+    query = sorted(
+        {
+            name
+            for name, value in parse_qsl(parts.query, keep_blank_values=True)
+            if _ID_NAME.match(name) and _IDENTIFIER.match(value)
+        }
+    )
+    if not found and not query:
+        return ""
+    template = f"{parts.scheme.lower()}://{parts.netloc.lower()}{'/'.join(out)}"
+    return template + ("?" + "&".join(f"{name}={{id}}" for name in query) if query else "")
+
+
+def _reached_urls(entries: Any) -> list[str]:
+    """URLs out of a crawler list: strings, or pages ``{"url", "status"}`` (2xx only)."""
+    if isinstance(entries, str):
+        entries = [entries]
+    if isinstance(entries, (bytes, Mapping)) or not isinstance(entries, Iterable):
+        return []
+    urls: list[str] = []
+    for entry in entries:
+        if isinstance(entry, Mapping):
+            status = entry.get("status")
+            if status is not None and not (isinstance(status, int) and 200 <= status < 300):
+                continue
+            entry = entry.get("url")
+        if isinstance(entry, str) and entry.strip():
+            urls.append(entry.strip().split("#", 1)[0])
+    return urls
+
+
+def infer_owners(
+    reached: Mapping[str, Iterable[str]],
+    markers_by_identity: Mapping[str, Iterable[str]] | None = None,
+) -> dict[str, Any]:
+    """Which object URL belongs to which identity, judged from what each reached.
+
+    ``reached`` maps an identity name to the URLs it reached while signed in.
+    An object URL (an identifier after a named collection, or an id-like query
+    parameter) reached by exactly one identity is given to it; one reached by
+    two or more is ``shared``. Static assets and other URLs are ignored.
+
+    This is a hint, not proof: pass the URLs of ``owners`` to :func:`run_matrix`
+    as ``require_marker_for``. ``markers_by_identity`` only orders the choice:
+    an identity with markers is picked first, since only its objects can be
+    reported. At most ``MAX_INFERRED`` owners are returned, chosen so that every
+    identity and every path template has one URL before any template gets a
+    second; the order is deterministic.
+
+    Returns ``{"owners": {url: identity}, "shared": [url], "per_identity":
+    {name: objects only it reached}, "considered": number of object URLs}``.
+    """
+    holders: dict[str, set[str]] = {}
+    names: list[str] = []
+    if isinstance(reached, Mapping):
+        for name, urls in reached.items():
+            if not isinstance(name, str) or not name:
+                continue
+            names.append(name)
+            for url in _reached_urls(urls):
+                if _object_template(url):
+                    holders.setdefault(url, set()).add(name)
+    with_markers = {
+        str(name)
+        for name, values in (markers_by_identity or {}).items()
+        if not isinstance(values, (str, bytes))
+        and isinstance(values, Iterable)
+        and any(str(v) for v in values)
+    }
+    unique = {url: next(iter(who)) for url, who in holders.items() if len(who) == 1}
+    shared = sorted(url for url, who in holders.items() if len(who) > 1)
+    per_identity = dict.fromkeys(sorted(set(names)), 0)
+    for name in unique.values():
+        per_identity[name] += 1
+
+    # (template, url, identity), sorted; identities with markers first where it matters.
+    pool = sorted((_object_template(url), url, name) for url, name in unique.items())
+    chosen: dict[str, str] = {}
+    used_templates: dict[str, int] = {}
+
+    def take(item: tuple[str, str, str]) -> None:
+        template, url, name = item
+        chosen[url] = name
+        used_templates[template] = used_templates.get(template, 0) + 1
+
+    def rank(name: str) -> tuple[int, str]:
+        return (0 if name in with_markers else 1, name)
+
+    # 1. One URL per identity, in a template not used yet where possible.
+    for name in sorted({n for _t, _u, n in pool}, key=rank):
+        if len(chosen) >= MAX_INFERRED:
+            break
+        mine = [item for item in pool if item[2] == name]
+        fresh = [item for item in mine if item[0] not in used_templates]
+        take((fresh or mine)[0])
+    # 2. Then rounds over the templates: one more URL per template per round,
+    # preferring the identity with the fewest URLs chosen so far.
+    by_template: dict[str, list[tuple[str, str, str]]] = {}
+    for item in pool:
+        if item[1] not in chosen:
+            by_template.setdefault(item[0], []).append(item)
+    while len(chosen) < MAX_INFERRED and any(by_template.values()):
+        for template in sorted(by_template, key=lambda t: (used_templates.get(t, 0), t)):
+            items = by_template[template]
+            if not items or len(chosen) >= MAX_INFERRED:
+                continue
+            if used_templates.get(template, 0) > min(
+                used_templates.get(t, 0) for t, rest in by_template.items() if rest
+            ):
+                continue
+            here = dict.fromkeys((n for _t, _u, n in items), 0)
+            overall = dict(here)
+            for url, name in chosen.items():
+                if name in here:
+                    overall[name] += 1
+                    if _object_template(url) == template:
+                        here[name] += 1
+            best = min(
+                items, key=lambda item: (here[item[2]], overall[item[2]], rank(item[2]), item[1])
+            )
+            items.remove(best)
+            take(best)
+    return {
+        "owners": dict(sorted(chosen.items())),
+        "shared": shared[:MAX_SHARED],
+        "shared_total": len(shared),
+        "per_identity": per_identity,
+        "considered": len(holders),
+    }
 
 
 # ── candidates ──────────────────────────────────────────────────────
@@ -556,6 +766,7 @@ def run_matrix(
     include_anonymous: bool = True,
     markers: Mapping[str, Iterable[str]] | None = None,
     max_requests: int = 300,
+    require_marker_for: Iterable[str] = (),
 ) -> dict[str, Any]:
     """Ask for every URL as every identity and report who received whose data.
 
@@ -566,6 +777,12 @@ def run_matrix(
     listed there is matched against the identities' ``owner_of`` patterns.
     ``markers`` maps an identity name (strings unique to that identity's data) or
     a URL (strings unique to that URL's private content) to a list of strings.
+    The identities' own declared ``markers`` are used too; an entry of ``markers``
+    for the same identity replaces them.
+    ``require_marker_for`` lists URLs (or ``"HEAD <url>"`` keys) whose owner was
+    inferred (see :func:`infer_owners`): for those, ``broken_access`` needs one of
+    the owner's markers in the owner's response and in the other response, and the
+    verdict is ``inconclusive`` when the owner has none or its response lacks them.
 
     Each URL costs one request per identity, one more for its owner (asked twice
     to see that the page is stable) and one without credentials. A login made to
@@ -577,7 +794,11 @@ def run_matrix(
         sessions = gateway.sessions
     targets, skipped = _targets(urls)
     usable, unavailable = _identities(gateway, engagement, identities)
-    strings_for = _markers(markers)
+    if isinstance(require_marker_for, (str, bytes)):
+        raise TypeError("require_marker_for must be a list of URLs")
+    strings_for = {name: ident.markers for name, ident in usable.items() if ident.markers}
+    strings_for.update(_markers(markers))
+    inferred = {str(url).strip() for url in require_marker_for if str(url).strip()}
     run = _Run(gateway, sessions, engagement, max(0, int(max_requests)), unavailable=unavailable)
 
     matrix: dict[str, dict[str, dict[str, Any]]] = {}
@@ -659,7 +880,15 @@ def run_matrix(
             row[owner]["repeat_capture_id"] = repeat.id
         matrix[target.key] = row
         if owner:
-            verdict = _judge_owned(owner, captures, repeat, strings, complete)
+            needs_marker = target.url in inferred or target.key in inferred
+            verdict = _judge_owned(
+                owner,
+                captures,
+                repeat,
+                strings,
+                complete,
+                strings_for.get(owner, ()) if needs_marker else None,
+            )
         else:
             verdict = _judge_unowned(captures, strings, complete)
         verdicts[target.key] = verdict
@@ -689,7 +918,9 @@ __all__ = [
     "PROBE",
     "SAME",
     "VERDICTS",
+    "MAX_INFERRED",
     "finding_id",
+    "infer_owners",
     "normalized_endpoint",
     "run_matrix",
 ]

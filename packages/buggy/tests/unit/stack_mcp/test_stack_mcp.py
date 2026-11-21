@@ -295,8 +295,9 @@ def _lab_scope(stack, **extra) -> None:
 
 def test_every_capture_server_tool_has_an_agent_wrapper_and_no_actor_argument() -> None:
     wrapped = {t.name: t for t in stack_mcp.ALL_STACK_MCP_TOOLS}
-    # candidates_add is used by the recon stage (operator side), not by agents.
-    for name in set(capture_server.TOOL_NAMES) - {"candidates_add"}:
+    # candidates_add is used by the recon stage and owners_infer by the hunt command
+    # (operator side), not by agents.
+    for name in set(capture_server.TOOL_NAMES) - {"candidates_add", "owners_infer"}:
         assert name in wrapped, f"{name} has no agent wrapper"
     for name, tool in wrapped.items():
         assert not {"engagement", "actor"} & set(tool.args), (
@@ -403,6 +404,18 @@ def test_identities_are_listed_without_secrets_and_attached_by_name(stack) -> No
     )
     assert "matrix" in matrix and secret not in json.dumps(matrix)
 
+    # An inferred owner reaches the server: alice declares no markers, so nothing is claimed.
+    page = stack["target"] + "/"
+    inferred = _call(
+        stack_mcp.authz_matrix_run,
+        urls_json=json.dumps([page]),
+        owners_json=json.dumps({page: "alice"}),
+        inferred_json=json.dumps([page]),
+        max_requests=20,
+    )
+    assert inferred["verdicts"][page]["verdict"] == "inconclusive"
+    assert "markers" in inferred["verdicts"][page]["reason"] and inferred["candidates"] == []
+
 
 def test_lessons_are_scrubbed_and_trusted_only_with_a_verified_finding(stack) -> None:
     _lab_scope(stack)
@@ -468,3 +481,10 @@ def test_the_matrix_tool_is_gated_on_every_url_it_would_request() -> None:
         "c.test",
     ]
     assert NETWORK_TARGET_EXTRACTORS["authz_matrix_run"]({"urls_json": "not json"}) == []
+    # inferred_json only marks some of urls_json; it adds nothing to request.
+    with_inferred = {"urls_json": urls, "inferred_json": json.dumps(["https://d.test/o/3"])}
+    assert NETWORK_TARGET_EXTRACTORS["authz_matrix_run"](with_inferred) == [
+        "a.test",
+        "b.test",
+        "c.test",
+    ]

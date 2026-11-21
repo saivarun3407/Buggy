@@ -1130,7 +1130,13 @@ def _inferred_access(
     out["without_markers"] = [str(n) for n in inferred.get("identities_without_markers") or []]
     if not isinstance(owners, dict) or not owners:
         return
-    urls = sorted(str(url) for url in owners)[:MAX_ACCESS_URLS]
+    # An inferred object is only ever reported when its owner's marker leaks, so
+    # objects of an account without markers would spend requests for nothing.
+    unmarked = set(out["without_markers"])
+    urls = sorted(str(url) for url, owner in owners.items() if str(owner) not in unmarked)
+    urls = urls[:MAX_ACCESS_URLS]
+    if not urls:
+        return
     owners = {url: str(owners[url]) for url in urls}
     result = _capture(
         "authz_matrix_run",

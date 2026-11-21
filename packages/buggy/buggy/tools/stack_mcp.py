@@ -537,12 +537,19 @@ async def identities_list() -> str:
 
 @tool
 async def authz_matrix_run(
-    urls_json: str, identities_json: str = "", owners_json: str = "", max_requests: int = 120
+    urls_json: str,
+    identities_json: str = "",
+    owners_json: str = "",
+    max_requests: int = 120,
+    inferred_json: str = "",
 ) -> str:
     """Access-control check without guessing: request each URL (GET/HEAD only) as every
     declared identity and as nobody, and report which objects are readable by someone who
     does not own them. urls_json is a list of URLs; owners_json maps url -> identity name.
+    inferred_json lists the URLs of owners_json whose owner was inferred from a crawl
+    rather than declared; those are reported only when the owner's marker leaks.
     Mismatches are queued as candidates."""
+    extra = {"inferred_json": inferred_json} if inferred_json else {}
     return await _engagement_call(
         "capture",
         "authz_matrix_run",
@@ -550,6 +557,7 @@ async def authz_matrix_run(
         identities_json=identities_json,
         owners_json=owners_json,
         max_requests=max_requests,
+        **extra,
     )
 
 

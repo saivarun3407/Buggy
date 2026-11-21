@@ -365,6 +365,67 @@ class TestIdentityFile:
         assert bad.value.field == "engagement"
 
 
+class TestMarkers:
+    BOB_MARKER = "Bob Fixture-Admin"
+
+    @staticmethod
+    def _with_markers(alice: object, bob: object = None) -> dict:
+        document = copy.deepcopy(_document())
+        document["identities"][0]["markers"] = alice
+        if bob is not None:
+            document["identities"][1]["markers"] = bob
+        return document
+
+    def test_markers_are_loaded_and_listed_by_name(self, env) -> None:
+        _gateway, _origin, roots, store, _sessions, _app = env
+        assert store.markers("acme") == {"alice": (), "bob": ()}  # none declared yet
+        _write(roots, self._with_markers([EMAIL, "ACC-0042", EMAIL], [self.BOB_MARKER]))
+        identities = store.load("acme")
+        assert identities["alice"].markers == (EMAIL, "ACC-0042")  # duplicates kept once
+        assert store.markers("acme") == {"alice": (EMAIL, "ACC-0042"), "bob": (self.BOB_MARKER,)}
+        assert store.markers("other") == {}
+
+    def test_markers_are_not_in_the_public_view(self, env) -> None:
+        _gateway, _origin, roots, store, _sessions, _app = env
+        _write(roots, self._with_markers([EMAIL, "ACC-0042"], [self.BOB_MARKER]))
+        public = store.public("acme")
+        assert [set(row) for row in public] == [{"name", "role", "owner_of", "kind"}] * 2
+        rendered = json.dumps(public)
+        for marker in (EMAIL, "ACC-0042", self.BOB_MARKER):
+            assert marker not in rendered
+        assert "markers" not in store.load("acme")["alice"].public()
+
+    @pytest.mark.parametrize(
+        ("alice", "bob", "field"),
+        [
+            ("alice@example.test", None, "identities[0].markers"),  # not a list
+            ({"email": EMAIL}, None, "identities[0].markers"),
+            ([], None, "identities[0].markers"),  # 1-20 strings
+            ([f"marker-{i:02d}" for i in range(21)], None, "identities[0].markers"),
+            ([EMAIL, ""], None, "identities[0].markers[1]"),
+            (["   "], None, "identities[0].markers[0]"),
+            (["ab"], None, "identities[0].markers[0]"),  # would match by accident
+            ([7], None, "identities[0].markers[0]"),
+            (["x" * 201], None, "identities[0].markers[0]"),
+            ([EMAIL], ["ACC-9", EMAIL], "identities[1].markers[1]"),  # shared by two accounts
+        ],
+    )
+    def test_malformed_markers_name_the_field(self, env, alice, bob, field) -> None:
+        _gateway, _origin, roots, store, _sessions, _app = env
+        _write(roots, self._with_markers(alice, bob))
+        with pytest.raises(IdentityError) as bad:
+            store.load("acme")
+        assert bad.value.field == field, str(bad.value)
+        if field.endswith("markers[1]") and bob is not None:
+            assert "alice" in str(bad.value) and EMAIL not in str(bad.value)
+
+    def test_boundary_lengths_are_accepted(self, env) -> None:
+        _gateway, _origin, roots, store, _sessions, _app = env
+        markers = ["abc", "y" * 200, *(f"m-{i:02d}" for i in range(18))]
+        _write(roots, self._with_markers(markers))
+        assert len(store.markers("acme")["alice"]) == 20
+
+
 class TestLoginFlow:
     def test_login_yields_the_applied_header_and_is_cached(self, env) -> None:
         gateway, origin, roots, _store, sessions, app = env
