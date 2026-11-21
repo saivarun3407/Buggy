@@ -33,6 +33,7 @@ Every live service gets one ``cors`` run and every GraphQL endpoint one
 
 from __future__ import annotations
 
+import re
 from collections import defaultdict
 from typing import Any
 from urllib.parse import urlencode, urlsplit
@@ -197,4 +198,184 @@ def plan(
     return {"steps": chosen, "considered": len(steps), "left_out": len(steps) - len(chosen)}
 
 
-__all__ = ["DEFAULT_BUDGET", "MAX_BUDGET", "PRIORITY", "plan", "probes_for"]
+# ── runs that can change state: planned here, sent only after approval ──
+
+DEFAULT_STATE_BUDGET = 15
+STATE_METHODS = ("POST", "PUT", "PATCH")
+#: Lower runs first.
+STATE_PRIORITY: dict[str, int] = {
+    "numeric_boundary": 0,
+    "mass_assignment": 1,
+    "sqli": 2,
+    "command_injection": 3,
+    "ssti": 4,
+    "xss_reflected": 5,
+}
+#: A field with one of these words in its name carries a business quantity.
+QUANTITY_WORDS = frozenset(
+    {
+        "quantity", "qty", "amount", "price", "total", "count", "balance", "points", "discount",
+        "credit", "credits", "rate", "fee", "cost", "units", "stock", "limit",
+    }
+)  # fmt: skip
+#: A field with one of these words in its name may reach a system command.
+COMMAND_WORDS = frozenset({"host", "hostname", "ip", "domain", "cmd", "command", "exec", "ping"})
+#: Fields a client should not be able to set; each must be refused or ignored.
+PRIVILEGED_FIELDS: dict[str, Any] = {"role": "admin", "isAdmin": True, "admin": True}
+_WORDS = re.compile(r"[A-Za-z][a-z0-9]*|[A-Z]+(?![a-z])")
+
+
+def _name_words(name: str) -> set[str]:
+    """The lower-cased words of a field name (``orderLines[].unitPrice`` -> order, lines, ...)."""
+    return {word.lower() for word in _WORDS.findall(name.split(".")[-1])}
+
+
+def _body_value(parameter: dict[str, Any]) -> Any:
+    """A plausible valid value for a body field: its example, else by what its name says."""
+    example = parameter["example"]
+    if example and example != REDACTED:
+        try:
+            return int(example)
+        except ValueError:
+            return example
+    hints = parameter["hints"]
+    if "numeric" in hints or "id-like" in hints or _name_words(parameter["name"]) & QUANTITY_WORDS:
+        return 1
+    return "test"
+
+
+def _put(body: dict[str, Any], name: str, value: Any) -> None:
+    """Set a dotted field in a JSON body; ``a[].b`` becomes a one-element list of objects."""
+    cursor: Any = body
+    parts = name.split(".")
+    for index, part in enumerate(parts):
+        last = index == len(parts) - 1
+        listed = part.endswith("[]")
+        key = part[:-2] if listed else part
+        if not key:
+            return
+        if listed:
+            items = cursor.setdefault(key, [{}] if not last else [value])
+            if last or not isinstance(items, list) or not items or not isinstance(items[0], dict):
+                return
+            cursor = items[0]
+        elif last:
+            cursor[key] = value
+        else:
+            nxt = cursor.setdefault(key, {})
+            if not isinstance(nxt, dict):
+                return
+            cursor = nxt
+
+
+def _body_operations(records: list[dict[str, Any]]) -> dict[tuple[str, str], list[dict[str, Any]]]:
+    """Body fields by ``(method, url)`` for the methods that write."""
+    operations: dict[tuple[str, str], list[dict[str, Any]]] = defaultdict(list)
+    for record in records:
+        attrs = _attrs(record)
+        url = _http_url(attrs.get("url"))
+        name = str(attrs.get("name") or "")
+        method = str(attrs.get("method") or "").upper()
+        if not url or not name or attrs.get("location") != "body" or method not in STATE_METHODS:
+            continue
+        hints = [str(h) for h in attrs.get("hints") or [] if isinstance(h, str)]
+        operations[(method, url)].append(
+            {"name": name, "example": str(attrs.get("example") or ""), "hints": hints}
+        )
+    return operations
+
+
+def _field_probes(parameter: dict[str, Any]) -> tuple[str, ...]:
+    """The state-changing probes one body field gets. A credential field gets none."""
+    hints, words = parameter["hints"], _name_words(parameter["name"])
+    if "auth-like" in hints or parameter["example"] == REDACTED or "[]" in parameter["name"]:
+        return ()
+    if words & QUANTITY_WORDS:
+        return ("numeric_boundary",)
+    if words & COMMAND_WORDS:
+        return ("command_injection", "sqli")
+    if "numeric" in hints or "id-like" in hints:
+        return ("sqli",)
+    return ("sqli", "ssti", "xss_reflected")
+
+
+def plan_state_changing(
+    records: dict[str, list[dict[str, Any]]],
+    *,
+    budget: int = DEFAULT_STATE_BUDGET,
+    identity: str = "",
+) -> dict[str, Any]:
+    """Probe runs on request bodies of write operations. Each needs the operator's approval.
+
+    Read from ``parameter`` records whose location is ``body`` (API
+    specifications and contracts). For every write operation a JSON body is
+    built from the fields recon knows, with their examples or a value their
+    name implies. Planned per operation: one ``mass_assignment`` run, and per
+    field ``numeric_boundary`` (a business quantity), ``command_injection``
+    (a field that names a host or a command) or the injection probes.
+
+    Nothing here is sent by planning. The caller hands each step to
+    ``probe_run``, where a run that can change state is held until the
+    operator approves that run. ``identity`` (a declared test account) is put
+    on every step when given, because write operations usually need a login.
+    """
+    budget = max(0, min(int(budget), MAX_BUDGET))
+    steps: list[dict[str, Any]] = []
+    for (method, url), fields in sorted(_body_operations(records.get("parameter", [])).items()):
+        fields = sorted(fields, key=lambda f: f["name"])
+        body: dict[str, Any] = {}
+        for parameter in fields:
+            if parameter["example"] != REDACTED and "auth-like" not in parameter["hints"]:
+                _put(body, parameter["name"], _body_value(parameter))
+        if not body:
+            continue
+        host = urlsplit(url).netloc.lower()
+        common: dict[str, Any] = {"url": url, "method": method, "body": body}
+        if identity:
+            common["identity"] = identity
+        steps.append(
+            {
+                "probe": "mass_assignment",
+                "host": host,
+                "params": {**common, "extra_fields": dict(PRIVILEGED_FIELDS)},
+                "why": f"{method} operation that stores an object",
+            }
+        )
+        for parameter in fields:
+            for probe in _field_probes(parameter):
+                params = dict(common)
+                if probe == "numeric_boundary":
+                    params.update({"field": parameter["name"], "values": [-1, 0]})
+                else:
+                    params.update({"parameter": parameter["name"], "location": "json"})
+                    if probe == "sqli":
+                        params["allow_time"] = False
+                steps.append(
+                    {
+                        "probe": probe,
+                        "host": host,
+                        "params": params,
+                        "why": f"body field {parameter['name']!r} of {method} {urlsplit(url).path}",
+                    }
+                )
+    turn: dict[tuple[str, str], int] = defaultdict(int)
+    ordered: list[tuple[int, int, str, int, dict[str, Any]]] = []
+    for index, step in enumerate(steps):
+        key = (step["host"], step["probe"])
+        ordered.append((turn[key], STATE_PRIORITY[step["probe"]], step["host"], index, step))
+        turn[key] += 1
+    ordered.sort(key=lambda row: row[:4])
+    chosen = [row[4] for row in ordered[:budget]]
+    return {"steps": chosen, "considered": len(steps), "left_out": len(steps) - len(chosen)}
+
+
+__all__ = [
+    "DEFAULT_BUDGET",
+    "DEFAULT_STATE_BUDGET",
+    "MAX_BUDGET",
+    "PRIORITY",
+    "STATE_PRIORITY",
+    "plan",
+    "plan_state_changing",
+    "probes_for",
+]

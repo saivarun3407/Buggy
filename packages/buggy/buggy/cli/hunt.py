@@ -820,6 +820,37 @@ def run_probe_sweep(
     from buggy.pipeline import sweep  # noqa: PLC0415
 
     planned = sweep.plan(records, budget=sweep.DEFAULT_BUDGET if budget is None else budget)
+    return _run_steps(engagement, planned, _known_issues(records))
+
+
+def run_state_sweep(
+    engagement: str,
+    records: dict[str, list[dict[str, Any]]],
+    *,
+    budget: int | None = None,
+    identity: str = "",
+) -> dict[str, Any]:
+    """Hand the planned state-changing probe runs to the gateway. No LLM.
+
+    These are the business-logic and request-body checks (a negative quantity,
+    a privileged field, injection in a JSON body). Each can change state, so
+    where the engagement requires approval the gateway holds the run and files
+    one request for it: nothing is sent, and the run is counted under
+    ``held_for_approval``. A run the operator has allowed is sent on the next
+    ``hunt --resume``; a positive result is re-proven and graded like any other.
+    """
+    from buggy.pipeline import sweep  # noqa: PLC0415
+
+    planned = sweep.plan_state_changing(
+        records,
+        budget=sweep.DEFAULT_STATE_BUDGET if budget is None else budget,
+        identity=identity,
+    )
+    return _run_steps(engagement, planned, _known_issues(records))
+
+
+def _run_steps(engagement: str, planned: dict[str, Any], known: str) -> dict[str, Any]:
+    """Send each planned probe run; re-prove and grade the positives. Returns the counts."""
     out: dict[str, Any] = {
         "planned": len(planned["steps"]),
         "left_out": planned["left_out"],
@@ -834,7 +865,6 @@ def run_probe_sweep(
         "findings": [],
         "error": None,
     }
-    known = _known_issues(records)
     failures = 0
     for step in planned["steps"]:
         result = _capture(
@@ -851,8 +881,8 @@ def run_probe_sweep(
         if result.get("status") == "refused":
             out["refused"] += 1
             if result.get("code") == "APPROVAL_REQUIRED":
-                # A read-only check that is sent with POST (a GraphQL query): the gateway
-                # cannot know it is read-only, so it waits for the operator like any POST.
+                # Held by the gateway: a state-changing run, or a read-only check that is
+                # sent with POST (a GraphQL query). It waits for the operator.
                 out["held_for_approval"] += 1
             continue
         if result.get("vulnerable") is False:
