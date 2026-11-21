@@ -419,6 +419,9 @@ def verify_by_probe(
     code = str(result.get("code") or "")
     if code:
         reason = f"{reason} ({code})"
+    request_id = str(result.get("request_id") or "")
+    if code == "APPROVAL_REQUIRED" and request_id:
+        reason = f"{reason}: the re-run needs approval {request_id}; verify again once allowed"
     return Verification(Status.INCONCLUSIVE.value, now, ids, [reason], [entry])
 
 

@@ -224,7 +224,10 @@ def register_tools(mcp: Any, tools: CaptureTools) -> None:
     @mcp.tool()
     def probe_run(engagement: str, probe: str, params_json: str) -> dict[str, Any]:
         """Run a deterministic probe (see probe_list). params_json is a JSON object. Returns
-        vulnerable true/false/null (null = could not tell), a summary and evidence capture ids."""
+        vulnerable true/false/null (null = could not tell), a summary and evidence capture ids.
+        A probe that can change state may return APPROVAL_REQUIRED with a request_id: nothing
+        was sent; once the operator allows it, call again with the same params_json (one
+        approval covers one run)."""
         return tools.probe_run(engagement, probe, params_json)
 
 

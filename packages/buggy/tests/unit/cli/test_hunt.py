@@ -824,6 +824,7 @@ class TestExitCodesAndTheResultFile:
             "findings": NO_FINDINGS,
             "approvals_pending": 0,
             "agent": {"ran": False, "error": None},
+            "probes": {"ran_sweep": False},
             "complete": True,
         }
         assert "hunt-result.json" in capsys.readouterr().err

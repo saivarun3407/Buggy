@@ -29,6 +29,7 @@ import buggy.capture.gateway as gateway_module
 from buggy.capture.gateway import CaptureGateway, Roots
 from buggy.capture.mcp_server import CaptureTools
 from buggy.capture.probes import REGISTRY, describe, execution, run_probe
+from buggy.capture.probes.base import Context
 from buggy.capture.probes.execution import (
     CMD_MAX_REQUESTS,
     OUTPUT_PAYLOADS,
@@ -837,9 +838,9 @@ class TestCannotTell:
             "body": {parameter: "x"},
         }
         result = run(env, post)
-        assert result["vulnerable"] is None, result
-        refusal = result["details"]["refusal"]
-        assert refusal["code"] == "APPROVAL_REQUIRED" and refusal["request_id"].startswith("apr-")
+        # The run is held as a whole: one approval request, and no request sent.
+        assert result["status"] == "refused" and "vulnerable" not in result, result
+        assert result["code"] == "APPROVAL_REQUIRED" and result["request_id"].startswith("apr-")
         assert env.site.seen == []
 
     @PROBES
@@ -877,15 +878,24 @@ class TestApprovalHold:
         shell = Shell(env.clock)
         env.app.handlers["/lookup"] = lookup_injectable(shell)
         result = command(env, LOOKUP)
-        assert result["status"] == "completed" and result["vulnerable"] is None, result
+        assert result["status"] == "refused" and result["code"] == "APPROVAL_REQUIRED", result
+        assert result["request_id"].startswith("apr-")
+        # Nothing left the gateway, not even the baseline; the shell saw nothing.
+        assert env.site.seen == [] and shell.ran == []
+
+    def test_probe_called_without_an_approved_run_holds_its_payloads(self, env) -> None:
+        # Defence in depth: the probe itself refuses when it is reached without a grant.
+        (env.roots.control / "acme" / "roe.json").write_text(_roe())
+        shell = Shell(env.clock)
+        env.app.handlers["/lookup"] = lookup_injectable(shell)
+        result = execution.command_injection(
+            Context(env.gateway, "acme", "command_injection"), LOOKUP
+        ).to_dict()
+        assert result["vulnerable"] is None, result
         refusal = result["details"]["refusal"]
         assert refusal["code"] == "APPROVAL_REQUIRED" and refusal["held_by"] == "probe"
-        assert "APPROVAL_REQUIRED" in result["summary"]
-        # Only the two plain baseline requests left; the shell never saw a payload.
         assert sent(env, "host") == ["example.org", "example.org"]
         assert shell.ran == ["nslookup example.org"] * 2
-        assert "numbers" not in result["details"]
-        check_evidence(env, result)
 
     def test_same_request_runs_once_the_scope_waives_approval(self, env) -> None:
         env.app.handlers["/lookup"] = lookup_injectable(Shell(env.clock))

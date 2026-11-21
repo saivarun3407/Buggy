@@ -72,6 +72,8 @@ _BLOCKED_HEADERS = frozenset(
     }
 )
 APPROVAL_MAX_USES = 3
+# One approved probe run may send at most this many requests (the largest probe sends 11).
+PROBE_RUN_MAX_REQUESTS = 40
 # What a capture and its ledger line carry instead of an approval id when the
 # request was the gateway's own login for a declared identity.
 log = logging.getLogger("buggy.capture.gateway")
@@ -180,6 +182,33 @@ class GatewayRefusal(Exception):
         return {"status": "refused", "code": self.code, "detail": self.detail, **self.extra}
 
 
+@dataclass(slots=True)
+class ProbeGrant:
+    """The operator's approval of one run of one probe. Only the gateway makes one.
+
+    It covers the requests that run sends to the approved origin, up to
+    ``remaining``. Scope, the internal-address block and the rate limit apply
+    to each of them as to any other request.
+    """
+
+    request_id: str
+    engagement: str
+    probe: str
+    origin: str
+    remaining: int = PROBE_RUN_MAX_REQUESTS
+
+
+def origin_of(url: str) -> str:
+    """``scheme://host[:port]`` of a URL, lower-cased; ``""`` when it has none."""
+    try:
+        parts = urlsplit(url)
+    except ValueError:
+        return ""
+    if not parts.scheme or not parts.netloc:
+        return ""
+    return f"{parts.scheme}://{parts.netloc}".lower()
+
+
 class _NoRedirect(urllib.request.HTTPRedirectHandler):
     def redirect_request(self, *_args: Any, **_kwargs: Any) -> None:
         return None
@@ -244,6 +273,7 @@ class CaptureGateway:
         # Called with the request record when a NEW approval request is filed
         # (the capture server sets it to notify the operator). Never raises here.
         self.on_approval_request: Any = None
+        self._grants: dict[str, ProbeGrant] = {}
 
     # ── scope / policy ──────────────────────────────────────────────
 
@@ -285,17 +315,12 @@ class CaptureGateway:
             self.roots.control / engagement / "approvals" / "decisions.jsonl",
         )
 
-    def _check_approval(
-        self, engagement: str, method: str, url: str, body: bytes, note: str, identity: str = ""
-    ) -> str:
-        """Return the approving request id, or raise a refusal that names the pending request.
+    def _approval_state(self, engagement: str, fingerprint: str, spent: Any) -> tuple[str, str]:
+        """``(approved_id, pending_id)`` for a fingerprint; either may be ``""``.
 
-        An approval covers one exact request sent as one identity: allowing a
-        request as one test account does not allow the same request as another.
+        Raises ``APPROVAL_DENIED`` when the operator refused it. ``spent`` says
+        whether an allowed request id has been used up.
         """
-        fingerprint = request_fingerprint(method, url, body)
-        if identity:
-            fingerprint = sha256_hex(f"{fingerprint}|identity:{identity}".encode())
         requests_path, decisions_path = self._approval_paths(engagement)
         mine = [
             r
@@ -315,48 +340,72 @@ class CaptureGateway:
                     request_id=request_id,
                     operator_note=str(decision.get("operator_note") or ""),
                 )
+            if spent(request_id):
+                continue  # this approval is spent; a new request is filed
+            return request_id, ""
+        pending = [r for r in mine if str(r.get("request_id")) not in decisions]
+        return "", (str(pending[-1]["request_id"]) if pending else "")
+
+    def _file_request(self, engagement: str, record: dict[str, Any]) -> None:
+        requests_path, _ = self._approval_paths(engagement)
+        requests_path.parent.mkdir(parents=True, exist_ok=True)
+        with requests_path.open("a", encoding="utf-8") as handle:
+            handle.write(json.dumps(record) + "\n")
+        if self.on_approval_request is not None:
+            try:
+                self.on_approval_request(record)
+            except Exception:  # noqa: BLE001 - telling the operator must not change the hold
+                log.warning("the approval-request hook failed", exc_info=True)
+
+    def _check_approval(
+        self, engagement: str, method: str, url: str, body: bytes, note: str, identity: str = ""
+    ) -> str:
+        """Return the approving request id, or raise a refusal that names the pending request.
+
+        An approval covers one exact request sent as one identity: allowing a
+        request as one test account does not allow the same request as another.
+        """
+        fingerprint = request_fingerprint(method, url, body)
+        if identity:
+            fingerprint = sha256_hex(f"{fingerprint}|identity:{identity}".encode())
+
+        def spent(request_id: str) -> bool:
             used = sum(
                 1 for c in self.store.list(engagement, limit=500) if c.approval_id == request_id
             )
-            if used >= APPROVAL_MAX_USES:
-                continue  # this approval is spent; a new request is filed below
-            return request_id
-        pending = [r for r in mine if str(r.get("request_id")) not in decisions]
-        if pending:
-            request_id = str(pending[-1]["request_id"])
-        else:
+            return used >= APPROVAL_MAX_USES
+
+        approved, request_id = self._approval_state(engagement, fingerprint, spent)
+        if approved:
+            return approved
+        if not request_id:
             request_id = f"apr-{uuid.uuid4().hex[:12]}"
-            record = {
-                "kind": "approval_request",
-                "request_id": request_id,
-                "engagement_name": engagement,
-                "agent_name": "capture-gateway",
-                "tool_name": "http_send",
-                "tool_args_redacted": {
-                    "method": method,
-                    "url": url,
-                    "body_sha256": sha256_hex(body),
-                    "body_preview": body[:400].decode("utf-8", "replace"),
-                    "identity": identity,
+            self._file_request(
+                engagement,
+                {
+                    "kind": "approval_request",
+                    "request_id": request_id,
+                    "engagement_name": engagement,
+                    "agent_name": "capture-gateway",
+                    "tool_name": "http_send",
+                    "tool_args_redacted": {
+                        "method": method,
+                        "url": url,
+                        "body_sha256": sha256_hex(body),
+                        "body_preview": body[:400].decode("utf-8", "replace"),
+                        "identity": identity,
+                    },
+                    "matched_rule": {
+                        "technique_tag": None,
+                        "tool_pattern": "state-changing HTTP method",
+                        "timeout_seconds": 0,
+                        "default_on_timeout": "deny",
+                    },
+                    "reason": note or f"{method} can change state on the target",
+                    "created_at": time.time(),
+                    "metadata": {"fingerprint": fingerprint},
                 },
-                "matched_rule": {
-                    "technique_tag": None,
-                    "tool_pattern": "state-changing HTTP method",
-                    "timeout_seconds": 0,
-                    "default_on_timeout": "deny",
-                },
-                "reason": note or f"{method} can change state on the target",
-                "created_at": time.time(),
-                "metadata": {"fingerprint": fingerprint},
-            }
-            requests_path.parent.mkdir(parents=True, exist_ok=True)
-            with requests_path.open("a", encoding="utf-8") as handle:
-                handle.write(json.dumps(record) + "\n")
-            if self.on_approval_request is not None:
-                try:
-                    self.on_approval_request(record)
-                except Exception:  # noqa: BLE001 - telling the operator must not change the hold
-                    log.warning("the approval-request hook failed", exc_info=True)
+            )
         raise GatewayRefusal(
             "APPROVAL_REQUIRED",
             f"{method} can change state on the target, so a human must approve this exact "
@@ -364,6 +413,123 @@ class CaptureGateway:
             "sent. Re-send the identical request after it is approved.",
             request_id=request_id,
         )
+
+    # ── approval of a whole probe run ───────────────────────────────
+
+    def _used_runs_path(self, engagement: str) -> Path:
+        return self.roots.audit / engagement / "approvals" / "probe-runs-used.jsonl"
+
+    def probe_grant(
+        self, engagement: str, probe: str, params: dict[str, Any], *, sends: str = ""
+    ) -> ProbeGrant | None:
+        """The operator's approval for one run of a state-changing probe.
+
+        A probe uses fresh random markers on every run, so no single request of
+        it can be approved in advance. What is approved instead is the run: this
+        probe, on this URL, with these parameters. Returns ``None`` when the
+        engagement does not require approval; otherwise the grant, or a refusal
+        that names the request the operator has to decide. One approval is one
+        run: it is used up the moment the grant is issued.
+        """
+        scope, document = self.scope_for(engagement)
+        if not self.approval_required(document):
+            return None
+        url = str(params.get("url") or "")
+        origin = origin_of(url)
+        if not origin:
+            return None  # the probe itself reports the missing or malformed URL
+        allowed, reason = scope.decide(url)
+        if not allowed:
+            self._refused(engagement, "PROBE", url, reason)
+            raise GatewayRefusal(
+                "OUT_OF_SCOPE",
+                f"{host_of(url)!r} is not in the enforced scope ({reason}); not sent",
+            )
+        canonical = json.dumps(params, sort_keys=True, default=str)
+        fingerprint = sha256_hex(f"probe-run|{probe}|{canonical}".encode())
+        used_path = self._used_runs_path(engagement)
+
+        def spent(request_id: str) -> bool:
+            return any(str(u.get("request_id")) == request_id for u in _read_jsonl(used_path))
+
+        with self._lock:
+            approved, request_id = self._approval_state(engagement, fingerprint, spent)
+            if approved:
+                used_path.parent.mkdir(parents=True, exist_ok=True)
+                with used_path.open("a", encoding="utf-8") as handle:
+                    handle.write(
+                        json.dumps({"request_id": approved, "probe": probe, "used_at": time.time()})
+                        + "\n"
+                    )
+                grant = ProbeGrant(approved, engagement, probe, origin)
+                self._grants[approved] = grant
+                return grant
+        if not request_id:
+            request_id = f"apr-{uuid.uuid4().hex[:12]}"
+            body = params.get("body")
+            preview = body if isinstance(body, str) else json.dumps(body, default=str)
+            self._file_request(
+                engagement,
+                {
+                    "kind": "approval_request",
+                    "request_id": request_id,
+                    "engagement_name": engagement,
+                    "agent_name": "capture-gateway",
+                    "tool_name": "probe_run",
+                    "tool_args_redacted": {
+                        "probe": probe,
+                        "url": url,
+                        "method": str(params.get("method") or "").upper(),
+                        "parameter": str(params.get("parameter") or params.get("field") or ""),
+                        "location": str(params.get("location") or ""),
+                        "what_it_sends": sends,
+                        "max_requests": PROBE_RUN_MAX_REQUESTS,
+                        "header_names": sorted(str(k) for k in as_dict(params.get("headers"))),
+                        "body_preview": "" if body is None else preview[:400],
+                        "params_sha256": sha256_hex(canonical.encode()),
+                    },
+                    "matched_rule": {
+                        "technique_tag": None,
+                        "tool_pattern": "state-changing probe run",
+                        "timeout_seconds": 0,
+                        "default_on_timeout": "deny",
+                    },
+                    "reason": f"one run of the {probe} probe, which can change state on the target",
+                    "created_at": time.time(),
+                    "metadata": {"fingerprint": fingerprint, "kind": "probe_run"},
+                },
+            )
+        raise GatewayRefusal(
+            "APPROVAL_REQUIRED",
+            f"the {probe} probe can change state on the target, so a human must approve this "
+            f"run first (buggy-cli approvals allow {engagement} {request_id}). Nothing was sent. "
+            "Run the probe again with the same parameters after it is approved; one approval "
+            "covers one run.",
+            request_id=request_id,
+        )
+
+    def _grant_approval(
+        self, grant: ProbeGrant | None, engagement: str, probe: str, url: str
+    ) -> str:
+        """The approval id a grant gives this request, or ``""`` when it does not cover it."""
+        if (
+            grant is None
+            or self._grants.get(grant.request_id) is not grant
+            or grant.engagement != engagement
+            or grant.probe != probe
+            or grant.origin != origin_of(url)
+        ):
+            return ""
+        with self._lock:
+            if grant.remaining <= 0:
+                raise GatewayRefusal(
+                    "APPROVAL_SPENT",
+                    f"the approved run of {probe} has sent its {PROBE_RUN_MAX_REQUESTS} "
+                    "requests; not sent",
+                    request_id=grant.request_id,
+                )
+            grant.remaining -= 1
+        return grant.request_id
 
     # ── sending ─────────────────────────────────────────────────────
 
@@ -380,6 +546,7 @@ class CaptureGateway:
         replay_of: str = "",
         identity: str = "",
         internal: bool = False,
+        grant: ProbeGrant | None = None,
     ) -> Capture:
         """Send one request and return its capture, or raise :class:`GatewayRefusal`.
 
@@ -392,6 +559,9 @@ class CaptureGateway:
         ``internal`` is for the session manager's own login request and waives
         the approval hold only. It is honoured for nothing but a request the
         operator declared as an identity's login; no tool argument reaches it.
+
+        ``grant`` is an approved probe run (:meth:`probe_grant`); only an object
+        this gateway issued is honoured, and no tool argument reaches it either.
         """
         return self._send(
             engagement,
@@ -404,6 +574,7 @@ class CaptureGateway:
             replay_of=replay_of,
             identity=identity,
             internal=internal,
+            grant=grant,
         )
 
     def _send(
@@ -420,6 +591,7 @@ class CaptureGateway:
         identity: str,
         internal: bool = False,
         also_redact: tuple[str, ...] = (),
+        grant: ProbeGrant | None = None,
     ) -> Capture:
         def exchange(session: Session | None) -> tuple[Capture, Session | None, bool]:
             return self._exchange(
@@ -435,6 +607,7 @@ class CaptureGateway:
                 internal=internal,
                 also_redact=also_redact,
                 session=session,
+                grant=grant,
             )
 
         capture, session, fresh = exchange(None)
@@ -503,6 +676,7 @@ class CaptureGateway:
         internal: bool,
         also_redact: tuple[str, ...],
         session: Session | None,
+        grant: ProbeGrant | None = None,
     ) -> tuple[Capture, Session | None, bool]:
         """One request through every check. Returns the capture, the session used and
         whether that session was opened (logged in) for this request."""
@@ -563,8 +737,12 @@ class CaptureGateway:
                 "only a login request the operator declared for an identity of this "
                 "engagement may be sent as internal; not sent",
             )
-        elif method not in SAFE_METHODS and self.approval_required(document):
-            approval_id = self._check_approval(engagement, method, url, payload, note, identity)
+        else:
+            # A request of an approved probe run is recorded under that approval,
+            # whatever its method; anything else state-changing is held one by one.
+            approval_id = self._grant_approval(grant, engagement, probe, url)
+            if not approval_id and method not in SAFE_METHODS and self.approval_required(document):
+                approval_id = self._check_approval(engagement, method, url, payload, note, identity)
 
         fresh = False
         redact_headers = set(also_redact)

@@ -10,6 +10,7 @@ code: the model chooses what to test and judges results, nothing else.
 | Step | Who does it | What happens |
 |---|---|---|
 | 1. Leads are queued | code | After recon, `hunt` queues scanner hits and ranked recon leads. A positive `probe_run` and every access-control mismatch from `authz_matrix_run` are queued automatically. Duplicates merge into one row. |
+| 1b. Read-only probes run | code | `hunt` then runs the probe sweep (below): no model, nothing state-changing. What it finds is re-proven and graded in the same step. |
 | 2. An agent picks a lead | agent | `candidates_next` returns the best unproven leads and claims them for that agent for a while. |
 | 3. A claim is submitted | agent | `finding_submit` with assertions that cite capture ids. The submitter cannot set a status. |
 | 4. The claim is re-proven | code | `finding_verify`. Only this sets `exploit_verified`. |
@@ -19,6 +20,33 @@ code: the model chooses what to test and judges results, nothing else.
 
 Statuses: `candidate`, `exploit_verified`, `source_verified` (operator-recorded
 code review), `inconclusive`, `discarded`. Grades: `submit`, `hold`, `discard`.
+
+## The automatic probe sweep
+
+After recon, `hunt` plans probe runs from the recon records by fixed rules and
+sends each one through the evidence gateway (scope, rate limit and ledger
+apply). It needs no model key.
+
+| Input found by recon | Probes run |
+|---|---|
+| GET query parameter, file-like name (`file`, `path`, `page`, ...) | `path_traversal` |
+| GET query parameter, URL-like name (`url`, `next`, `redirect`, ...) | `open_redirect` |
+| GET query parameter, id-like or numeric | `sqli` (no time payloads) |
+| any other GET query parameter | `sqli`, `xss_reflected`, `ssti` |
+| each live service (10 at most) | `cors` |
+| each GraphQL endpoint (5 at most) | `graphql_checks` |
+
+- Never planned: request bodies, headers, cookies, path segments, any method
+  but GET, any parameter that looks like a credential, and every probe that
+  can change state or needs test accounts. Those stay with a run the operator
+  approves.
+- Budget: 40 probe runs by default (`--probe-budget N`; `--no-probes` or `0`
+  turns the sweep off). Every host gets its first run of each probe before any
+  host gets a second. One parameter name is probed on two URLs per host at most.
+- A positive probe is queued, verified by running the probe again, and graded.
+  `hunt` prints each one with its status and grade; `hunt-result.json` carries
+  the counts under `probes`.
+- The lite stack has no evidence gateway, so it does not run the sweep.
 
 ## How a finding is verified
 
@@ -163,11 +191,17 @@ Approving still happens with `buggy-cli approvals allow` or in the dashboard.
 
 ## Limits you should know
 
-- **State-changing probes on a real program.** `command_injection` and any
-  probe sent with POST need approval per exact request, and each run uses
-  fresh random markers, so an approval never matches the next run. On an
-  engagement that requires approvals these probes return "could not tell".
-  There is no approve-a-whole-probe-run yet.
+- **State-changing probes need one approval per run.** A probe that can
+  change state (`command_injection`, `ssrf_canary`, `numeric_boundary`,
+  `mass_assignment`, and any probe sent with POST/PUT/PATCH/DELETE) is held
+  as a whole where the engagement requires approvals: `probe_run` returns
+  `APPROVAL_REQUIRED` with a request id and sends nothing. The request shows
+  the probe, the URL, the parameter, what the probe sends and its request cap
+  (header names only, never values). After `buggy-cli approvals allow
+  <engagement> <id>`, the same `probe_run` call runs once; its requests are
+  recorded under that approval. One approval is one run of at most 40
+  requests to the approved origin; verifying such a finding re-runs the probe
+  and needs its own approval.
 - **Lab coverage is partial.** See
   [benchmark/lab/results/coverage.md](../benchmark/lab/results/coverage.md):
   each known lab bug is listed as proven, pipeline-only, backlog or excluded.

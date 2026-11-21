@@ -684,9 +684,9 @@ class TestCannotTell:
                 "body": "text=hello&post=7",
             },
         )
-        assert result["vulnerable"] is None, result
-        refusal = result["details"]["refusal"]
-        assert refusal["code"] == "APPROVAL_REQUIRED" and refusal["request_id"].startswith("apr-")
+        # The run is held as a whole: one approval request, and no request sent.
+        assert result["status"] == "refused" and "vulnerable" not in result, result
+        assert result["code"] == "APPROVAL_REQUIRED" and result["request_id"].startswith("apr-")
         assert env.origin.seen == []
 
 

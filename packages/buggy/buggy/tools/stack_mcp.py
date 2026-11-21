@@ -350,9 +350,12 @@ async def probe_list() -> str:
 @tool
 async def probe_run(probe: str, params_json: str) -> str:
     """Run a deterministic probe (jwt_alg_none, idor, ssrf_canary, numeric_boundary,
-    mass_assignment, graphql_checks). You choose the endpoint and identities; the probe sends
+    mass_assignment, graphql_checks, sqli, xss_reflected, ssti, command_injection,
+    open_redirect, path_traversal, cors). You choose the endpoint and identities; the probe sends
     the requests, compares the outcomes and returns vulnerable true / false / null (null =
-    could not tell) with evidence capture ids. params_json is a JSON object (see probe_list)."""
+    could not tell) with evidence capture ids. params_json is a JSON object (see probe_list).
+    A state-changing probe may return APPROVAL_REQUIRED with a request_id: nothing was sent;
+    after the operator allows it, call again with identical params_json (one approval, one run)."""
     return await _engagement_call("capture", "probe_run", probe=probe, params_json=params_json)
 
 

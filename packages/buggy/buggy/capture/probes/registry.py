@@ -5,7 +5,7 @@ from __future__ import annotations
 from typing import Any
 
 from buggy.capture.canary import Canary
-from buggy.capture.gateway import CaptureGateway, GatewayRefusal
+from buggy.capture.gateway import SAFE_METHODS, CaptureGateway, GatewayRefusal
 from buggy.capture.probes import checks
 from buggy.capture.probes.base import Context, ProbeInputError, ProbeSpec
 from buggy.capture.probes.execution import command_injection, ssti
@@ -231,6 +231,17 @@ def describe() -> list[dict[str, Any]]:
     ]
 
 
+def needs_run_approval(spec: ProbeSpec, params: dict[str, Any]) -> bool:
+    """Whether a run can change state: the probe says so, or the caller chose such a method.
+
+    Where the engagement requires approval, such a run is approved as a whole
+    (one decision for the run), because its requests carry fresh random markers
+    and could never match an approval given for one exact request.
+    """
+    method = str(params.get("method") or "GET").upper()
+    return spec.state_changing or method not in SAFE_METHODS
+
+
 def run_probe(
     gateway: CaptureGateway,
     engagement: str,
@@ -244,7 +255,10 @@ def run_probe(
     if spec is None:
         return {"status": "error", "detail": f"unknown probe {name!r}", "probes": sorted(REGISTRY)}
     try:
-        result = spec.run(Context(gateway, engagement, name, canary), params)
+        grant = None
+        if needs_run_approval(spec, params):
+            grant = gateway.probe_grant(engagement, name, params, sends=spec.summary)
+        result = spec.run(Context(gateway, engagement, name, canary, grant), params)
     except ProbeInputError as exc:
         return {"status": "error", "probe": name, "detail": str(exc), "params": spec.params}
     except GatewayRefusal as refusal:
@@ -252,4 +266,4 @@ def run_probe(
     return {"status": "completed", **result.to_dict()}
 
 
-__all__ = ["REGISTRY", "describe", "run_probe"]
+__all__ = ["REGISTRY", "describe", "needs_run_approval", "run_probe"]

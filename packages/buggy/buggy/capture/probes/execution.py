@@ -387,8 +387,8 @@ def _approval_hold(run: _ExecRun) -> dict[str, Any] | None:
     lets through, the hold is kept here: a request that asks a shell to run
     something is state-changing whatever its method.
     """
-    if run.target.method not in SAFE_METHODS:
-        return None
+    if run.target.method not in SAFE_METHODS or run.ctx.grant is not None:
+        return None  # the gateway holds it, or the operator approved this run
     try:
         _scope, document = run.ctx.gateway.scope_for(run.ctx.engagement)
     except GatewayRefusal:
@@ -402,10 +402,8 @@ def _approval_hold(run: _ExecRun) -> dict[str, Any] | None:
         "detail": (
             f"{CMD_PROBE} asks a shell to run a command, which is state-changing whatever the "
             f"HTTP method, and this engagement requires approval for state-changing requests. "
-            f"The gateway only files approval requests for methods other than "
-            f"{', '.join(sorted(SAFE_METHODS))}, so there is nothing to approve for a "
-            f"{run.target.method}: no payload was sent. The operator can waive the approval "
-            "for this engagement (approvals.state_changing: not_required)."
+            "No payload was sent. Run it through probe_run, which asks the operator to "
+            "approve the run as a whole."
         ),
     }
 

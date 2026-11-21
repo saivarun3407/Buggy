@@ -49,6 +49,9 @@ class Context:
     engagement: str
     probe: str
     canary: Canary | None = None
+    # The operator's approval of this run (state-changing probes only); see
+    # CaptureGateway.probe_grant.
+    grant: Any = None
 
     def send(
         self,
@@ -60,7 +63,14 @@ class Context:
         note: str = "",
     ) -> Capture:
         return self.gateway.send(
-            self.engagement, method, url, headers=headers, body=body, note=note, probe=self.probe
+            self.engagement,
+            method,
+            url,
+            headers=headers,
+            body=body,
+            note=note,
+            probe=self.probe,
+            grant=self.grant,
         )
 
 

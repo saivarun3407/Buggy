@@ -219,6 +219,17 @@ def _build_parser() -> argparse.ArgumentParser:
     )
     p.add_argument("--no-agent", action="store_true", help="Recon and report only; no LLM.")
     p.add_argument(
+        "--no-probes",
+        action="store_true",
+        help="Do not run the automatic read-only probe sweep after recon.",
+    )
+    p.add_argument(
+        "--probe-budget",
+        type=int,
+        default=None,
+        help="Most probe runs the automatic sweep makes (default 40; 0 turns it off).",
+    )
+    p.add_argument(
         "--force-agent",
         action="store_true",
         help="Start the agent run even when no model provider is detected in the environment.",
@@ -760,6 +771,104 @@ def queue_leads(engagement: str, records: dict[str, list[dict[str, Any]]]) -> di
     return _capture("candidates_add", engagement, items_json=json.dumps(items), actor="recon")
 
 
+#: Scanner records are sent to the grader slimmed to what it reads, and capped.
+_KNOWN_ISSUE_ATTRS = ("class", "cwe", "tags", "template_id", "matched_at")
+MAX_KNOWN_ISSUES = 300
+#: Unanswered calls in a row after which the sweep stops: the server is gone.
+SWEEP_MAX_FAILURES = 3
+
+
+def _known_issues(records: dict[str, list[dict[str, Any]]]) -> str:
+    slim = []
+    for record in records.get("vulnerability", [])[:MAX_KNOWN_ISSUES]:
+        attrs = record.get("attrs") if isinstance(record.get("attrs"), dict) else {}
+        slim.append(
+            {
+                "type": "vulnerability",
+                "value": record.get("value"),
+                "attrs": {k: attrs[k] for k in _KNOWN_ISSUE_ATTRS if k in attrs},
+            }
+        )
+    return json.dumps(slim)
+
+
+def run_probe_sweep(
+    engagement: str, records: dict[str, list[dict[str, Any]]], *, budget: int | None = None
+) -> dict[str, Any]:
+    """Run the planned read-only probes, then re-prove and grade what they found. No LLM.
+
+    The plan is fixed rules over the recon records (:mod:`buggy.pipeline.sweep`).
+    Every request goes through the capture gateway: scope, rate limit and the
+    ledger apply. A positive probe is queued by the server; here it is verified
+    (the probe is run again) and graded. Nothing state-changing is planned, so
+    nothing waits for approval.
+    """
+    from buggy.pipeline import sweep  # noqa: PLC0415
+
+    planned = sweep.plan(records, budget=sweep.DEFAULT_BUDGET if budget is None else budget)
+    out: dict[str, Any] = {
+        "planned": len(planned["steps"]),
+        "left_out": planned["left_out"],
+        "ran": 0,
+        "vulnerable": 0,
+        "not_vulnerable": 0,
+        "undecided": 0,
+        "refused": 0,
+        "verified": 0,
+        "submit": 0,
+        "findings": [],
+        "error": None,
+    }
+    known = _known_issues(records)
+    failures = 0
+    for step in planned["steps"]:
+        result = _capture(
+            "probe_run", engagement, probe=step["probe"], params_json=json.dumps(step["params"])
+        )
+        if result.get("error") and "status" not in result and "code" not in result:
+            failures += 1
+            if failures >= SWEEP_MAX_FAILURES:
+                out["error"] = str(result["error"])[:300]
+                break
+            continue
+        failures = 0
+        out["ran"] += 1
+        if result.get("status") == "refused":
+            out["refused"] += 1
+            continue
+        if result.get("vulnerable") is False:
+            out["not_vulnerable"] += 1
+            continue
+        if result.get("vulnerable") is not True:
+            out["undecided"] += 1
+            continue
+        out["vulnerable"] += 1
+        finding_id = str(result.get("finding_id") or "")
+        if not finding_id:
+            continue
+        entry = {
+            "id": finding_id,
+            "probe": step["probe"],
+            "url": step["params"]["url"],
+            "status": "candidate",
+            "grade": "",
+        }
+        verified = _capture("finding_verify", engagement, finding_id=finding_id)
+        finding = verified.get("finding") if isinstance(verified.get("finding"), dict) else {}
+        entry["status"] = str(finding.get("status") or entry["status"])
+        if entry["status"] == "exploit_verified":
+            out["verified"] += 1
+            graded = _capture(
+                "finding_grade", engagement, finding_id=finding_id, known_issues_json=known
+            )
+            grade = graded.get("grade") if isinstance(graded.get("grade"), dict) else {}
+            entry["grade"] = str(grade.get("decision") or "")
+            if entry["grade"] == "submit":
+                out["submit"] += 1
+        out["findings"].append(entry)
+    return out
+
+
 FINDINGS_REPORTS = (("markdown", "report.md"), ("html", "report.html"), ("json", "report.json"))
 SARIF_FILE = "findings.sarif"
 
@@ -1007,6 +1116,20 @@ def recon_outcome(state: str, summary: dict[str, Any] | None) -> dict[str, Any]:
     }
 
 
+_PROBE_COUNTS = (
+    "planned", "left_out", "ran", "vulnerable", "not_vulnerable", "undecided", "refused",
+    "verified", "submit",
+)  # fmt: skip
+
+
+def _probes_result(probes: Any) -> dict[str, Any]:
+    """The sweep's counts for the result file; ``{"ran_sweep": False}`` when it did not run."""
+    if not isinstance(probes, dict):
+        return {"ran_sweep": False}
+    counts = {name: int(probes.get(name) or 0) for name in _PROBE_COUNTS}
+    return {"ran_sweep": True, **counts, "error": probes.get("error")}
+
+
 def build_result(
     slug: str, outcome: dict[str, Any], sections: dict[str, Any], *, now: float
 ) -> dict[str, Any]:
@@ -1025,6 +1148,7 @@ def build_result(
         if approvals.get("available")
         else 0,
         "agent": {"ran": bool(agent["ran"]), "error": agent["error"]},
+        "probes": _probes_result(outcome.get("probes")),
         "complete": recon_is_complete(recon["state"]) and not agent["error"],
     }
 
@@ -1072,6 +1196,36 @@ def write_result(control: Path, slug: str, result: dict[str, Any]) -> Path:
 # ── entry ────────────────────────────────────────────────────────────
 
 
+def _sweep_stage(
+    args: argparse.Namespace, slug: str, records: dict[str, list[dict[str, Any]]]
+) -> dict[str, Any] | None:
+    """Run the probe sweep unless it was turned off; print one summary. ``None`` when skipped."""
+    budget = getattr(args, "probe_budget", None)
+    if getattr(args, "no_probes", False) or (budget is not None and budget <= 0):
+        print("  probe sweep      skipped (--no-probes)", file=sys.stderr)
+        return None
+    probes = run_probe_sweep(slug, records, budget=budget)
+    line = (
+        f"{probes['ran']} of {probes['planned']} run, {probes['vulnerable']} positive, "
+        f"{probes['verified']} re-proven, {probes['submit']} graded submit"
+    )
+    if probes["left_out"]:
+        line += f" ({probes['left_out']} more left out by the budget; --probe-budget)"
+    if probes["error"]:
+        line += f"; stopped: {probes['error']}"
+    print(f"  probe sweep      {line}", file=sys.stderr)
+    for found in probes["findings"]:
+        print(
+            f"    {found['id']}  {found['probe']}  {found['status']}"
+            + (f"/{found['grade']}" if found["grade"] else "")
+            + f"  {found['url']}",
+            file=sys.stderr,
+        )
+    if args.non_interactive:
+        print(json.dumps({"type": "probe_sweep", **probes}))
+    return probes
+
+
 def run_stages(  # noqa: PLR0912, PLR0915
     args: argparse.Namespace,
     slug: str,
@@ -1084,6 +1238,7 @@ def run_stages(  # noqa: PLR0912, PLR0915
     """Recon, report and agents. Returns what happened, for the result file."""
     issues = dict.fromkeys(SEVERITIES, 0)
     agent: dict[str, Any] = {"ran": False, "error": None}
+    probes: dict[str, Any] | None = None
     state, summary = "skipped", None
     recon_done = False
     if args.mode != "enforce":
@@ -1144,11 +1299,17 @@ def run_stages(  # noqa: PLR0912, PLR0915
                             f"{queued.get('unclassified', 0)} scanner hits without a class left out)",
                             file=sys.stderr,
                         )
+                    probes = _sweep_stage(args, slug, records)
                 print(f"  knowledge graph  {project_graph(slug)}", file=sys.stderr)
                 if args.non_interactive:
                     print(json.dumps({"type": "recon_report", "path": str(path), **digest}))
             _notify("recon_event", {**summary, "engagement": slug})
-    outcome = {"recon": recon_outcome(state, summary), "issues": issues, "agent": agent}
+    outcome = {
+        "recon": recon_outcome(state, summary),
+        "issues": issues,
+        "agent": agent,
+        "probes": probes,
+    }
 
     if args.no_agent:
         print("\n[4/4] agents skipped (--no-agent)", file=sys.stderr)
