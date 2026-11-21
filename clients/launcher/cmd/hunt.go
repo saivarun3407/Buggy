@@ -26,6 +26,8 @@ var (
 	huntNonInteractive bool
 	huntYes            bool
 	huntNoAgent        bool
+	huntNoProbes       bool
+	huntProbeBudget    string
 	huntLab            bool
 	huntInternal       bool
 	huntAllowSandbox   bool
@@ -72,6 +74,8 @@ func init() {
 	huntCmd.Flags().BoolVarP(&huntNonInteractive, "non-interactive", "n", false, "Emit JSONL events instead of progress lines")
 	huntCmd.Flags().BoolVarP(&huntYes, "yes", "y", false, "I am authorized to test these targets; do not prompt")
 	huntCmd.Flags().BoolVar(&huntNoAgent, "no-agent", false, "Recon and report only; no LLM")
+	huntCmd.Flags().BoolVar(&huntNoProbes, "no-probes", false, "Do not run the automatic read-only probe sweep after recon")
+	huntCmd.Flags().StringVar(&huntProbeBudget, "probe-budget", "", "Most probe runs the automatic sweep makes (default 40; 0 turns it off)")
 	huntCmd.Flags().BoolVar(&huntLab, "lab", false, "Training target you own: no approval holds, private addresses allowed")
 	huntCmd.Flags().BoolVar(&huntInternal, "internal", false, "Target is on a private network")
 	huntCmd.Flags().BoolVar(&huntAllowSandbox, "allow-sandbox-network", false, "Let the agent shell reach in-scope targets directly (not held for approval)")
@@ -108,6 +112,8 @@ type huntFlags struct {
 	nonInteractive bool
 	yes            bool
 	noAgent        bool
+	noProbes       bool
+	probeBudget    string // a number; empty: not set
 	lab            bool
 	internal       bool
 	allowSandbox   bool
@@ -132,6 +138,8 @@ func currentHuntFlags() huntFlags {
 		nonInteractive: huntNonInteractive,
 		yes:            huntYes,
 		noAgent:        huntNoAgent,
+		noProbes:       huntNoProbes,
+		probeBudget:    huntProbeBudget,
 		lab:            huntLab,
 		internal:       huntInternal,
 		allowSandbox:   huntAllowSandbox,
@@ -200,6 +208,7 @@ func huntOperatorCommand(targets []string, f huntFlags) []string {
 	}{
 		{"--yes", f.yes},
 		{"--no-agent", f.noAgent || f.lite},
+		{"--no-probes", f.noProbes},
 		{"--lab", f.lab},
 		{"--internal", f.internal},
 		{"--allow-sandbox-network", f.allowSandbox},
@@ -211,6 +220,9 @@ func huntOperatorCommand(targets []string, f huntFlags) []string {
 	}
 	if f.rps > 0 {
 		cliArgs = append(cliArgs, "--rps", strconv.Itoa(f.rps))
+	}
+	if f.probeBudget != "" {
+		cliArgs = append(cliArgs, "--probe-budget", f.probeBudget)
 	}
 	if f.engagement != "" {
 		cliArgs = append(cliArgs, "--engagement-name", f.engagement)

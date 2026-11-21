@@ -781,7 +781,8 @@ SWEEP_MAX_FAILURES = 3
 def _known_issues(records: dict[str, list[dict[str, Any]]]) -> str:
     slim = []
     for record in records.get("vulnerability", [])[:MAX_KNOWN_ISSUES]:
-        attrs = record.get("attrs") if isinstance(record.get("attrs"), dict) else {}
+        raw = record.get("attrs")
+        attrs: dict[str, Any] = raw if isinstance(raw, dict) else {}
         slim.append(
             {
                 "type": "vulnerability",
@@ -854,14 +855,16 @@ def run_probe_sweep(
             "grade": "",
         }
         verified = _capture("finding_verify", engagement, finding_id=finding_id)
-        finding = verified.get("finding") if isinstance(verified.get("finding"), dict) else {}
+        raw_finding = verified.get("finding")
+        finding: dict[str, Any] = raw_finding if isinstance(raw_finding, dict) else {}
         entry["status"] = str(finding.get("status") or entry["status"])
         if entry["status"] == "exploit_verified":
             out["verified"] += 1
             graded = _capture(
                 "finding_grade", engagement, finding_id=finding_id, known_issues_json=known
             )
-            grade = graded.get("grade") if isinstance(graded.get("grade"), dict) else {}
+            raw_grade = graded.get("grade")
+            grade: dict[str, Any] = raw_grade if isinstance(raw_grade, dict) else {}
             entry["grade"] = str(grade.get("decision") or "")
             if entry["grade"] == "submit":
                 out["submit"] += 1
