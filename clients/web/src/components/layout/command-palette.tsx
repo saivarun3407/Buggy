@@ -6,6 +6,7 @@ import {
   LayoutDashboard,
   Crosshair,
   Radio,
+  Activity,
   ClipboardList,
   FileWarning,
   Network,
@@ -46,6 +47,7 @@ export function CommandPalette() {
     // Engagement-scoped (only when in an engagement)
     ...(engId ? [
       { id: "live", label: "Go to Live Terminal", shortcut: "G L", icon: Radio, action: () => router.push(`/engagements/${engId}/live`), section: "Engagement" },
+      { id: "run", label: "Go to Run Status", icon: Activity, action: () => router.push(`/engagements/${engId}/run`), section: "Engagement" },
       { id: "plan", label: "Go to Plan", shortcut: "G P", icon: ClipboardList, action: () => router.push(`/engagements/${engId}/plan`), section: "Engagement" },
       { id: "timeline", label: "Go to Timeline", icon: Clock, action: () => router.push(`/engagements/${engId}/timeline`), section: "Engagement" },
       { id: "docs", label: "Go to Documents", icon: FolderOpen, action: () => router.push(`/engagements/${engId}/documents`), section: "Engagement" },

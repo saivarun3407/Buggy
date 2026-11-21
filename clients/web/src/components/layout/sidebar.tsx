@@ -8,6 +8,7 @@ import {
   LayoutDashboard,
   Crosshair,
   Radio,
+  Activity,
   ClipboardList,
   Clock,
   FolderOpen,
@@ -42,6 +43,7 @@ const globalNav: NavItem[] = [
 
 const engagementNav: NavItem[] = [
   { href: "/live", label: "Live", icon: Radio, engagementScoped: true },
+  { href: "/run", label: "Run Status", icon: Activity, engagementScoped: true },
   { href: "/plan", label: "Plan", icon: ClipboardList, engagementScoped: true },
   { href: "/timeline", label: "Timeline", icon: Clock, engagementScoped: true },
   { href: "/documents", label: "Documents", icon: FolderOpen, engagementScoped: true },
