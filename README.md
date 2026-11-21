@@ -52,7 +52,7 @@ to test, chain findings and judge results. Last checked 2026-11-21.
 | Scope enforcement, recon pipeline, recon report | Works, no model needed. Run on local practice targets. |
 | Automatic read-only probe sweep, re-proof, grading, reports (Markdown, HTML, JSON, SARIF) | Works, no model needed. See [findings](docs/findings.md). |
 | Approval before anything state-changing, including one approval per probe run | Works. Approving is always a person's step. |
-| Agents (choosing tests, chaining) | Need a model key (`buggy onboard`). **No agent run has been measured here yet.** |
+| Agents (choosing tests, chaining) | Run with a model key (`buggy onboard`), or **with no key through Claude Code** on your machine (`buggy agent <engagement>`; see [Claude Code agent](docs/claude-code-agent.md)). Measured so far: one bounded Claude Code run on the practice apps. |
 | Releases and the one-line installer | The workflows publish from this repository, but **no release has been cut yet**. Until the first tag, run from source (below). See [releasing](docs/releasing.md). |
 | CI | Lint, type check, 10,900+ tests, dependency audit and compose validation pass locally on this branch. |
 

@@ -219,6 +219,17 @@ def _build_parser() -> argparse.ArgumentParser:
     )
     p.add_argument("--no-agent", action="store_true", help="Recon and report only; no LLM.")
     p.add_argument(
+        "--finalize",
+        action="store_true",
+        help="With --resume: an agent outside this command (Claude Code) has finished. "
+        "Rebuild the result and the reports from the findings store; run nothing.",
+    )
+    p.add_argument(
+        "--agent-runner",
+        default="",
+        help="With --finalize: the name of the agent that ran (recorded in the result).",
+    )
+    p.add_argument(
         "--no-probes",
         action="store_true",
         help="Do not run the automatic read-only probe sweep after recon.",
@@ -1281,7 +1292,11 @@ def build_result(
         "approvals_pending": int(approvals.get("pending") or 0)
         if approvals.get("available")
         else 0,
-        "agent": {"ran": bool(agent["ran"]), "error": agent["error"]},
+        "agent": {
+            "ran": bool(agent["ran"]),
+            "error": agent["error"],
+            **({"runner": str(agent["runner"])} if agent.get("runner") else {}),
+        },
         "probes": _probes_result(outcome.get("probes")),
         "access": _access_result(outcome.get("access")),
         "not_tested": list(outcome.get("not_tested") or []),
@@ -1402,6 +1417,8 @@ def not_tested(
     args: argparse.Namespace,
     probes: dict[str, Any] | None,
     access: dict[str, Any] | None,
+    *,
+    agents_ran: bool = False,
 ) -> list[dict[str, str]]:
     """What this run did not test, and what would make it tested. Plain facts for the operator.
 
@@ -1433,13 +1450,14 @@ def not_tested(
     agents_off = bool(getattr(args, "no_agent", False)) or (
         not getattr(args, "force_agent", False) and not model_configured()
     )
-    if agents_off:
+    if agents_off and not agents_ran:
         missing.append(
             {
                 "area": "business logic, authentication flows, request bodies, chained findings",
                 "reason": "these need judgement, which is the agents' job, and no agent run "
                 "started (--no-agent, or no model is configured)",
-                "enable": "configure a model with `buggy onboard` and run "
+                "enable": f"run `buggy agent {slug}` to use Claude Code on this machine (no "
+                "model key), or configure a model with `buggy onboard` and run "
                 f"`buggy hunt --resume {slug}`",
             }
         )
@@ -1547,9 +1565,10 @@ def run_stages(  # noqa: PLR0912, PLR0915
         return outcome
     if not args.force_agent and not model_configured():
         print(
-            "\n[4/4] agents skipped: no model is configured. Run `buggy onboard` to add one, "
-            f"then `buggy hunt ... --engagement-name {slug}` to continue from this recon. "
-            "(--force-agent starts the run anyway.)",
+            "\n[4/4] agents skipped: no model is configured. Run the agent stage with Claude "
+            f"Code on this machine (no key needed): `buggy agent {slug}`. Or run `buggy onboard` "
+            f"to add a model, then `buggy hunt --resume {slug}`. "
+            "(--force-agent starts the built-in agents anyway.)",
             file=sys.stderr,
         )
         return outcome
@@ -1595,6 +1614,58 @@ def run_stages(  # noqa: PLR0912, PLR0915
     return outcome
 
 
+_RUNNER_NAME = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.-]{0,40}$")
+_POINTER_NAME = re.compile(r"^\.hunt-[A-Za-z0-9]{6,40}\.json$")
+POINTER_ENV = "BUGGY_HUNT_POINTER"
+
+
+def finalize_outcome(control: Path, slug: str, args: argparse.Namespace) -> dict[str, Any]:
+    """The outcome of a run whose agent stage happened outside this command.
+
+    Recon, the probe sweep and the access-control check are taken from the
+    result this engagement already has; nothing is run again. The findings
+    are read fresh by the caller, so what the outside agent proved is counted.
+    """
+    try:
+        prior = json.loads((control / slug / RESULT_FILE).read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        prior = {}
+    prior = prior if isinstance(prior, dict) else {}
+
+    def section(name: str) -> dict[str, Any] | None:
+        value = prior.get(name)
+        return value if isinstance(value, dict) else None
+
+    recon, access = section("recon"), section("access")
+    probes: dict[str, Any] = section("probes") or {}
+    issues: dict[str, Any] = section("issues") or {}
+    runner = args.agent_runner if _RUNNER_NAME.match(args.agent_runner or "") else "external"
+    kept_probes = probes if probes.get("ran_sweep") else None
+    return {
+        "recon": recon or recon_outcome("skipped", None),
+        "issues": {severity: int(issues.get(severity) or 0) for severity in SEVERITIES},
+        "agent": {"ran": True, "error": None, "runner": runner},
+        "probes": kept_probes,
+        "access": access,
+        "not_tested": not_tested(slug, args, kept_probes, access, agents_ran=True),
+    }
+
+
+def write_pointer(control: Path, slug: str) -> None:
+    """Tell the launcher that started this command which engagement it became.
+
+    The launcher names a one-time file in ``BUGGY_HUNT_POINTER``; the engagement
+    name is derived here, so this is how it learns it. Any other name is ignored.
+    """
+    name = os.environ.get(POINTER_ENV, "")
+    if not _POINTER_NAME.match(name):
+        return
+    try:
+        (control / name).write_text(json.dumps({"engagement": slug}) + "\n", encoding="utf-8")
+    except OSError:
+        pass
+
+
 def main(argv: list[str] | None = None) -> int:  # noqa: PLR0911, PLR0912, PLR0915
     argv = list(sys.argv[1:] if argv is None else argv)
     args = _build_parser().parse_args(argv)
@@ -1606,6 +1677,9 @@ def main(argv: list[str] | None = None) -> int:  # noqa: PLR0911, PLR0912, PLR09
             return EXIT_CONFIG
     if args.fail_on_issues and not args.fail_on:
         print("error: --fail-on-issues needs a threshold: add --fail-on SEVERITY", file=sys.stderr)
+        return EXIT_CONFIG
+    if args.finalize and args.resume is None:
+        print("error: --finalize continues an engagement: add --resume NAME", file=sys.stderr)
         return EXIT_CONFIG
     if not any(target.strip() for target in args.targets):
         print(
@@ -1696,9 +1770,18 @@ def main(argv: list[str] | None = None) -> int:  # noqa: PLR0911, PLR0912, PLR09
 
     # A resumed engagement continues from the pipeline run that exists: the
     # pipeline starts a new one only for a scope it has not run against.
-    outcome = run_stages(
-        args, slug, scope, control, workspace, since=0.0 if resumed else started_at
-    )
+    if args.finalize:
+        if not resumed:
+            print("error: --finalize needs an engagement that already ran", file=sys.stderr)
+            return EXIT_CONFIG
+        print(
+            "\n[finalize] agent stage done outside this command; nothing is re-run", file=sys.stderr
+        )
+        outcome = finalize_outcome(control, slug, args)
+    else:
+        outcome = run_stages(
+            args, slug, scope, control, workspace, since=0.0 if resumed else started_at
+        )
     result = build_result(slug, outcome, status_sections(slug, control), now=time.time())
     code = exit_code(result, fail_on=args.fail_on, fail_on_issues=args.fail_on_issues)
     try:
@@ -1706,6 +1789,7 @@ def main(argv: list[str] | None = None) -> int:  # noqa: PLR0911, PLR0912, PLR09
     except OSError as exc:
         print(f"error: cannot write {control / slug / RESULT_FILE}: {exc}", file=sys.stderr)
         return EXIT_INCOMPLETE
+    write_pointer(control, slug)
     print(f"\n  result           {_host_path(path)}", file=sys.stderr)
     if capture_available():
         reports = write_findings_reports(

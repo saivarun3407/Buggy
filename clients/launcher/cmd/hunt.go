@@ -27,6 +27,7 @@ var (
 	huntYes            bool
 	huntNoAgent        bool
 	huntNoProbes       bool
+	huntAgent          string
 	huntProbeBudget    string
 	huntLab            bool
 	huntInternal       bool
@@ -74,6 +75,7 @@ func init() {
 	huntCmd.Flags().BoolVarP(&huntNonInteractive, "non-interactive", "n", false, "Emit JSONL events instead of progress lines")
 	huntCmd.Flags().BoolVarP(&huntYes, "yes", "y", false, "I am authorized to test these targets; do not prompt")
 	huntCmd.Flags().BoolVar(&huntNoAgent, "no-agent", false, "Recon and report only; no LLM")
+	huntCmd.Flags().StringVar(&huntAgent, "agent", agentAuto, "Who runs the agent stage: auto (Buggy's agents when a model is configured, else Claude Code on this machine if installed), builtin, or claude-code")
 	huntCmd.Flags().BoolVar(&huntNoProbes, "no-probes", false, "Do not run the automatic read-only probe sweep after recon")
 	huntCmd.Flags().StringVar(&huntProbeBudget, "probe-budget", "", "Most probe runs the automatic sweep makes (default 40; 0 turns it off)")
 	huntCmd.Flags().BoolVar(&huntLab, "lab", false, "Training target you own: no approval holds, private addresses allowed")
@@ -113,6 +115,8 @@ type huntFlags struct {
 	yes            bool
 	noAgent        bool
 	noProbes       bool
+	agent          string // auto | builtin | claude-code
+	claudeCode     bool   // decided once: Claude Code runs the agent stage
 	probeBudget    string // a number; empty: not set
 	lab            bool
 	internal       bool
@@ -139,6 +143,7 @@ func currentHuntFlags() huntFlags {
 		yes:            huntYes,
 		noAgent:        huntNoAgent,
 		noProbes:       huntNoProbes,
+		agent:          huntAgent,
 		probeBudget:    huntProbeBudget,
 		lab:            huntLab,
 		internal:       huntInternal,
@@ -156,7 +161,7 @@ func currentHuntFlags() huntFlags {
 // skipsModelAuth reports whether this hunt never calls a model, and so must
 // not be refused for lacking a model provider.
 func (f huntFlags) skipsModelAuth() bool {
-	return f.lite
+	return f.lite || f.claudeCode
 }
 
 // huntCompose returns the stack a hunt runs on: the lite file of the Buggy
@@ -207,7 +212,9 @@ func huntOperatorCommand(targets []string, f huntFlags) []string {
 		on   bool
 	}{
 		{"--yes", f.yes},
-		{"--no-agent", f.noAgent || f.lite},
+		// With Claude Code as the agent, the operator's hunt stops before its own
+		// agent stage; the launcher runs Claude Code afterwards.
+		{"--no-agent", f.noAgent || f.lite || f.claudeCode},
 		{"--no-probes", f.noProbes},
 		{"--lab", f.lab},
 		{"--internal", f.internal},
@@ -273,6 +280,11 @@ func huntVerdict(err error) (code int, message string, ok bool) {
 
 func runHunt(cmd *cobra.Command, args []string) error {
 	flags := currentHuntFlags()
+	claude, err := useClaudeCode(flags.agent, flags.lite, flags.noAgent, noModelSetup(), claudeAvailable())
+	if err != nil {
+		return err
+	}
+	flags.claudeCode = claude
 	_, env, err := prepareStackFor(cmd, flags.skipsModelAuth())
 	if err != nil {
 		return err
@@ -311,10 +323,30 @@ func runHunt(cmd *cobra.Command, args []string) error {
 	// stack) and is the only container with the control root mounted
 	// read-write: `buggy-cli hunt` writes the enforced scope there, which the
 	// other services can only read.
-	if err := c.RunInteractive([]string{compose.Profiles.Operator}, "operator", nil, cliArgs...); err != nil {
-		code, message, ok := huntVerdict(err)
-		if !ok {
+	var operatorEnv map[string]string
+	pointer := ""
+	if flags.claudeCode {
+		// The engagement name is derived inside the operator's hunt; it writes
+		// it to this one-time file so the agent stage knows which one to run.
+		if pointer, err = newHuntPointer(); err != nil {
 			return err
+		}
+		operatorEnv = map[string]string{pointerEnvKey: pointer}
+	}
+	runErr := c.RunInteractive([]string{compose.Profiles.Operator}, "operator", operatorEnv, cliArgs...)
+	if flags.claudeCode {
+		slug := readHuntPointer(controlDir(env), pointer)
+		code, _, known := huntVerdict(runErr)
+		// Recon finished (exit 0, or 10 when the gate already trips): the agent
+		// stage runs, and its finalize step gives the run's verdict.
+		if slug != "" && (runErr == nil || (known && code == huntExitGate)) {
+			runErr = claudeAgentStage(c, slug, flags.failOn, flags.failOnIssues)
+		}
+	}
+	if runErr != nil {
+		code, message, ok := huntVerdict(runErr)
+		if !ok {
+			return runErr
 		}
 		ui.Warning(message)
 		huntExit(code)

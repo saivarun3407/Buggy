@@ -93,7 +93,7 @@ You are asked once to confirm you are authorized (`--yes` skips the prompt).
 | 2. Recon | The pipeline maps hosts, services, URLs, API specifications and known issues with pinned tools. Progress is shown per stage | no |
 | 3. Report | `~/.buggy/control/<engagement>/recon-report.md`: known issues by severity with fixes, live services, APIs, and what to test next | no |
 | 3b. Probe sweep | Read-only probes (SQL injection, reflected XSS, template injection, open redirect, path traversal, CORS, GraphQL checks) run on the GET query parameters, services and GraphQL endpoints recon found. What they find is re-proven and graded, and lands in `report.md`. 40 runs by default (`--probe-budget N`, `--no-probes`). Full stack only | no |
-| 4. Agents | The agents read the recon data, choose what to test, run the deterministic probes and chain what they find. Skipped when no model is configured or with `--no-agent` | yes |
+| 4. Agents | The agents read the recon data, choose what to test, run the deterministic probes and chain what they find. With no model configured, Claude Code on your machine runs this stage if it is installed ([how](claude-code-agent.md)); otherwise it is skipped. `--no-agent` skips it | yes |
 
 Stages 1–3b need no model at all:
 

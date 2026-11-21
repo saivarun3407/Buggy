@@ -576,3 +576,10 @@ func (c *Compose) RemoveOrphanedCLI() {
 		_ = rm.Run()
 	}
 }
+
+// Env is the environment every compose call of this stack runs with. It is
+// exported for a caller that has to hand the same compose command to another
+// program (the Claude Code agent stage starts the bridge through it).
+func (c *Compose) Env() []string {
+	return c.composeEnv()
+}

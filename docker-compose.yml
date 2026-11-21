@@ -849,6 +849,10 @@ services:
       # ... queues recon leads and builds the findings report through the
       # capture server ...
       - BUGGY_MCP_CAPTURE_URL=http://capture-mcp:9461/mcp
+      # The agent bridge (python -m buggy.agent_bridge) runs here and offers an
+      # outside agent the same four tool servers the built-in agents use.
+      - BUGGY_MCP_SCOPE_URL=http://scope-mcp:9462/mcp
+      - BUGGY_MCP_BROWSER_URL=http://browser-mcp:9463/mcp
       # ... and projects the recon store into the knowledge graph.
       - BUGGY_PIPELINE_DATA=/data/pipeline
       - BUGGY_NEO4J_URI=bolt://neo4j:7687

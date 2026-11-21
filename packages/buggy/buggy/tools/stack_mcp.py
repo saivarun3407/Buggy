@@ -69,7 +69,8 @@ def current_actor() -> str:
     The capture server records it as the author of findings, facts and lessons
     and uses it as the worker identity for claims.
     """
-    name, thread = "agent", ""
+    # Outside an agent run (the bridge for an external agent) the process names the actor.
+    name, thread = (os.environ.get("BUGGY_ACTOR") or "").strip() or "agent", ""
     try:
         from langgraph.config import get_config  # noqa: PLC0415
 
