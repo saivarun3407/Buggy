@@ -12,6 +12,7 @@ can make a finding ``exploit_verified``.
 from __future__ import annotations
 
 import json
+import sqlite3
 from collections.abc import Callable
 from dataclasses import replace
 from typing import Any
@@ -29,7 +30,7 @@ from buggy.findings.model import (
     severity_rank,
     validate,
 )
-from buggy.findings.store import FindingStore, IllegalTransition
+from buggy.findings.store import FindingNotFound, FindingStore, IllegalTransition
 
 # Decided by the service, never taken from a submission.
 _SERVICE_OWNED = ("id", "status", "verification", "grade", "grade_reasons", "created_at")
@@ -291,9 +292,27 @@ class FindingService:
             return _error("UNKNOWN_FINDING", f"no finding {finding_id!r} in this engagement")
         return {
             "ok": True,
-            "finding": finding.to_dict(),
+            "finding": self._shown(engagement, finding),
             "events": self.store.events(engagement, finding_id),
         }
+
+    def _shown(self, engagement: str, finding: Finding) -> dict[str, Any]:
+        """The finding as readers get it: the contract dict, plus its latest retest if any.
+
+        ``retest`` (``{at, outcome, capture_ids}``) and ``fixed_at`` are added
+        only once a retest was recorded, so a finding that was never retested
+        reads exactly as the contract defines it.
+        """
+        shown = finding.to_dict()
+        try:
+            state = self.store.retest_state(engagement, finding.id)
+        except (FindingNotFound, sqlite3.Error, ValueError):
+            # A retest record that cannot be read never hides the finding itself.
+            return shown
+        if state.get("retest"):
+            shown["retest"] = state["retest"]
+            shown["fixed_at"] = state.get("fixed_at")
+        return shown
 
     def list(
         self, engagement: str, *, status: str | None = None, grade: str | None = None
@@ -304,7 +323,7 @@ class FindingService:
             counts[row.status] = counts.get(row.status, 0) + 1
         return {
             "ok": True,
-            "findings": [row.to_dict() for row in rows],
+            "findings": [self._shown(engagement, row) for row in rows],
             "count": len(rows),
             "by_status": counts,
         }

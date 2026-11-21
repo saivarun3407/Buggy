@@ -592,3 +592,55 @@ class TestCli:
 
         assert dispatch(["retest", "acme", "F-000000000000"]) == 2
         assert dispatch(["retest", "acme"]) == 2
+
+
+class TestRetestIsShown:
+    """The latest retest travels with the finding and into the report."""
+
+    def test_a_finding_never_retested_reads_as_the_contract_defines_it(self, env: Env) -> None:
+        finding = verified_idor(env)
+        shown = env.service.get("acme", finding)["finding"]
+        assert "retest" not in shown and "fixed_at" not in shown
+        assert shown == _must(env.store.get("acme", finding)).to_dict()
+
+    def test_get_and_list_carry_the_latest_retest(self, env: Env) -> None:
+        finding = verified_idor(env)
+        behave(env, ORDER, "fixed")
+        out = retest(env.service, "acme", finding)
+        assert out["outcome"] == "fixed"
+
+        shown = env.service.get("acme", finding)["finding"]
+        assert shown["retest"]["outcome"] == "fixed" and shown["fixed_at"] == out["fixed_at"]
+        assert shown["status"] == "exploit_verified"  # a retest never changes the status
+        (listed,) = env.service.list("acme")["findings"]
+        assert listed["retest"] == shown["retest"]
+
+    def test_the_report_says_what_the_retest_showed(self, env: Env) -> None:
+        from buggy.findings import report  # noqa: PLC0415
+
+        finding = verified_idor(env)
+        graded = env.service.grade("acme", finding)
+        assert graded["ok"], graded
+
+        def build() -> dict:
+            return report.build(
+                "acme",
+                env.service.list("acme")["findings"],
+                recon_summary=None,
+                scope=["app.acme.test"],
+                captures=lambda capture_id: env.gateway.store.get("acme", capture_id),
+                generated_at=1_800_000_000,
+            )
+
+        before = build()
+        assert "Retest" not in report.to_markdown(before)
+        assert "retest" not in json.loads(report.to_json(before))["findings"][0]
+
+        assert retest(env.service, "acme", finding)["outcome"] == "still_vulnerable"
+        after = build()
+        assert "- **Retest:** still vulnerable" in report.to_markdown(after)
+        assert "<dt>Retest</dt><dd>still vulnerable (retested " in report.to_html(after)
+        entry = json.loads(report.to_json(after))["findings"][0]
+        assert (
+            entry["retest"]["outcome"] == "still_vulnerable" and entry["retest"]["fixed_at"] == ""
+        )

@@ -252,8 +252,34 @@ def _grade(finding: dict[str, Any]) -> dict[str, Any]:
     }
 
 
-def _base(finding: dict[str, Any]) -> dict[str, Any]:
+RETEST_WORDS = {
+    "fixed": "fixed",
+    "still_vulnerable": "still vulnerable",
+    "inconclusive": "could not tell",
+}
+
+
+def _retest(finding: dict[str, Any]) -> dict[str, Any] | None:
+    """The finding's latest retest, ``None`` when it was never retested."""
+    record = finding.get("retest")
+    if not isinstance(record, dict) or not record.get("outcome"):
+        return None
     return {
+        "outcome": _s(record.get("outcome")),
+        "at": _timestamp(record.get("at")),
+        "fixed_at": _timestamp(finding.get("fixed_at")) if finding.get("fixed_at") else "",
+    }
+
+
+def _retest_words(retest: dict[str, Any]) -> str:
+    outcome = RETEST_WORDS.get(retest["outcome"], retest["outcome"])
+    return f"{outcome} (retested {retest['at']})"
+
+
+def _base(finding: dict[str, Any]) -> dict[str, Any]:
+    retest = _retest(finding)
+    return {
+        **({"retest": retest} if retest else {}),
         "id": _s(finding.get("id")),
         "title": _s(finding.get("title")),
         "severity": _s(finding.get("severity")),
@@ -437,6 +463,8 @@ def _md_fields(item: dict[str, Any]) -> list[str]:
         ("Parameter", item["parameter"] or "none"),
         ("Source", item["source"]),
     ]
+    if item.get("retest"):
+        pairs.append(("Retest", _retest_words(item["retest"])))
     return [f"- **{name}:** {md_inline(value)}" for name, value in pairs]
 
 
@@ -612,6 +640,8 @@ def _h_fields(item: dict[str, Any]) -> str:
         ("Parameter", item["parameter"] or "none"),
         ("Source", item["source"]),
     ]
+    if item.get("retest"):
+        pairs.append(("Retest", _retest_words(item["retest"])))
     return "<dl>" + "".join(f"<dt>{_h(k)}</dt><dd>{_h(v)}</dd>" for k, v in pairs) + "</dl>"
 
 
