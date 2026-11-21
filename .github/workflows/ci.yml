@@ -152,6 +152,13 @@ jobs:
     if: ${{ needs.changes.outputs.compose == 'true' || github.event_name == 'push' }}
     runs-on: ubuntu-latest
     timeout-minutes: 10
+    # The compose files refuse to render without the stack secrets (there are
+    # deliberately no defaults). These are placeholders for a config-only
+    # render: nothing is started and nothing reads them.
+    env:
+      SANDBOX_TOKEN: ci-render-only
+      EGRESS_GUARD_TOKEN: ci-render-only
+      BUGGY_STACK_MCP_TOKEN: ci-render-only
     steps:
       - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
       # The compose files reference a project-local ``.env`` for the
@@ -166,6 +173,19 @@ jobs:
         run: docker compose -f docker-compose.yml -f docker-compose.dev.yml config > /dev/null
       - name: Validate base + dev + watch
         run: docker compose -f docker-compose.yml -f docker-compose.dev.yml -f docker-compose.watch.yml config > /dev/null
+      - name: Validate the lite stack (recon only)
+        run: docker compose -f docker-compose.lite.yml config > /dev/null
+      - name: Validate the demo stack (lite + lab + demo overlay)
+        run: docker compose -f docker-compose.lite.yml -f docker-compose.lab.yml -f docker-compose.demo.yml config > /dev/null
+      - name: Validate base + lab overlay
+        run: docker compose -f docker-compose.yml -f docker-compose.lab.yml config > /dev/null
+      - name: The stack must refuse to render without its secrets
+        run: |
+          if env -u SANDBOX_TOKEN -u EGRESS_GUARD_TOKEN -u BUGGY_STACK_MCP_TOKEN \
+              docker compose -f docker-compose.yml config > /dev/null 2>&1; then
+            echo "docker-compose.yml rendered without the stack secrets" >&2
+            exit 1
+          fi
 
   python:
     # ubuntu-only by design: the Python backend ships and runs inside the
