@@ -272,7 +272,13 @@ def needs_run_approval(spec: ProbeSpec, params: dict[str, Any]) -> bool:
     and could never match an approval given for one exact request.
     """
     method = str(params.get("method") or "GET").upper()
-    return spec.state_changing or method not in SAFE_METHODS
+    return spec.state_changing or method not in SAFE_METHODS or params.get(DECLARED_FLAG) is True
+
+
+#: A caller may declare that a run changes state although its method is safe
+#: (a GET form that changes a password). The flag can only add the approval
+#: hold, never remove it, and the probe function does not see it.
+DECLARED_FLAG = "state_changing"
 
 
 def run_probe(
@@ -301,8 +307,14 @@ def run_probe(
             # An unknown name is refused before an approval is filed or a byte is sent.
             gateway.check_identity(engagement, identity)
         grant = None
-        if needs_run_approval(spec, probe_params):
-            approved = {**probe_params, **named}
+        declared = probe_params.get(DECLARED_FLAG) is True
+        if DECLARED_FLAG in probe_params:
+            if not isinstance(probe_params[DECLARED_FLAG], bool):
+                raise ProbeInputError(f"{DECLARED_FLAG} must be true or false")
+            probe_params = {k: v for k, v in probe_params.items() if k != DECLARED_FLAG}
+        if declared or needs_run_approval(spec, probe_params):
+            # The declaration is part of what the operator approves.
+            approved = {**probe_params, **named, **({DECLARED_FLAG: True} if declared else {})}
             grant = gateway.probe_grant(engagement, name, approved, sends=spec.summary)
         context = Context(gateway, engagement, name, canary, grant, identity)
         result = spec.run(context, probe_params)

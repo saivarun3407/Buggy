@@ -950,25 +950,42 @@ def _service_urls(records: dict[str, list[dict[str, Any]]]) -> list[str]:
     return sorted(urls)[:MAX_SEEDS]
 
 
-def crawl_records(crawl: dict[str, Any]) -> list[dict[str, Any]]:
+def crawl_records(crawl: dict[str, Any]) -> tuple[list[dict[str, Any]], int]:
     """What a crawl discovered, as the ``url`` records the parameter extractor reads.
 
-    A form that is sent with GET becomes the URL it would request, so its
-    fields are query parameters. A form that posts stays a form on its page.
+    Returns the records and how many forms were left out as destructive.
+
+    A link the crawler itself must never request (it could sign out or change
+    something) is not handed on either: a probe would request it. A form sent
+    with GET becomes the URL it would request, so its fields are query
+    parameters for the read-only sweep, unless the form looks like an action
+    (a change-password form is often a GET): then, like a form that posts, it
+    stays a form, and its checks wait for approval. A form whose submission
+    would destroy data or reconfigure the application is dropped.
     """
     from urllib.parse import urlencode  # noqa: PLC0415
+
+    from buggy.capture.crawl import (  # noqa: PLC0415
+        form_changes_state,
+        form_destructive_reason,
+        never_request_reason,
+    )
 
     out: list[dict[str, Any]] = [
         {"type": "url", "value": url, "source_tool": SOURCE_CRAWL}
         for url in crawl.get("urls") or []
-        if isinstance(url, str)
+        if isinstance(url, str) and not never_request_reason(url)
     ]
+    dropped = 0
     for form in crawl.get("forms") or []:
         if not isinstance(form, dict) or not isinstance(form.get("action"), str):
             continue
+        if form_destructive_reason(form) or never_request_reason(form["action"]):
+            dropped += 1
+            continue
         fields = [f for f in form.get("fields") or [] if isinstance(f, dict) and f.get("name")]
         method = str(form.get("method") or "GET").upper()
-        if method == "GET":
+        if method == "GET" and not form_changes_state(form):
             action = form["action"].partition("?")[0].partition("#")[0]
             pairs = [(str(f["name"]), str(f.get("value") or "")) for f in fields]
             value = f"{action}?{urlencode(pairs)}" if pairs else action
@@ -984,7 +1001,7 @@ def crawl_records(crawl: dict[str, Any]) -> list[dict[str, Any]]:
                     },
                 }
             )
-    return out
+    return out, dropped
 
 
 def _new_parameters(found: list[dict[str, Any]], known: set[str]) -> list[dict[str, Any]]:
@@ -1088,7 +1105,8 @@ def run_signed_in(
             continue
         out["ran"] = True
         reached[name] = [u for u in urls if isinstance(u, str)]
-        fresh = _new_parameters(crawl_records(crawl), known)
+        found, dropped = crawl_records(crawl)
+        fresh = _new_parameters(found, known)
         out["accounts"].append(
             {
                 "name": name,
@@ -1096,6 +1114,7 @@ def run_signed_in(
                 "urls": len(reached[name]),
                 "forms": len(crawl.get("forms") or []),
                 "new_inputs": len(fresh),
+                "forms_never_planned": dropped,
                 "truncated": bool(crawl.get("truncated")),
             }
         )
@@ -1888,7 +1907,7 @@ def run_stages(  # noqa: PLR0912, PLR0915
     probes: dict[str, Any] | None = None
     access: dict[str, Any] | None = None
     signed_in: dict[str, Any] | None = None
-    state: dict[str, Any] | None = None
+    writes: dict[str, Any] | None = None
     state, summary = "skipped", None
     recon_done = False
     if args.mode != "enforce":
@@ -1952,7 +1971,7 @@ def run_stages(  # noqa: PLR0912, PLR0915
                     probes = _sweep_stage(args, slug, records)
                     access = _access_stage(args, slug, records)
                     signed_in = _signed_in_stage(args, slug, records)
-                    state = _state_stage(args, slug, records, signed_in)
+                    writes = _state_stage(args, slug, records, signed_in)
                 print(f"  knowledge graph  {project_graph(slug)}", file=sys.stderr)
                 if args.non_interactive:
                     print(json.dumps({"type": "recon_report", "path": str(path), **digest}))
@@ -1964,7 +1983,7 @@ def run_stages(  # noqa: PLR0912, PLR0915
         "probes": probes,
         "access": access,
         "signed_in": signed_in,
-        "state": state,
+        "state": writes,
     }
     outcome["not_tested"] = not_tested(slug, args, probes, access, signed_in=signed_in)
 

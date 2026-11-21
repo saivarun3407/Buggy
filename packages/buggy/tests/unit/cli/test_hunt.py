@@ -836,6 +836,26 @@ class TestExitCodesAndTheResultFile:
         assert "hunt-result.json" in capsys.readouterr().err
         assert not list(_result_path(tmp_path).parent.glob(".hunt-result-*"))
 
+    def test_a_run_with_the_evidence_gateway_keeps_its_recon_state(
+        self, tmp_path: Path, monkeypatch
+    ) -> None:
+        # Every stage that needs the gateway runs; the recon verdict must survive them.
+        _watch(monkeypatch, ["completed"], CLEAN_RECORDS)
+        monkeypatch.setattr(hunt, "capture_available", lambda: True)
+        asked: list[str] = []
+
+        def capture(tool: str, _engagement: str, **_arguments) -> dict:
+            asked.append(tool)
+            return {"ok": True, "identities": [], "ids": [], "findings": [], "report": "{}"}
+
+        monkeypatch.setattr(hunt, "_capture", capture)
+        assert _run(tmp_path, *self.BASE) == hunt.EXIT_OK
+        result = _result(tmp_path)
+        assert result["recon"]["state"] == "completed" and result["complete"] is True
+        assert result["probes"]["ran_sweep"] is True and result["state"]["ran_sweep"] is True
+        assert result["signed_in"]["ran"] is False and result["access"]["ran"] is False
+        assert {"candidates_add", "probe_run", "identities_list"} <= set(asked)
+
     def test_a_high_issue_with_the_issue_gate_is_10(
         self, tmp_path: Path, monkeypatch, capsys
     ) -> None:

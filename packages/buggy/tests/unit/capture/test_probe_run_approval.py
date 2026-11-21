@@ -204,3 +204,18 @@ def test_time_is_recorded_on_the_request(env) -> None:
     requests_path, decisions_path = paths_for(env.roots.control, env.roots.audit, "acme")
     (request,) = pending(requests_path, decisions_path)
     assert request["created_at"] >= before and request["request_id"] == held["request_id"]
+
+
+def test_a_get_run_declared_state_changing_is_held_and_the_probe_never_sees_the_flag(env) -> None:
+    params = {"url": f"{BASE}/account?password_new=x&Change=Change", "parameter": "password_new"}
+    plain = run_probe(env.gateway, "acme", "xss_reflected", params)
+    assert plain["status"] == "completed"  # a GET is sent without a hold by default
+    sent = len(env.shop.seen)
+    held = run_probe(env.gateway, "acme", "xss_reflected", {**params, "state_changing": True})
+    assert held["status"] == "refused" and held["code"] == "APPROVAL_REQUIRED", held
+    assert len(env.shop.seen) == sent
+    decide(env, held["request_id"])
+    done = run_probe(env.gateway, "acme", "xss_reflected", {**params, "state_changing": True})
+    assert done["status"] == "completed", done
+    bad = run_probe(env.gateway, "acme", "xss_reflected", {**params, "state_changing": "yes"})
+    assert bad["status"] == "error" and "state_changing" in bad["detail"]

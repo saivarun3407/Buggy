@@ -285,7 +285,10 @@ def _body_operations(
         name = str(attrs.get("name") or "")
         method = str(attrs.get("method") or "").upper()
         kind = {"body": "json", "form": "form"}.get(str(attrs.get("location") or ""))
-        if not url or not name or kind is None or method not in STATE_METHODS:
+        # A form recon kept as a form is one whose submission changes something, even
+        # when it is sent with GET (a change-password form often is).
+        writes = method in STATE_METHODS or (kind == "form" and method == "GET")
+        if not url or not name or kind is None or not writes:
             continue
         hints = [str(h) for h in attrs.get("hints") or [] if isinstance(h, str)]
         operations[(method, url, kind)].append(
@@ -347,6 +350,9 @@ def plan_state_changing(
             continue
         host = urlsplit(url).netloc.lower()
         common: dict[str, Any] = {"url": url, "method": method, "body": body}
+        if method == "GET":
+            # Sent as a query string, and declared state-changing so the gateway holds it.
+            common = {"url": f"{url}?{urlencode(body)}", "method": "GET", "state_changing": True}
         if identity:
             common["identity"] = identity
         if kind == "json":
@@ -366,7 +372,8 @@ def plan_state_changing(
                         continue  # the boundary probe sends JSON
                     params.update({"field": parameter["name"], "values": [-1, 0]})
                 else:
-                    params.update({"parameter": parameter["name"], "location": kind})
+                    where = "query" if method == "GET" else kind
+                    params.update({"parameter": parameter["name"], "location": where})
                     if probe == "sqli":
                         params["allow_time"] = False
                 steps.append(

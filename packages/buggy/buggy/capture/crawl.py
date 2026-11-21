@@ -30,7 +30,7 @@ import re
 from collections import deque
 from html.parser import HTMLParser
 from typing import Any
-from urllib.parse import unquote, urljoin, urlsplit, urlunsplit
+from urllib.parse import parse_qsl, unquote, urljoin, urlsplit, urlunsplit
 
 from buggy.capture.gateway import CaptureGateway, GatewayRefusal
 from buggy.capture.store import Capture
@@ -80,11 +80,77 @@ NEVER_REQUEST_WORDS: tuple[str, ...] = (
     # (and that is often heavy on the target).
     "export",
     "download",
+    # Switches a feature of the application on or off, for the account or for
+    # everyone: a link like ?waf=on changed how every later request was answered.
+    "enable",
+    "toggle",
+    "activate",
+    "install",
+    "uninstall",
 )
+
+#: A query value that flips a switch (``?feature=on``).
+TOGGLE_VALUES = frozenset({"on", "off", "enable", "disable", "enabled", "disabled"})
+
+#: A form whose action, field names or button labels carry one of these words
+#: changes something when it is submitted, whatever its method.
+ACTION_WORDS: tuple[str, ...] = (
+    *NEVER_REQUEST_WORDS,
+    "change", "update", "create", "add", "save", "edit", "upload", "import", "set",
+    "password", "passwd", "pwd", "transfer", "pay", "buy", "order", "send", "invite",
+    "grant", "apply", "confirm", "register", "signup", "sign[-_ ]?up", "post", "submit[-_ ]?order",
+)  # fmt: skip
+#: A form that must never be planned at all: submitting it destroys data or
+#: reconfigures the application.
+DESTRUCTIVE_WORDS: tuple[str, ...] = (
+    "delete", "remove", "destroy", "purge", "drop", "reset", "wipe", "truncate", "erase",
+    "uninstall", "install", "setup", "create[-_ ]?db", "format", "shutdown", "restart",
+)  # fmt: skip
 _NEVER = re.compile(
     r"(?<![a-z0-9])(?:" + "|".join(NEVER_REQUEST_WORDS) + r")(?![a-z0-9])", re.IGNORECASE
 )
 _CAMEL = re.compile(r"([a-z0-9])([A-Z])")
+
+
+def _word_pattern(words: tuple[str, ...]) -> re.Pattern[str]:
+    return re.compile(r"(?<![a-z0-9])(?:" + "|".join(words) + r")(?![a-z0-9])", re.IGNORECASE)
+
+
+_ACTION = _word_pattern(ACTION_WORDS)
+_DESTRUCTIVE = _word_pattern(DESTRUCTIVE_WORDS)
+
+
+def _form_text(form: Any) -> str:
+    """The words of a form: its action path and query, its field names and its values."""
+    if not isinstance(form, dict):
+        return ""
+    try:
+        parts = urlsplit(str(form.get("action") or ""))
+        pieces = [unquote(parts.path), unquote(parts.query.replace("+", " "))]
+    except ValueError:
+        pieces = []
+    for field in form.get("fields") or []:
+        if isinstance(field, dict):
+            pieces += [str(field.get("name") or ""), str(field.get("value") or "")]
+    return _CAMEL.sub(r"\1 \2", " ".join(pieces)).replace("_", " ")
+
+
+def form_destructive_reason(form: Any) -> str:
+    """Why a form must never be submitted by a planned check, or ``""``."""
+    match = _DESTRUCTIVE.search(_form_text(form))
+    return f"it names {match.group(0).lower()!r}" if match else ""
+
+
+def form_changes_state(form: Any) -> str:
+    """Why submitting a form changes something whatever its method, or ``""``.
+
+    A form sent with GET is not read-only just because of its method: a
+    change-password form is often a GET. Such a form is never probed by the
+    read-only sweep; it is planned as a run that waits for approval.
+    """
+    match = _ACTION.search(_form_text(form))
+    return f"it names {match.group(0).lower()!r}" if match else ""
+
 
 #: Extensions that are not worth a request: nothing to extract from them.
 STATIC_EXTENSIONS = frozenset(
@@ -133,6 +199,9 @@ def never_request_reason(url: str) -> str:
         if match is not None:
             word = match.group(0).lower()
             return f"its {where} names {word!r}, which can end the session or change state"
+    for name, value in parse_qsl(parts.query, keep_blank_values=True):
+        if value.strip().lower() in TOGGLE_VALUES:
+            return f"its query sets {name!r} to {value.strip().lower()!r}, which flips a switch"
     return ""
 
 
@@ -488,6 +557,8 @@ __all__ = [
     "PER_TEMPLATE",
     "STATIC_EXTENSIONS",
     "crawl",
+    "form_changes_state",
+    "form_destructive_reason",
     "never_request_reason",
     "normalize",
     "template_of",
