@@ -1541,7 +1541,8 @@ def _signed_in_result(signed_in: Any) -> dict[str, Any]:
     """The signed-in stage for the result file: counts only, no finding lists."""
     if not isinstance(signed_in, dict):
         return {"ran": False, "reason": "not run"}
-    inferred = signed_in.get("inferred") if isinstance(signed_in.get("inferred"), dict) else {}
+    raw_inferred = signed_in.get("inferred")
+    inferred: dict[str, Any] = raw_inferred if isinstance(raw_inferred, dict) else {}
     return {
         "ran": bool(signed_in.get("ran")),
         "reason": signed_in.get("reason"),
