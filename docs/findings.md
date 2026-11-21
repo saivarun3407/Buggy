@@ -74,6 +74,26 @@ that enables each (accounts, a model, your approval). The same list is in
 `hunt-result.json` under `not_tested`. A run that only shows scanner results
 is a run where those things were missing.
 
+## What `hunt` does once test accounts are declared
+
+With accounts in `~/.buggy/secrets/<engagement>/identities.json`, `hunt` adds
+these steps after the probe sweep. None of them uses a model.
+
+| Step | What happens |
+|---|---|
+| Signed-in crawl | For each account (three at most) the gateway signs in and walks the application with up to 120 GET requests. Links that could sign out or change something are never followed; forms are recorded, never submitted. |
+| Signed-in probes | The inputs found there that recon had not seen are probed as that account with the read-only probes. Positives are re-proven as the same account and graded. |
+| Write operations | Forms that post, and the write operations of the API description, become state-changing probe runs: a negative or zero business quantity, a privileged field the client should not set, injection in a body or form field, a shell probe on a field that names a host or command. Each run is handed to the gateway and **waits for your approval**; `hunt --resume` sends the ones you allowed. 15 runs at most per run (`--state-probe-budget`). |
+| Owned objects | An object URL only one account reached is asked for as the other accounts. It is reported only when the owner's `markers` come back to a non-owner, so declare markers. |
+
+`hunt` prints one block per step and lists, at the end, what was not tested
+and why. Limits: the crawl reads HTML links, forms and URLs inside JSON, so a
+single-page application that builds its requests in script shows it little;
+there, declare `owner_of` objects and let the agent stage do the rest. Field
+values for write operations come from the API description or the form, so an
+operation that needs a specific valid body may be refused by the target
+before the check means anything.
+
 ## How a finding is verified
 
 - **A finding that came from a probe** is verified by running that probe
