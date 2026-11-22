@@ -369,6 +369,6 @@ images, videos and `package-lock.json` are counted as files only).
 | | Before (`6a90cab`) | After |
 |---|---:|---:|
 | Tracked files (`git ls-files \| wc -l`) | 2,510 | 1,640 |
-| Lines (`git ls-files \| xargs wc -l`) | 586,002 | 385,207 |
+| Lines (`git ls-files \| xargs wc -l`) | 586,002 | 385,077 |
 | Container images built (release lists + `buggy-sandbox-reversing`) | 12 | 9 |
 | Compose services in `docker-compose.yml` (all profiles) | 21 | 15 |
