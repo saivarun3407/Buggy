@@ -176,7 +176,6 @@ recon = "buggy.agents.standard.recon:SUBAGENT_SPEC"
 exploit = "buggy.agents.standard.exploit:SUBAGENT_SPEC"
 analyst = "buggy.agents.standard.analyst:SUBAGENT_SPEC"
 asvs_assessor = "buggy.agents.standard.asvs_assessor:SUBAGENT_SPEC"
-contract_auditor = "buggy.agents.standard.contract_auditor:SUBAGENT_SPEC"
 blue_cell = "buggy.agents.standard.blue_cell:SUBAGENT_SPEC"
 # Plugins bundle — vulnresearch family, attached to the ``vulnresearch`` main agent.
 scanner = "buggy.agents.plugins.scanner:SUBAGENT_SPEC"

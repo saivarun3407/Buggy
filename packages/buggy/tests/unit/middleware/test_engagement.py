@@ -199,7 +199,7 @@ _CONVERGING_KG_FIELDS = [
 
 @pytest.mark.parametrize(("field", "value"), _CONVERGING_KG_FIELDS)
 def test_kg_state_fields_survive_parallel_fanout(field, value) -> None:
-    """KG slot runs in analyst / exploit / contract_auditor — dispatching
+    """KG slot runs in analyst / exploit — dispatching
     two in parallel writes these channels concurrently; the reducer must let
     them converge instead of tripping INVALID_CONCURRENT_GRAPH_UPDATE."""
     from buggy.middleware.kg_internal.state import KGState

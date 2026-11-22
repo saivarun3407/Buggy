@@ -189,7 +189,7 @@ _BASE_SLOTS: frozenset[MiddlewareSlot] = _TAIL_SLOTS | {
 }
 
 # Standard bash-executing agents (recon/exploit/analyst/
-# contract_auditor + plugin
+# plugin
 # specialists verifier/patcher/scanner/exploiter): base + engagement
 # context + sandbox notification.
 _BASH_AGENT_SLOTS: frozenset[MiddlewareSlot] = _BASE_SLOTS | {
@@ -244,15 +244,8 @@ SLOTS_PER_ROLE: dict[str, frozenset[MiddlewareSlot]] = {
     # OSS roles that run the KG middleware — the persistent-graph use
     # cases the spec calls out
     # (docs/design/2026-06-03-kg-middleware-redesign.md § 4.10).
-    # contract_auditor records Foundry-confirmed
-    # smart-contract vulnerabilities and chain candidates. The opt-in
-    # ``kg_record`` / ``kg_ingest`` tools complement (do not replace)
-    # the legacy CONTRACT_TOOLS surface — the legacy
-    # ingest paths still route through the ``graph_transaction`` shim
-    # and migrate to KGStore in a separate RFC.
     "analyst": _BASH_AGENT_SLOTS | {MiddlewareSlot.KG},
     "asvs_assessor": _BASH_AGENT_SLOTS,
-    "contract_auditor": _BASH_AGENT_SLOTS | {MiddlewareSlot.KG},
     # ── Plugin orchestrator (no EngagementContext per the existing
     # vulnresearch factory — it consumes its parent's context) ──
     "vulnresearch": _BASE_SLOTS

@@ -28,8 +28,6 @@ from urllib.parse import urlparse
 import defusedxml.ElementTree as ET
 from langchain_core.tools import tool
 
-from buggy.tools.contracts.patterns import scan_solidity_source
-from buggy.tools.contracts.slither import ingest_slither_file
 from buggy.tools.research import cve as cve_mod
 from buggy.tools.research import fuzz as fuzz_mod
 
@@ -1433,107 +1431,6 @@ def kg_analyze_cookie_value(
         )
 
 
-# ── Smart contract ingestion ───────────────────────────────────────────
-
-
-@tool
-@kg_degrades
-def kg_scan_solidity(
-    path: str, min_severity: str = "low", scanner_hint: str = "solidity-patterns"
-) -> str:
-    """Scan Solidity source with offline heuristics and ingest findings."""
-    source_path = Path(path)
-    if not source_path.exists():
-        return _json({"error": f"file not found: {path}"})
-
-    try:
-        source = source_path.read_text(encoding="utf-8")
-    except OSError as e:
-        return _json({"error": f"failed to read solidity file: {e}"})
-
-    findings = scan_solidity_source(source)
-    threshold = _severity_threshold(_severity_from_string(min_severity))
-
-    with graph_transaction() as graph:
-        ingested = 0
-        by_severity: dict[str, int] = {}
-
-        file_node = graph.upsert_node(
-            Node.make(
-                NodeKind.SOURCE_FILE,
-                str(source_path),
-                key=f"file::{source_path}",
-                source=scanner_hint,
-                language="solidity",
-            )
-        )
-
-        for finding in findings:
-            if _severity_threshold(finding.severity) < threshold:
-                continue
-            vuln = graph.upsert_node(
-                Node.make(
-                    NodeKind.VULNERABILITY,
-                    f"[{scanner_hint}:{finding.rule}] {source_path.name}:{finding.line}",
-                    key=f"{scanner_hint}::{source_path}::{finding.rule}::{finding.line}",
-                    scanner=scanner_hint,
-                    rule_id=finding.rule,
-                    severity=finding.severity.value,
-                    description=finding.description,
-                    recommendation=finding.recommendation,
-                    cwe=[finding.cwe] if finding.cwe else [],
-                    file=str(source_path),
-                    line=finding.line,
-                )
-            )
-            loc = graph.upsert_node(
-                Node.make(
-                    NodeKind.CODE_LOCATION,
-                    f"{source_path}:{finding.line}",
-                    key=f"{source_path}::{finding.line}",
-                    file=str(source_path),
-                    start_line=finding.line,
-                )
-            )
-            graph.upsert_edge(Edge.make(vuln.id, loc.id, EdgeKind.DEFINED_IN))
-            graph.upsert_edge(Edge.make(loc.id, file_node.id, EdgeKind.DEFINED_IN))
-            by_severity[finding.severity.value] = by_severity.get(finding.severity.value, 0) + 1
-            ingested += 1
-
-        return _json(
-            {
-                "file": str(source_path),
-                "matches": len(findings),
-                "ingested": ingested,
-                "by_severity": by_severity,
-                "stats": graph.stats(),
-            }
-        )
-
-
-@tool
-@kg_degrades
-def kg_ingest_slither(path: str) -> str:
-    """Ingest Slither JSON output into the engagement KG.
-
-    Writes flow directly through ``KGStore.record_observations`` —
-    a single atomic batch per file. The engagement label is resolved
-    from the ``EngagementContextMiddleware`` contextvar; falls back
-    to the shared ``_LEGACY_ENGAGEMENT_LABEL`` outside the standard
-    middleware stack (matches the convention used by the rest of
-    RESEARCH_TOOLS).
-    """
-    from buggy.tools.research._engagement_scope import _LEGACY_ENGAGEMENT_LABEL
-    from buggy_core.utils.engagement_scope import get_active_engagement
-
-    engagement = get_active_engagement() or _LEGACY_ENGAGEMENT_LABEL
-    try:
-        ingested = ingest_slither_file(path, engagement=engagement)
-    except ValueError as exc:
-        return _json({"error": str(exc)})
-    return _json({"ingested": ingested})
-
-
 # ── Chain planner ──────────────────────────────────────────────────────
 
 
@@ -2505,8 +2402,6 @@ RESEARCH_TOOLS = [
     kg_analyze_jwt,
     kg_analyze_oauth_callback,
     kg_analyze_cookie_value,
-    kg_scan_solidity,
-    kg_ingest_slither,
     cve_lookup,
     cve_by_package,
     cve_enrich_dependencies,

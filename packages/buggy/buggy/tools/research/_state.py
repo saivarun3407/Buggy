@@ -3,7 +3,7 @@
 
 The old ``Neo4jStore`` class (``tools/research/neo4j_store.py``) is
 removed in this PR. Every caller that still imports from
-``buggy.tools.research._state`` — CONTRACT_TOOLS,
+``buggy.tools.research._state`` —
 RESEARCH_TOOLS, ``chain.py``, ``health.py``, ``dedupe.py`` — now sits
 on top of the new ``KGStore`` (``buggy.middleware.kg_internal.store``)
 through this shim. The agent-facing ``_load`` / ``_save`` /
@@ -248,7 +248,7 @@ def close_store() -> None:
 # ── Compat wrappers ──────────────────────────────────────────────────
 #
 # ``_load`` / ``_save`` / ``graph_transaction`` preserve the old
-# call shape so tool code under ``tools/contracts``,
+# call shape so tool code under
 # and ``tools/research/{tools,patch,scanner_tools,bounty,dedupe}.py``
 # does not need to change in this PR.
 

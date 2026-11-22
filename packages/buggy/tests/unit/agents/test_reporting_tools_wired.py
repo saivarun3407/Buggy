@@ -2,17 +2,12 @@
 
 Historical context: ``REPORTING_TOOLS`` shipped and were unit-tested but
 reached no agent (no agent listed them and ``build_tools`` never
-received them), while ``contract_auditor.md`` instructed the model to
-call ``report_hackerone`` — a tool the agent did not actually have, so
-the model would emit a tool call that always fails. These tests pin the
+received them), while a prompt instructed the model to call
+``report_hackerone`` — a tool the agent did not actually have, so the
+model would emit a tool call that always fails. These tests pin the
 wiring AND the prompt<->tool contract so the regression cannot return.
 
-Current state (post-KG-narrow, refactor/kg-narrow-and-research-prep):
-``contract_auditor`` no longer wires ``report_hackerone`` (the tool
-routes through the broken ``graph_transaction`` shim and the narrow
-prunes it pending the KG middleware redesign). ``contract_auditor.md``
-step 6 now emits a HackerOne-style ``findings/FIND-NNN.md`` directly
-instead. ``analyst`` remains the sole carrier of the full
+``analyst`` remains the sole carrier of the full
 ``REPORTING_TOOLS`` suite and is the only agent the prompt<->tool
 contract check still applies to.
 """
@@ -54,10 +49,7 @@ def test_prompt_referenced_reporting_tools_are_wired(module: Any, role: str) -> 
     emit a tool call that can never resolve — the exact bug this fixes.
 
     Only the analyst is checked: it is the sole agent that carries the
-    full REPORTING_TOOLS bundle post-narrow. Other roles that previously
-    referenced specific report_* tools (e.g. contract_auditor invoking
-    report_hackerone in its prompt) have had those references rewritten
-    to file-based equivalents.
+    full REPORTING_TOOLS bundle.
     """
     prompt = load_prompt(role, shared=["bash"])
     toolset = frozenset(module._STANDARD_TOOLS)

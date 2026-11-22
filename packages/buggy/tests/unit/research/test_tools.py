@@ -219,40 +219,6 @@ class TestDependencyEnrichment:
 
 
 class TestSpecializedHuntingTools:
-    def test_kg_scan_solidity_ingests_pattern_findings(
-        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
-        fake = _configure_kg(monkeypatch, tmp_path)
-        solidity = tmp_path / "Vault.sol"
-        solidity.write_text(
-            """pragma solidity ^0.8.20;
-contract Vault {
-    function withdraw(address target) public {
-        require(tx.origin == msg.sender, \"nope\");
-        (bool ok, ) = target.delegatecall(\"\");
-    }
-}
-""",
-            encoding="utf-8",
-        )
-
-        payload = json.loads(research_tools.kg_scan_solidity.invoke({"path": str(solidity)}))
-        assert payload["matches"] >= 2
-        assert payload["ingested"] >= 2
-
-        graph = fake.load_graph()
-        assert len(graph.by_kind(NodeKind.VULNERABILITY)) >= 2
-        assert len(graph.by_kind(NodeKind.CODE_LOCATION)) >= 1
-
-    # ``test_kg_ingest_slither_reads_detector_output`` previously
-    # checked that the legacy ``ingest_slither_file(path, graph)``
-    # populated the ``_configure_kg`` fake store. After ``slither.py``
-    # was rewritten to write directly through
-    # ``KGStore.record_observations`` (keyword-only ``engagement``,
-    # no ``graph`` parameter), the fake-store assertion shape no
-    # longer applies. Reintroduced in a dedicated KGStore-mock-based
-    # test PR — see the Slither RFC §4.4.
-
     def test_kg_analyze_jwt_ingests_alg_none_finding(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:

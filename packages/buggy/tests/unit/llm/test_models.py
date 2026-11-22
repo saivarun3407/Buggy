@@ -113,7 +113,6 @@ class TestAgentTiers:
             "exploit",
             "exploiter",
             "patcher",
-            "contract_auditor",
             "analyst",
             "vulnresearch",
         ):

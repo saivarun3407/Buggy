@@ -107,12 +107,6 @@ export const AGENT_DISPLAY_CONFIG: Record<string, AgentDisplayMeta> = {
     role: "Analysis",
     color: "#f97316",
   },
-  contract_auditor: {
-    name: "Contract Auditor",
-    description: "Smart contract security — Solidity, Slither, Foundry",
-    role: "Domain Specialist",
-    color: "#a855f7",
-  },
   detector: {
     name: "Detector",
     description: "Vulnerability detection — pattern matching, triage",
