@@ -775,15 +775,10 @@ func Get(env map[string]string, key, fallback string) string {
 // MigrateActiveComposeProfiles comments out any active "COMPOSE_PROFILES="
 // line in the .env file.
 //
-// Before ADR-0006 (v1.1.7 and earlier) the OSS .env.example shipped with
-// an active "COMPOSE_PROFILES=c2-sliver" line so `buggy start`
-// always brought the Sliver C2 container up. ADR-0006 routes every
-// specialist workload (c2-sliver, ad, reversing, …) through the
-// opscontrol daemon; the orchestrator decides when each plane comes up
-// via `ops_start(...)`. A stale active COMPOSE_PROFILES from a v1.1.7-era
-// .env forces those workloads to spawn on every `buggy start`,
-// defeating the dynamic-spawn design and re-introducing the idle-cost +
-// attack-surface that ADR-0006 was meant to remove.
+// v1.1.7 and earlier shipped .env.example with an active
+// "COMPOSE_PROFILES=c2-sliver" line. A stale active COMPOSE_PROFILES line
+// names profiles the launcher did not ask for (and that may no longer
+// exist), so it is commented out on start.
 //
 // Behaviour:
 //   - rewrites every active "COMPOSE_PROFILES=…" line to a "# Migrated …"
@@ -812,7 +807,7 @@ func MigrateActiveComposeProfiles(envPath string) (bool, error) {
 			continue
 		}
 		if k, _, ok := parseEnvLine(trimmed); ok && k == "COMPOSE_PROFILES" {
-			lines[i] = "# [v1.1.8 ADR-0006 migration] specialist workloads now spawn via ops_start; was: " + line
+			lines[i] = "# [v1.1.8 migration] the launcher picks the profiles it starts; was: " + line
 			rewritten = true
 		}
 	}

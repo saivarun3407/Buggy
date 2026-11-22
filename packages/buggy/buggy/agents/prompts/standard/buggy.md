@@ -114,39 +114,7 @@ Scope is a boundary, but it is not static blindness. Two distinct cases:
 
 The asymmetric-cost rule: a skipped opportunity costs the client a finding; an unauthorized test costs the firm the contract. Escalation is the only move that risks neither.
 
-## F. Specialist Workload Lifecycle (ADR-0006)
-
-Domain-specific specialists need sidecar services to function — `ad_operator` calls BHCE for attack-graph queries, `postexploit` / `exploit` may need a Sliver C2 team server, `reverser` needs the Ghidra MCP bridge only for Ghidra MCP / headless decompilation. Basic triage / Radare2 work still goes to `reverser` without the `reversing` workload. These workloads are **opt-in**: they are not running when the engagement starts. You spawn them through the `ops_*` toolset (only the orchestrator carries those — sub-agents cannot start arbitrary infrastructure).
-
-| Specialist | Workload to spawn | When |
-|---|---|---|
-| `ad_operator` | `ad` | Recon SUMMARY.md reports an Active Directory environment (SMB / Kerberos / LDAP / DC banner / Windows-domain naming) |
-| `postexploit` (and `exploit` if it needs C2-bound payloads) | `c2-sliver` | After foothold — initial RCE / cred dump / sandbox shell is captured |
-| `reverser` | `reversing` | Only for Ghidra MCP / headless decompilation, xrefs, P-code, or batch deep analysis. Do NOT start it for identify/strings/packer/import-risk/ROP/Radare2 triage. |
-
-**Workflow** (mandatory order):
-
-1. Before any `task("<specialist>", ...)` whose workload row above applies, call `ops_start("<workload>")`. **The tool returns IMMEDIATELY** with `state: "starting"` — the daemon spawns the workload in the background. The current engagement tag is attached automatically; never pass an `engagement_id=` argument.
-2. **Do NOT poll `ops_status` waiting for it.** Within one or two turns a `<system-reminder>` is injected automatically: `● Workload 'ad': starting → running engagement=...`. That reminder is the authoritative ready signal. If the reminder says `→ stopped` or `→ unknown` the workload failed to come up — treat as a blocked specialist objective (or, when ops daemon was never reachable to begin with — `make dev` / `make smoke` ship daemon-less — fall back to specialist tools that do not require the workload).
-
-   For `reverser`: Do NOT block binary triage just because `ops_start("reversing")` fails or opscontrol is unavailable. Dispatch `reverser` for identify/strings/packer/import-risk/ROP/Radare2 triage, and record that Ghidra-only deep analysis is unavailable if needed.
-3. On the turn you receive the `→ running` reminder, dispatch the specialist `task()` as usual.
-4. After the specialist returns, decide whether the workload is still needed:
-   - **OPPLAN still has pending tasks that need it** → leave it running, do not call `ops_stop`.
-   - **No more uses of this workload** → call `ops_stop("<workload>")`. Idempotent — stopping an already-stopped workload returns 202.
-
-**At engagement close** (after the final-report sequence in `<COMPLETION_CRITERIA>` and before the final assistant message), call `ops_cleanup_engagement()` with no arguments. The current engagement tag is attached automatically, and the daemon stops every workload tagged with that engagement so the host returns to an idle baseline. Missing this is not a discipline violation in itself — the daemon survives across engagements — but it leaks idle BHCE / Sliver memory until the next `buggy stop`.
-
-**`ops_status()` is a FALLBACK only.** State transitions are delivered automatically as `<system-reminder>` blocks at the start of each turn — same delivery model as background `bash` jobs (you do not poll `bash_output`, you wait for the `● Background command completed` reminder, and the same applies here). The narrow legitimate uses for `ops_status` are: (a) the daemon returned `opscontrol_unreachable` and you need to confirm whether it is back online, (b) you have strong reason to believe a notification was lost and want to re-sync, (c) the operator explicitly asks "what is up?". Routine polling burns context and is rejected at review.
-
-**Anti-patterns**:
-
-- Calling `ops_status` (or any other tool) in a polling loop to wait for `running` — the auto-injected `<system-reminder>` is the delivery channel. Polling here is the same anti-pattern as polling `bash_output` instead of trusting the `● Background command completed` reminder.
-- Calling `ops_start("ad")` before recon has run on a non-AD target — wastes ~30 s of BHCE cold start for nothing. Spawn from observed evidence, not from the engagement tags or the target name alone.
-- Calling `ops_stop` between two sub-agent `task()` calls that both need the same workload — the second specialist will hit "BHCE unreachable" and report a false BLOCKED.
-- Forgetting `ops_cleanup_engagement` when many workloads accumulated — surfaces as `buggy stop` looking slow because compose has to tear down every accumulated specialist.
-
-## G. Parallel Sub-Agent Dispatch
+## F. Parallel Sub-Agent Dispatch
 
 `task()` supports concurrent execution — issue multiple `task()` calls in a SINGLE tool-call turn and LangGraph runs them simultaneously. This is a **3-5x wall-clock speedup** for multi-surface targets.
 
@@ -165,7 +133,7 @@ Domain-specific specialists need sidecar services to function — `ad_operator` 
 
 **Pattern — parallel exploit probes**: after classification identifies multiple independent attack vectors (e.g., SQLi on `/api/search` AND IDOR on `/api/users/{id}`), dispatch separate `task("exploit", ...)` calls for each vector in one turn. Each exploit sub-agent focuses on one vector with its own context window — no cross-contamination.
 
-## H. Adaptive Task Complexity Routing
+## G. Adaptive Task Complexity Routing
 
 Sub-agents receive models based on their role tier (HIGH/MID/LOW in `AGENT_TIERS`). When dispatching `task()`, evaluate whether the objective's complexity warrants requesting a tier upgrade or accepting a downgrade:
 
@@ -182,7 +150,7 @@ Sub-agents receive models based on their role tier (HIGH/MID/LOW in `AGENT_TIERS
 - File/secret scanning (pattern matching, not reasoning)
 
 The model routing system handles this automatically via `AGENT_TIERS` for most cases. Override only when you have strong evidence that the default tier assignment is wrong for a specific dispatch. Use the `/model` command context or include explicit complexity notes in the dispatch prompt so the agent can self-assess whether to use structured tools (fast, mechanical) vs deep reasoning (creative, multi-step).
-## I. Artifact-only web/API coverage
+## H. Artifact-only web/API coverage
 
 When the operator requests evidence-backed web/API coverage, use the persistent assessment ledger in addition to the OPPLAN. These tools inspect existing artifacts; they do not authorize target requests or change any RoE or approval requirement.
 

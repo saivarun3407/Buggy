@@ -11,7 +11,6 @@ import (
 	"strings"
 
 	"github.com/saivarun3407/buggy/clients/launcher/internal/config"
-	"github.com/saivarun3407/buggy/clients/launcher/internal/opscontrol"
 	"github.com/saivarun3407/buggy/clients/launcher/internal/project"
 	"github.com/saivarun3407/buggy/clients/launcher/internal/runtime"
 )
@@ -38,10 +37,6 @@ type Compose struct {
 	EnvFile     string
 	// Overlays are further compose files layered on ComposeFile, in order.
 	Overlays []string
-	// Standalone marks a base file that is not the full stack. The
-	// launcher-managed opscontrol overlay mounts a socket into the langgraph
-	// service, which only the full stack has, so it is never attached here.
-	Standalone bool
 	// Runtime is the container runtime selected at construction time
 	// (docker / podman / nerdctl). Stored so every call uses the same
 	// binary + socket and we don't re-probe on every invocation.
@@ -85,7 +80,6 @@ func NewWithFile(path string, overlays ...string) *Compose {
 		ComposeFile: inHome(path),
 		EnvFile:     filepath.Join(home, ".env"),
 		Overlays:    layered,
-		Standalone:  filepath.Base(path) != MainFile,
 		Runtime:     rt,
 	}
 }
@@ -108,25 +102,18 @@ func (c *Compose) MissingFiles() []string {
 }
 
 // Profiles defines the Docker Compose profile names this launcher
-// recognizes. The shipped catalog (cli + every specialist workload)
-// is the union — `cli` is always activated by `buggy start`;
-// the specialist workloads come up on demand through ADR-0006's
-// opscontrol daemon. The launcher keeps the names here as constants
-// only so `down` / `stop` can sweep every container regardless of
-// which workloads the agent ended up spawning.
+// recognizes. `cli` is always activated by `buggy start`; the names are
+// kept here so `down` / `stop` sweep every profile-gated container.
 var Profiles = struct {
-	CLI       string
-	Operator  string
+	CLI      string
+	Operator string
 }{
-	CLI:       "cli",
-	Operator:  "operator",
+	CLI:      "cli",
+	Operator: "operator",
 }
 
 // AllProfiles returns every profile flag the launcher should pass
-// to `docker compose down`. Workloads the agent never spawned are
-// silently no-ops; the cost of listing them is one cli-arg per
-// profile, which beats orphaning containers when an engagement
-// brought up an ad-hoc combination of specialists.
+// to `docker compose down`. Profiles that never ran are silent no-ops.
 func AllProfiles() []string {
 	return []string{
 		"--profile", Profiles.CLI,
@@ -148,34 +135,14 @@ func (c *Compose) baseArgs() []string {
 		prefix = []string{"compose"}
 	}
 	args := append([]string{}, prefix...)
-	// `-p` is explicit so the launcher's project name matches what the
-	// opscontrol daemon uses on its own compose calls (DockerComposeBackend
-	// reads the same helper). Without `-p`, compose defaults to the
-	// sanitized basename of $BUGGY_HOME — that agrees by accident in
-	// normal flows but breaks the moment any caller passes a different
-	// `-p` (CI, manual debugging, …) and produces a "container_name in
-	// use by another project" conflict on the next ops_start.
-	args = append(args, "-p", opscontrol.ComposeProjectName())
+	// `-p` is explicit: without it compose defaults to the sanitized
+	// basename of $BUGGY_HOME, which breaks the moment any caller passes a
+	// different `-p` (CI, manual debugging, …) and produces a
+	// "container_name in use by another project" conflict.
+	args = append(args, "-p", ComposeProjectName())
 	args = append(args, "-f", c.ComposeFile, "--env-file", c.EnvFile)
 	for _, overlay := range c.Overlays {
 		args = append(args, "-f", overlay)
-	}
-	if c.Standalone {
-		return args
-	}
-	// ADR-0006 Sprint 1: include the opscontrol overlay only when
-	// the file exists AND the host socket has been bound. Attaching
-	// the overlay without BUGGY_OPSCONTROL_SOCK_HOST exported
-	// would mount /dev/null into langgraph (the old `:-/dev/null`
-	// fallback in the overlay) — that's a wiring bug masquerading
-	// as a "daemon unreachable" diagnostic at agent runtime,
-	// which is much harder to debug than a missing overlay at boot.
-	// EnsureRunning() exports the env var on success; the user-side
-	// fallback (no service manager + spawn failed) keeps the overlay
-	// out so the boot doesn't silently regress to the broken state.
-	if override := filepath.Join(c.Home, "docker-compose.opscontrol.yml"); fileExists(override) &&
-		os.Getenv("BUGGY_OPSCONTROL_SOCK_HOST") != "" {
-		args = append(args, "-f", override)
 	}
 	return args
 }
@@ -220,11 +187,8 @@ func (c *Compose) readVersion() string {
 // that occurs when the variable is unset.
 func (c *Compose) composeEnv() []string {
 	// Single source of truth for compose interpolation env (STACK_NAME +
-	// COMPOSE_PROJECT). The daemon's DockerComposeBackend reads from the
-	// same helper so the two never write DIFFERENT container_name
-	// values into the SAME compose project. See
-	// opscontrol.ComposeCommandEnv() for the rationale.
-	env := opscontrol.ComposeCommandEnv()
+	// COMPOSE_PROJECT); see ComposeCommandEnv for the rationale.
+	env := ComposeCommandEnv()
 	if v := c.readVersion(); v != "" {
 		env = append(env, "BUGGY_VERSION="+imageTag(v))
 	}

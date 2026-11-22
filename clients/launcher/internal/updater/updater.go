@@ -345,13 +345,6 @@ func parseUint(s string) (int, bool) {
 // configSyncTargets maps each release-tracked config file (repo-relative
 // source path) to its destination under the install dir. These are the
 // files SyncConfigFiles downloads and manifest-verifies.
-//
-// docker-compose.opscontrol.yml is intentionally absent: it is
-// LAUNCHER-MANAGED (cmd/opscontrol/supervisor.go embeds the body and
-// writes it at every `buggy start`), so the file is never
-// downloaded, never manifest-verified, and never release-tied.
-// Previously every overlay change forced a point release with a "no
-// checksum entry" sync warning.
 func configSyncTargets(home string) map[string]string {
 	return map[string]string{
 		"docker-compose.yml": filepath.Join(home, "docker-compose.yml"),

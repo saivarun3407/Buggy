@@ -27,7 +27,6 @@ func stackHome(t *testing.T) string {
 	home := t.TempDir()
 	t.Setenv("BUGGY_HOME", home)
 	t.Setenv("BUGGY_STACK_NAME", "")
-	t.Setenv("BUGGY_OPSCONTROL_SOCK_HOST", "")
 	t.Setenv("BUGGY_STARTUP_TIMEOUT_SECONDS", "")
 	// Explicitly empty: the bare local image names, whatever the shell says.
 	t.Setenv("BUGGY_IMAGE_PREFIX", "")
@@ -168,24 +167,6 @@ func TestHuntLite_StartsOnlyThePipelineServices(t *testing.T) {
 	got := dockerShaped(huntCompose(true)).UpArgs(nil, liteServices...)
 	if !reflect.DeepEqual(got, want) {
 		t.Errorf("lite up argv:\n got %v\nwant %v", got, want)
-	}
-}
-
-// The lite stack must not inherit the opscontrol overlay: it mounts a socket
-// into langgraph, a service the lite file does not have.
-func TestHuntLite_NeverAttachesTheOpscontrolOverlay(t *testing.T) {
-	home := stackHome(t)
-	override := filepath.Join(home, "docker-compose.opscontrol.yml")
-	if err := os.WriteFile(override, []byte("services: {}\n"), 0o600); err != nil {
-		t.Fatal(err)
-	}
-	t.Setenv("BUGGY_OPSCONTROL_SOCK_HOST", filepath.Join(home, "ops.sock"))
-
-	if !slices.Contains(operatorArgv([]string{"example.com"}, huntFlags{mode: "enforce"}), override) {
-		t.Fatal("control: the full-stack hunt should attach the opscontrol overlay here")
-	}
-	if slices.Contains(operatorArgv([]string{"example.com"}, huntFlags{mode: "enforce", lite: true}), override) {
-		t.Error("the lite hunt attached the opscontrol overlay")
 	}
 }
 

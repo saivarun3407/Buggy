@@ -416,8 +416,7 @@ func ensureComposeFiles(env map[string]string, c *compose.Compose) error {
 // blocks until their healthchecks pass.
 //
 // It is startServices without everything the lite stack does not have: no
-// opscontrol daemon, no database or gateway credentials to refuse, no
-// langgraph to wait for. The lite file has no env_file; the one secret it
+// database or gateway credentials to refuse, no langgraph to wait for. The lite file has no env_file; the one secret it
 // needs, BUGGY_STACK_MCP_TOKEN, is interpolated from .env, where it is
 // generated when missing.
 func startLiteServices(env map[string]string, c *compose.Compose, services ...string) error {

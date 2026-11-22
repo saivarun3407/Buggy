@@ -613,7 +613,7 @@ COMPOSE_PROFILES=c2-sliver
 	if strings.Contains(string(out), "\nCOMPOSE_PROFILES=c2-sliver\n") {
 		t.Errorf("active COMPOSE_PROFILES line survived migration:\n%s", out)
 	}
-	if !strings.Contains(string(out), "[v1.1.8 ADR-0006 migration]") {
+	if !strings.Contains(string(out), "[v1.1.8 migration]") {
 		t.Errorf("expected migration comment, got:\n%s", out)
 	}
 	// Original value preserved inline for restorability.

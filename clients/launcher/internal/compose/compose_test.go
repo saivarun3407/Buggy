@@ -29,10 +29,9 @@ func TestNew(t *testing.T) {
 
 func TestAllProfiles(t *testing.T) {
 	profiles := AllProfiles()
-	// ADR-0006 Sprint 2 expanded the catalog to cover every workload
-	// the launcher may need to tear down: cli plus the one-off operator
-	// shell that writes the control root = 2 profiles = 4 cli args
-	// (--profile NAME).
+	// Every profile the launcher may need to tear down: cli plus the
+	// one-off operator shell that writes the control root = 2 profiles =
+	// 4 cli args (--profile NAME).
 	expected := []string{
 		"--profile", "cli",
 		"--profile", "operator",
@@ -57,10 +56,9 @@ func TestBaseArgs(t *testing.T) {
 	args := c.baseArgs()
 	// Expected shape: ["compose", "-p", "buggy", "-f",
 	//                  "/test/docker-compose.yml", "--env-file", "/test/.env"]
-	// `-p buggy` is explicit so the launcher and the opscontrol
-	// daemon both target the same compose project; otherwise the
-	// daemon's no-`-p` default ("buggy" via dir basename) drifts
-	// the moment any caller passes `-p X` themselves.
+	// `-p buggy` is explicit so every caller targets the same compose
+	// project; compose's no-`-p` default (the dir basename) drifts the
+	// moment any caller passes `-p X` themselves.
 	want := []string{
 		"compose",
 		"-p", "buggy",
@@ -121,9 +119,6 @@ func TestNewWithFile_ResolvesNamesAgainstTheHome(t *testing.T) {
 	if want := filepath.Join(home, ".env"); c.EnvFile != want {
 		t.Errorf("EnvFile = %q, want %q", c.EnvFile, want)
 	}
-	if !c.Standalone {
-		t.Error("a stack whose base is not docker-compose.yml must be Standalone")
-	}
 	wantFiles := append([]string{c.ComposeFile}, wantOverlays...)
 	if got := c.Files(); !reflect.DeepEqual(got, wantFiles) {
 		t.Errorf("Files() = %v, want %v", got, wantFiles)
@@ -131,8 +126,8 @@ func TestNewWithFile_ResolvesNamesAgainstTheHome(t *testing.T) {
 
 	// Control: New() is still the full stack, with nothing layered on it.
 	full := New()
-	if full.Standalone || full.Overlays != nil {
-		t.Errorf("New() = Standalone %v, Overlays %v; want false and none", full.Standalone, full.Overlays)
+	if full.Overlays != nil {
+		t.Errorf("New() Overlays = %v; want none", full.Overlays)
 	}
 	if want := filepath.Join(home, "docker-compose.yml"); full.ComposeFile != want {
 		t.Errorf("New().ComposeFile = %q, want %q", full.ComposeFile, want)
@@ -146,7 +141,6 @@ func TestBaseArgs_OverlaysFollowTheBaseFileInOrder(t *testing.T) {
 		ComposeFile: "/test/docker-compose.lite.yml",
 		EnvFile:     "/test/.env",
 		Overlays:    []string{"/test/docker-compose.lab.yml", "/test/docker-compose.demo.yml"},
-		Standalone:  true,
 	}
 	want := []string{
 		"compose",
@@ -161,32 +155,8 @@ func TestBaseArgs_OverlaysFollowTheBaseFileInOrder(t *testing.T) {
 	}
 }
 
-func TestBaseArgs_OpscontrolOverlayIsForTheFullStackOnly(t *testing.T) {
-	home := t.TempDir()
-	override := filepath.Join(home, "docker-compose.opscontrol.yml")
-	if err := os.WriteFile(override, []byte("services: {}\n"), 0o600); err != nil {
-		t.Fatal(err)
-	}
-	t.Setenv("BUGGY_STACK_NAME", "")
-	t.Setenv("BUGGY_OPSCONTROL_SOCK_HOST", filepath.Join(home, "ops.sock"))
-
-	full := &Compose{Home: home, ComposeFile: filepath.Join(home, MainFile), EnvFile: filepath.Join(home, ".env")}
-	if got := full.baseArgs(); got[len(got)-1] != override {
-		t.Fatalf("full stack must attach the opscontrol overlay; baseArgs = %v", got)
-	}
-
-	// The overlay mounts a socket into langgraph, which the lite stack does
-	// not have: attaching it there would make every lite command fail.
-	lite := &Compose{Home: home, ComposeFile: filepath.Join(home, LiteFile), EnvFile: filepath.Join(home, ".env"), Standalone: true}
-	for _, arg := range lite.baseArgs() {
-		if arg == override {
-			t.Fatalf("standalone stack attached the opscontrol overlay: %v", lite.baseArgs())
-		}
-	}
-}
-
 func testStack() *Compose {
-	return &Compose{Home: "/test", ComposeFile: "/test/docker-compose.lite.yml", EnvFile: "/test/.env", Standalone: true}
+	return &Compose{Home: "/test", ComposeFile: "/test/docker-compose.lite.yml", EnvFile: "/test/.env"}
 }
 
 var testStackBase = []string{"compose", "-p", "buggy", "-f", "/test/docker-compose.lite.yml", "--env-file", "/test/.env"}

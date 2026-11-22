@@ -32,7 +32,7 @@ Filter by free-text `query` (matches id/description/binaries/category),
 (MITRE tactic id, e.g. `TA0006`), or `max_risk`
 (`passive`|`bounded_active`|`intrusive`|`high_impact`|`hardware`). Each result's
 `reach` field says exactly how to run it: directly in bash (base image),
-after an `ops_start` profile activation, via a sidecar's dedicated tools, or
+after the operator starts its compose profile, via a sidecar's dedicated tools, or
 after a `pip3 install`. Reach for the dedicated tool over a bespoke script.
 
 ### bash() — execute a command

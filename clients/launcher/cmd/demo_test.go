@@ -34,9 +34,6 @@ func TestDemo_ComposeFileList(t *testing.T) {
 	if got := c.Files(); !reflect.DeepEqual(got, want) {
 		t.Errorf("demo files = %v\n      want %v", got, want)
 	}
-	if !c.Standalone {
-		t.Error("the demo is based on the lite file: it must not take the opscontrol overlay")
-	}
 	if slices.Contains(c.Files(), filepath.Join(home, "docker-compose.yml")) {
 		t.Error("the demo must not layer the full stack")
 	}

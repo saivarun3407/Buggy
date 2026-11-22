@@ -7,7 +7,6 @@ import (
 	"time"
 
 	"charm.land/huh/v2"
-	"github.com/saivarun3407/buggy/clients/launcher/cmd/opscontrol"
 	"github.com/saivarun3407/buggy/clients/launcher/internal/config"
 	"github.com/saivarun3407/buggy/clients/launcher/internal/migrate"
 	"github.com/saivarun3407/buggy/clients/launcher/internal/platform"
@@ -1105,17 +1104,6 @@ func runOnboard(cmd *cobra.Command, args []string) error {
 	fmt.Println(ui.Dim.Render("  └──────────────────────────────────┘"))
 	fmt.Println()
 
-	// Install opscontrol as a managed service (ADR-0006). Idempotent
-	// — re-running onboard re-templates the unit so a launcher
-	// upgrade picks up the new ExecStart path. On hosts without
-	// systemd-user / launchd this is a no-op announcement, and the
-	// launcher's spawn fallback takes over at `buggy start`.
-	fmt.Println()
-	if err := opscontrol.EnsureInstalled(); err != nil {
-		// Non-fatal: onboarding can complete without managed-service
-		// mode, the user will just stay on launcher-spawn fallback.
-		ui.Warning("opscontrol install skipped: " + err.Error())
-	}
 	fmt.Println()
 
 	// One-time GitHub star ask — the natural post-onboarding moment.

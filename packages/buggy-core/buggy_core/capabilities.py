@@ -881,21 +881,20 @@ def reach_instruction(cap: Capability) -> str:
         if cap.requires_service:
             return (
                 f"installed in the sandbox, but needs the '{cap.requires_service}' "
-                f"workload running — ask the orchestrator to ops_start it and confirm "
-                f"it is running (ops_status) before invoking it with the bash tool"
+                f"service running — confirm it is up before invoking it with the bash tool"
             )
         return "installed in the sandbox — run it directly with the bash tool"
     if delivery.startswith("profile:"):
         profile = delivery.removeprefix("profile:")
         return (
-            f"profile-gated — ask the orchestrator to ops_start the '{profile}' "
+            f"profile-gated — the operator must start the '{profile}' compose "
             f"profile, then run it with bash"
         )
     if delivery == "sidecar":
         service = cap.requires_service or cap.id
         return (
             f"delivered by the '{service}' sidecar — reach it through the dedicated "
-            f"@tool wrappers, NOT bash; request via ops_start first"
+            f"@tool wrappers, NOT bash"
         )
     if delivery == "pip":
         return (
@@ -1065,7 +1064,7 @@ def generate_kali_environment_block() -> str:
     ]
     if profile_caps:
         lines.append("")
-        lines.append("**Profile-gated (request via ops_start before use):**")
+        lines.append("**Profile-gated (the operator starts the profile):**")
         by_profile: dict[str, list[Capability]] = {}
         for c in profile_caps:
             p = c.delivery.removeprefix("profile:")
@@ -1083,8 +1082,7 @@ def generate_kali_environment_block() -> str:
     if sidecar_caps:
         lines.append("")
         lines.append(
-            "**Via dedicated tools (NOT bash — request via ops_start first):** "
-            + ", ".join(sorted(c.id for c in sidecar_caps))
+            "**Via dedicated tools (NOT bash):** " + ", ".join(sorted(c.id for c in sidecar_caps))
         )
 
     # Planned tools advisory

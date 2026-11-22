@@ -163,39 +163,28 @@ def create_buggy_agent(
 
     if tools is None:
         # Offensive work goes through ``task()`` to a specialist.
-        # The orchestrator carries two tool categories directly:
+        # The orchestrator carries these tool categories directly:
         #
-        # 1. ADR-0006 ``ops_*``: only the orchestrator may bring
-        #    specialist workloads up or down (least-privilege §2, so a
-        #    compromised sub-agent cannot spin up unrelated infrastructure).
-        #    Registered ONLY when the opscontrol daemon socket is present
-        #    (``buggy start`` topology). Daemon-less topologies —
-        #    ``make dev`` / ``make smoke``, and hosted deployments that manage
-        #    workload teardown externally — have no socket, so offering these
-        #    tools would only return ``opscontrol_unreachable``. Gating keeps
-        #    the toolset honest per topology instead of relying on the model
-        #    to avoid an unusable tool.
-        # 2. Engagement-level intelligence & coordination tools:
+        # 1. Engagement-level intelligence & coordination tools:
         #    cross-session memory (recall/store), OSINT feeds (KEV/GHSA),
         #    consensus validation, structured export, CART,
         #    and finding-ID allocation for parallel dispatch. These carry no
         #    daemon dependency, so they are always registered.
-        # 3. ``request_scope_amendment``: the operator-approval channel for
+        # 2. ``request_scope_amendment``: the operator-approval channel for
         #    out-of-scope opportunities discovered mid-engagement. Lives on
         #    the orchestrator (not sub-agents) because scope adjudication is
         #    a coordination concern — sub-agents surface opportunities in
         #    their exit artifacts, the orchestrator raises them.
-        # 4. ``devin_delegate``: agent-level subscription (Devin CLI). The
+        # 3. ``devin_delegate``: agent-level subscription (Devin CLI). The
         #    operator's logged-in devin binary executes delegated subtasks
         #    under their Devin subscription. Orchestrator-only per the same
-        #    least-privilege rule as ops_*: a delegated session is a full
+        #    least-privilege rule as scope amendment: a delegated session is a full
         #    agent, so a prompt-injected sub-agent must not be able to fan
         #    out sessions on the operator's subscription. Registered ONLY
         #    when BUGGY_AUTH_DEVIN=true and the CLI probe
         #    authenticates — an unusable tool would only ever return
         #    devin_not_installed.
         from buggy.tools.devin import DEVIN_TOOLS, devin_available
-        from buggy.tools.ops import OPS_TOOLS, ops_available
         from buggy.tools.session import SESSION_TOOLS
 
         orchestrator_tools = [
@@ -212,8 +201,6 @@ def create_buggy_agent(
             allocate_finding_id,
             request_scope_amendment,
         ]
-        if ops_available():
-            orchestrator_tools = [*OPS_TOOLS, *orchestrator_tools]
         if devin_available():
             orchestrator_tools = [*DEVIN_TOOLS, *orchestrator_tools]
         tools = build_tools(

@@ -13,7 +13,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/saivarun3407/buggy/clients/launcher/cmd/opscontrol"
 	"github.com/saivarun3407/buggy/clients/launcher/internal/compose"
 	"github.com/saivarun3407/buggy/clients/launcher/internal/config"
 	"github.com/saivarun3407/buggy/clients/launcher/internal/engagement"
@@ -235,7 +234,7 @@ func prepareStackFor(cmd *cobra.Command, skipModelAuth bool) (string, map[string
 	if rewrote, mErr := config.MigrateActiveComposeProfiles(config.EnvPath()); mErr != nil {
 		ui.Warning("Could not migrate stale COMPOSE_PROFILES in .env: " + mErr.Error())
 	} else if rewrote {
-		ui.Info("Migrated stale COMPOSE_PROFILES in .env (specialist workloads now spawn via ops_start). Backup at " + config.EnvPath() + ".bak")
+		ui.Info("Migrated stale COMPOSE_PROFILES in .env (the launcher picks the profiles it starts). Backup at " + config.EnvPath() + ".bak")
 	}
 
 	// 2. Load and validate .env
@@ -294,8 +293,7 @@ func prepareStackFor(cmd *cobra.Command, skipModelAuth bool) (string, map[string
 	}
 
 	// Record the registry an installed launcher pulls its images from, so
-	// every compose caller that reads .env (the opscontrol daemon among
-	// them) resolves the same image names. Development builds have no
+	// every compose caller that reads .env resolves the same image names. Development builds have no
 	// default prefix and leave .env alone; an existing value always wins.
 	if compose.DefaultImagePrefix != "" {
 		if _, ok := env[project.ImagePrefixEnv]; !ok {
@@ -363,22 +361,12 @@ func bindEngagementDirs(home string, choice engagement.Choice) error {
 	return nil
 }
 
-// startServices spawns the opscontrol daemon, refuses default credentials,
-// brings the compose stack up, and blocks until healthchecks pass. The
+// startServices refuses default credentials, brings the compose stack up, and blocks until healthchecks pass. The
 // caller sets BUGGY_ENGAGEMENT_WORKSPACE beforehand when an
 // engagement-scoped /workspace bind is wanted (the interactive paths do;
 // the non-interactive hunt path leaves the whole tree mounted, which is the
 // convention buggy-cli engage/hunt relies on).
 func startServices(env map[string]string) error {
-	// Spawn the opscontrol daemon BEFORE compose up so the langgraph socket
-	// bind-mount has a real socket to attach to (ADR-0006 S1').
-	sock, err := opscontrol.EnsureRunning()
-	if err != nil {
-		ui.Warning("opscontrol daemon not started: " + err.Error())
-	} else if err := os.Setenv("BUGGY_OPSCONTROL_SOCK_HOST", sock); err != nil {
-		ui.Warning("set BUGGY_OPSCONTROL_SOCK_HOST: " + err.Error())
-	}
-
 	// Refuse to start with default credentials.
 	if err := checkDefaultCredentials(env); err != nil {
 		return err

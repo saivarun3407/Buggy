@@ -259,8 +259,7 @@ _OPERATIONAL_ROLES = {
 # verification gate, finding protocol, output discipline, analyst mindset) but
 # NOT the attack-oriented cross-cutting prompts (_MISSION_DIRECTIVE,
 # _KALI_ENVIRONMENT) which contradict their agent-specific rules.
-_PASSIVE_ROLES = {
-}
+_PASSIVE_ROLES = {}
 
 
 class PromptBuilder:
