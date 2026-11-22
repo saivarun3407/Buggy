@@ -243,7 +243,6 @@ _OPERATIONAL_ROLES = {
     # not here. They get the 5 compatible cross-cutting prompts but NOT
     # _MISSION_DIRECTIVE or _KALI_ENVIRONMENT, which contradict their
     # agent-specific read-only / passive-only rules.
-    "mobile_operator",
     "iot_operator",
     "ics_operator",
     "wireless_operator",

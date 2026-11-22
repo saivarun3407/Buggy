@@ -43,7 +43,6 @@ STANDARD_GRAPHS: dict[str, str] = {
     "ad_operator": "./buggy/agents/standard/ad_operator.py:graph",
     "blue_cell": "./buggy/agents/standard/blue_cell.py:graph",
     "phisher": "./buggy/agents/standard/phisher.py:graph",
-    "mobile_operator": "./buggy/agents/standard/mobile_operator.py:graph",
     "wireless_operator": "./buggy/agents/standard/wireless_operator.py:graph",
     "osint_operator": "./buggy/agents/standard/osint_operator.py:graph",
     "iot_operator": "./buggy/agents/standard/iot_operator.py:graph",

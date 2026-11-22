@@ -106,7 +106,6 @@ class TestPhaseForRoleMapping:
             "postexploit",
             "ad_operator",
             "cloud_hunter",
-            "mobile_operator",
             "wireless_operator",
             "phisher",
             "analyst",

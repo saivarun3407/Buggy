@@ -111,11 +111,6 @@ _STANDARD_FACTORIES = [
     ("ad_operator", "buggy.agents.standard.ad_operator", "create_ad_operator_agent"),
     ("phisher", "buggy.agents.standard.phisher", "create_phisher_agent"),
     (
-        "mobile_operator",
-        "buggy.agents.standard.mobile_operator",
-        "create_mobile_operator_agent",
-    ),
-    (
         "wireless_operator",
         "buggy.agents.standard.wireless_operator",
         "create_wireless_operator_agent",
