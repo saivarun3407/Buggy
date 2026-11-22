@@ -1,5 +1,5 @@
 {
- "updated": "2026-11-22 07:06 UTC",
+ "updated": "2026-11-22 07:56 UTC",
  "columns": [
   "backlog",
   "ready",
@@ -824,9 +824,9 @@
    "status": "review",
    "agent": "",
    "branch": "",
-   "commit": "3436e58",
-   "tests": "2430 tests in the gateway suites",
-   "note": "merged; unit-tested; live run pending",
+   "commit": "11328 tests pass:3436e58",
+   "tests": " no sign-up found on the single-page practice app; accounts were declared by hand",
+   "note": "unit-tested only. Live",
    "order": 38
   },
   {
@@ -835,12 +835,12 @@
    "lane": "C",
    "title": "Test one bug class after another and say what happened to each",
    "depends": [],
-   "status": "review",
+   "status": "done",
    "agent": "",
    "branch": "",
-   "commit": "678f0bc",
-   "tests": "626 CLI tests",
-   "note": "merged; class table in every run; live run pending",
+   "commit": "11328 tests pass:678f0bc",
+   "tests": " 14 classes reported, 5 tested with 8 proven",
+   "note": "live",
    "order": 39
   },
   {
@@ -849,12 +849,12 @@
    "lane": "E",
    "title": "A video and a screenshot for every proven bug",
    "depends": [],
-   "status": "review",
+   "status": "done",
    "agent": "",
    "branch": "",
-   "commit": "ec07edf",
-   "tests": "473 findings and browser tests",
-   "note": "merged; a real video was recorded in a test; live run pending",
+   "commit": "11328 tests pass:ec07edf",
+   "tests": " 8 videos and screenshots recorded, one per proven bug",
+   "note": "live",
    "order": 40
   },
   {
@@ -863,12 +863,12 @@
    "lane": "E",
    "title": "Word report: what, how severe and why, payloads, proof, fix",
    "depends": [],
-   "status": "review",
+   "status": "done",
    "agent": "",
    "branch": "",
-   "commit": "826203d",
-   "tests": "473 findings and browser tests",
-   "note": "merged; Word report written by hunt; live run pending",
+   "commit": "11328 tests pass:826203d",
+   "tests": " report.docx with 8 findings and embedded screenshots",
+   "note": "live",
    "order": 41
   },
   {
@@ -882,12 +882,12 @@
     "G3",
     "G4"
    ],
-   "status": "in_progress",
+   "status": "done",
    "agent": "",
    "branch": "",
-   "commit": "",
-   "tests": "",
-   "note": "images rebuilding for the end-to-end run",
+   "commit": "11328 tests pass:826203d",
+   "tests": " one command, 12 min 18 s, 8 proven bugs, videos, logs, Word report",
+   "note": "live",
    "order": 42
   },
   {

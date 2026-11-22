@@ -458,6 +458,16 @@ Approving still happens with `buggy-cli approvals allow` or in the dashboard.
   each known lab bug is listed as proven, pipeline-only, backlog or excluded.
   Reflected XSS, template injection, path traversal and CORS have no positive
   case in the lab apps; those probes are proven on unit fixtures only.
+- **The whole chain has been run once, on two practice apps.** On 2026-11-22
+  one `hunt` command with no model ran recon, the class-by-class tests, proof
+  recording and the Word report against a local Juice Shop and DVWA in 12
+  minutes 18 seconds: eight issues proven (five injection, one XSS, one file
+  inclusion, one open redirect), eight videos, eight log bundles, one
+  `report.docx`. Account creation was allowed and did not work there: Juice
+  Shop is a single-page application whose sign-up is built in script, so no
+  registration form or described API was found, and DVWA has no sign-up; the
+  DVWA accounts were declared by hand. Self-created accounts are proven by
+  unit tests only.
 - **Signed-in testing has been run on one practice app.** On 2026-11-21
   `hunt` ran against a local DVWA with two declared accounts and no model:
   5 minutes 37 seconds, 74 URLs reached behind the login, and six issues
