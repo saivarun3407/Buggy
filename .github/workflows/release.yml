@@ -148,8 +148,8 @@ jobs:
 
   # Multi-arch images that build well under QEMU (Python wheels, simple
   # binaries). Web is split out below — its arm64 emulation cost dominated
-  # the release (~21 min for web alone). Sandbox + c2-sliver are also split
-  # out (docker-heavy) for the same reason: their Kali base + ~25-package
+  # the release (~21 min for web alone). Sandbox is also split
+  # out (docker-heavy) for the same reason: its Kali base + ~25-package
   # apt layers turned out to be even worse under QEMU.
   docker:
     name: Build & push ${{ matrix.image }}
@@ -313,9 +313,9 @@ jobs:
           name: sbom-${{ matrix.image }}
           path: sbom-${{ matrix.image }}.cdx.json
 
-  # Sandbox + c2-sliver: split per platform onto native runners. Same
-  # rationale as docker-web below — these images sit on Kali rolling
-  # with heavy apt layers (Python, Node, sliver, ~25 dpkg postinst
+  # Sandbox: split per platform onto native runners. Same
+  # rationale as docker-web below — it sits on Kali rolling
+  # with heavy apt layers (Python, Node, ~25 dpkg postinst
   # scripts), which under QEMU emulation pushed sandbox's arm64 build
   # over 25 minutes. Native runners drop it to ~5 min. Per-image,
   # per-platform digests are stitched into a manifest by
@@ -333,14 +333,6 @@ jobs:
             runs-on: ubuntu-latest
           - image: buggy-sandbox
             dockerfile: containers/sandbox.Dockerfile
-            platform: arm64
-            runs-on: ubuntu-24.04-arm
-          - image: buggy-c2-sliver
-            dockerfile: containers/c2-sliver.Dockerfile
-            platform: amd64
-            runs-on: ubuntu-latest
-          - image: buggy-c2-sliver
-            dockerfile: containers/c2-sliver.Dockerfile
             platform: arm64
             runs-on: ubuntu-24.04-arm
           # Recon pipeline: pinned Go scanners (CGO) + stdlib Python. Always
@@ -411,7 +403,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        image: [buggy-sandbox, buggy-c2-sliver, buggy-pipeline]
+        image: [buggy-sandbox, buggy-pipeline]
     runs-on: ubuntu-latest
     environment: pypi-release
     steps:
@@ -855,7 +847,6 @@ jobs:
             buggy-egress-guard
             buggy-pipeline
             buggy-browser
-            buggy-c2-sliver
             buggy-web
             buggy-solver
           )
@@ -889,7 +880,6 @@ jobs:
             buggy-egress-guard
             buggy-pipeline
             buggy-browser
-            buggy-c2-sliver
             buggy-web
             buggy-solver
           )

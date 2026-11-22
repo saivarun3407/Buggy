@@ -116,13 +116,11 @@ func (c *Compose) MissingFiles() []string {
 // which workloads the agent ended up spawning.
 var Profiles = struct {
 	CLI       string
-	C2        string
 	AD        string
 	Reversing string
 	Operator  string
 }{
 	CLI:       "cli",
-	C2:        "c2-sliver",
 	AD:        "ad",
 	Reversing: "reversing",
 	Operator:  "operator",
@@ -136,7 +134,6 @@ var Profiles = struct {
 func AllProfiles() []string {
 	return []string{
 		"--profile", Profiles.CLI,
-		"--profile", Profiles.C2,
 		"--profile", Profiles.AD,
 		"--profile", Profiles.Reversing,
 		"--profile", Profiles.Operator,

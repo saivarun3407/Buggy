@@ -249,8 +249,8 @@ def test_generated_script_runs_for_real_with_sh(tmp_path, monkeypatch):
 # ── domain readiness ─────────────────────────────────────────────────
 
 
-AD_PROFILE = {"ad": ["bhce", "bhce-neo4j"], "c2-sliver": ["c2-sliver"], "reversing": ["ghidra-mcp"]}
-ALL_SERVICES = ["bhce", "bhce-neo4j", "c2-sliver", "ghidra-mcp", "sandbox"]
+AD_PROFILE = {"ad": ["bhce", "bhce-neo4j"], "reversing": ["ghidra-mcp"]}
+ALL_SERVICES = ["bhce", "bhce-neo4j", "ghidra-mcp", "sandbox"]
 
 
 def _statuses(missing: set[str] = frozenset()):
@@ -303,7 +303,7 @@ def test_missing_profile_service_is_not_available_with_profile_named():
 
 
 def test_tool_service_down_degrades_with_profile_named():
-    services = [s for s in ALL_SERVICES if s not in {"c2-sliver", "ghidra-mcp"}]
+    services = [s for s in ALL_SERVICES if s != "ghidra-mcp"]
     rows = readiness.domain_readiness(_statuses(), services, profile_services=AD_PROFILE)
     assert _domain(rows, "reverser")["status"] == (
         "degraded (missing: ghidra (needs profile reversing))"
@@ -334,7 +334,6 @@ def compose_file(tmp_path):
         "  sandbox: {}\n"
         "  bhce: {profiles: [ad]}\n"
         "  bhce-neo4j: {profiles: [ad]}\n"
-        "  c2-sliver: {profiles: [c2-sliver]}\n"
         "  ghidra-mcp: {profiles: [reversing]}\n"
     )
     return path

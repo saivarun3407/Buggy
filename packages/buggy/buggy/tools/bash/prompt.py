@@ -64,7 +64,7 @@ Return-value markers from `bash()`:
 - `[AUTO-BACKGROUND]` — command exceeded 60s and was auto-converted; partial output preview included
 - `[SIZE LIMIT]` — output exceeded 5M chars; command was interrupted; redirect to file
 - `[TIMEOUT]` — only when you set `timeout` BELOW 60; session still occupied (use a different session for new commands; check this one with `bash_output`). At the default, a long command auto-backgrounds instead.
-- `[session: <name> — interactive, send next command with is_input=True]` — interactive prompt detected (msf, sliver, REPL). Reply with `is_input=True`; interactive turns are NEVER auto-backgrounded.
+- `[session: <name> — interactive, send next command with is_input=True]` — interactive prompt detected (msf, REPL). Reply with `is_input=True`; interactive turns are NEVER auto-backgrounded.
 - `[ERROR]` — sandbox/tmux failure; message explains; retry or `bash_kill`
 
 Empty `command` (passive screen read of `session`) returns one of:
@@ -190,13 +190,13 @@ no TLS fingerprint to defeat.
 
 **Exception**: If the entire output IS the flag (single line ≤200 bytes), inline it.
 
-## Interactive Programs (msfconsole, sliver, evil-winrm, REPLs)
+## Interactive Programs (msfconsole, evil-winrm, REPLs)
 
 The tool auto-detects waiting prompts:
 ```
-bash(command="sliver-client console", session="c2", description="Open the Sliver client console")
-bash(command="https -l 443", is_input=True, session="c2", description="Start an HTTPS listener on port 443")
-bash(command="C-c", is_input=True, session="c2", description="Send Ctrl+C to the console")  # Ctrl+C
+bash(command="python3", session="repl", description="Open a Python REPL")
+bash(command="print(42)", is_input=True, session="repl", description="Send a line to the REPL")
+bash(command="C-c", is_input=True, session="repl", description="Send Ctrl+C to the REPL")  # Ctrl+C
 ```
 
 NEVER start with `is_input=True`. NEVER use `nohup ... &` — use named

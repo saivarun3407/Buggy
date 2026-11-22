@@ -979,34 +979,6 @@ services:
     profiles:
       - cli
 
-  # ── C2 Infrastructure (profile-based, default: c2-sliver) ───────────
-  # Each C2 framework runs as a profile-based service on sandbox-net.
-  # ADR-0006 (v1.1.8+): C2 frameworks are opt-in workloads spawned by
-  # the orchestrator agent through opscontrol — the orchestrator calls
-  # `ops_start("c2-sliver")` after gaining a foothold. Default
-  # `buggy start` keeps the C2 plane cold.
-  # Swap framework: change `ops_start("c2-sliver")` to
-  # `ops_start("c2-havoc")` once that workload ships.
-  # Agent connects via: sliver-client (pre-installed in sandbox)
-  c2-sliver:
-    image: ${BUGGY_IMAGE_PREFIX:-}buggy-c2-sliver:${BUGGY_VERSION:-stable}
-    # Multi-arch image — see buggy-sandbox above for the same notes.
-    build:
-      context: .
-      dockerfile: containers/c2-sliver.Dockerfile
-    container_name: buggy${BUGGY_STACK_NAME:+-${BUGGY_STACK_NAME}}-c2-sliver
-    networks:
-      - sandbox-net
-    cap_add:
-      - NET_BIND_SERVICE
-    volumes:
-      - sliver_data:/home/sliver/.sliver
-    pids_limit: 512
-    restart: unless-stopped
-    logging: *default-logging
-    profiles:
-      - c2-sliver
-
   # ─── Optional: OpenTelemetry collector for self-hosted traces ──────────
   # Uncomment to receive Buggy spans locally (Jaeger all-in-one).
   # Buggy stays default-off; set OTEL_ENABLED=1 plus the env vars below
@@ -1245,7 +1217,6 @@ volumes:
   # Agent thread state, written by langgraph only.
   langgraph_state:
   postgres_data:
-  sliver_data:
   neo4j_data:
   neo4j_logs:
   bhce_neo4j_data:

@@ -94,8 +94,6 @@ RUN --mount=type=cache,target=/var/cache/apt,sharing=locked,id=sandbox-apt-cache
         # ── Exploitation frameworks ──
         exploitdb \
         metasploit-framework \
-        # ── C2 client (connects to the separate c2-sliver server container) ──
-        sliver \
         # ── TLS / crypto assessment ──
         testssl.sh \
         sslscan \

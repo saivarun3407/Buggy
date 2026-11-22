@@ -37,7 +37,7 @@ jobs:
           version="${GITHUB_REF_NAME#v}"
           # This repository's registry namespace, lower-cased for ghcr.io.
           registry="ghcr.io/${GITHUB_REPOSITORY_OWNER,,}"
-          images="buggy-litellm buggy-langgraph buggy-cli buggy-skillogy buggy-egress-guard buggy-pipeline buggy-browser buggy-sandbox buggy-c2-sliver buggy-web buggy-solver"
+          images="buggy-litellm buggy-langgraph buggy-cli buggy-skillogy buggy-egress-guard buggy-pipeline buggy-browser buggy-sandbox buggy-web buggy-solver"
           : > image-digests.txt
           for image in ${images}; do
             ref="${registry}/${image}:${version}"

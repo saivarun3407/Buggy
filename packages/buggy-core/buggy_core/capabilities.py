@@ -575,19 +575,6 @@ CAPABILITY_REGISTRY: tuple[Capability, ...] = (
         phases=("TA0001", "TA0002", "TA0004"),
         lifecycle=Lifecycle.SUPPORTED,
     ),
-    # ── C2 ──
-    Capability(
-        id="sliver",
-        category="c2",
-        description="Sliver C2 framework client",
-        binaries=("sliver", "sliver-client"),
-        delivery="base",
-        apt_packages=("sliver",),
-        risk_tier=RiskTier.HIGH_IMPACT,
-        phases=("TA0011",),
-        requires_service="c2-sliver",
-        lifecycle=Lifecycle.SUPPORTED,
-    ),
     # ── TLS / crypto ──
     Capability(
         id="testssl",
@@ -1074,7 +1061,6 @@ def generate_kali_environment_block() -> str:
         "smb": "SMB / network services",
         "ad": "Active Directory / Kerberos",
         "exploit": "Exploitation frameworks",
-        "c2": "Command & Control",
         "tls": "TLS / crypto",
         "secrets": "Secrets / supply chain",
         "network": "Packet capture / network",

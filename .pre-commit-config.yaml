@@ -130,7 +130,7 @@ repos:
           - "--ignore=DL3018"   # pin apk versions — Alpine doesn't expose snapshot URLs
           - "--ignore=DL3015"   # always --no-install-recommends — many cases legitimately need recommends
           - "--ignore=DL3059"   # consecutive RUN — deliberately combined for cache control
-          - "--ignore=DL3002"   # last USER should not be root — sandbox + c2-sliver run as root by design
+          - "--ignore=DL3002"   # last USER should not be root — sandbox runs as root by design
           - "--ignore=DL3013"   # pin pip versions — uv.lock pins everything via uv sync
           - "--ignore=DL4006"   # SHELL pipefail — existing Dockerfiles use `set -o pipefail` inline instead
         files: ^containers/.*\.Dockerfile$

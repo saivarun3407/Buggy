@@ -52,7 +52,6 @@ jobs:
             buggy-egress-guard
             buggy-pipeline
             buggy-browser
-            buggy-c2-sliver
             buggy-web
             buggy-solver
           )
@@ -79,7 +78,6 @@ jobs:
             buggy-egress-guard
             buggy-pipeline
             buggy-browser
-            buggy-c2-sliver
             buggy-web
             buggy-solver
           )

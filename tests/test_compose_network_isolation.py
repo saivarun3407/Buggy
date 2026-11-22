@@ -72,7 +72,6 @@ SANDBOX_NET = "sandbox-net"
 OPERATIONAL_ONLY: frozenset[str] = frozenset(
     {
         "sandbox",
-        "c2-sliver",
         "ghidra-mcp",
     }
 )
@@ -122,7 +121,7 @@ def _rendered_compose() -> dict:
     """Return the post-interpolation compose document as a dict.
 
     Uses ``--profiles`` so that profile-gated services
-    (c2-sliver, ghidra-mcp, cli) are present in the render and
+    (ghidra-mcp, cli) are present in the render and
     therefore subject to the same invariants as the always-on
     services.
     """
@@ -134,7 +133,7 @@ def _rendered_compose() -> dict:
         # render sees every service. The list mirrors the profiles
         # defined in docker-compose.yml; extend here when a new
         # profile is added.
-        "COMPOSE_PROFILES": "c2-sliver,reversing,cli,operator",
+        "COMPOSE_PROFILES": "reversing,cli,operator",
         # The compose file refuses to render without these (no defaults).
         "SANDBOX_TOKEN": os.environ.get("SANDBOX_TOKEN") or "test-sandbox-token",
         "EGRESS_GUARD_TOKEN": os.environ.get("EGRESS_GUARD_TOKEN") or "test-guard-token",
@@ -193,7 +192,7 @@ def _service_volumes(service: dict) -> list[str]:
 
 
 def test_operational_services_never_on_management_network():
-    """sandbox, c2-sliver, ghidra-mcp must never appear on buggy-net.
+    """sandbox, ghidra-mcp must never appear on buggy-net.
 
     A regression here collapses the management/operational boundary —
     a compromised target-facing container would gain a path to LiteLLM
@@ -340,7 +339,7 @@ def _rendered_with_overlay(*overlays: Path) -> dict:
         args,
         env={
             **os.environ,
-            "COMPOSE_PROFILES": "c2-sliver,reversing,cli",
+            "COMPOSE_PROFILES": "reversing,cli",
             "SANDBOX_TOKEN": os.environ.get("SANDBOX_TOKEN") or "test-sandbox-token",
             "EGRESS_GUARD_TOKEN": os.environ.get("EGRESS_GUARD_TOKEN") or "test-guard-token",
             "BUGGY_STACK_MCP_TOKEN": os.environ.get("BUGGY_STACK_MCP_TOKEN")

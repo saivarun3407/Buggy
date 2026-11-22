@@ -71,20 +71,6 @@ def test_reach_instruction_reflects_delivery() -> None:
     assert "NOT bash" in reach_instruction(BINARY_TO_CAPABILITY["ghidra"])
 
 
-def test_reach_instruction_base_capability_with_service_requires_ops_start() -> None:
-    # Sliver ships in the base image but is inert until its c2-sliver
-    # workload runs — the hint must not claim it is directly runnable and
-    # must have the agent confirm readiness before invoking.
-    sliver = BINARY_TO_CAPABILITY["sliver"]
-    assert sliver.delivery == "base"
-    assert sliver.requires_service == "c2-sliver"
-    text = reach_instruction(sliver)
-    assert "c2-sliver" in text
-    assert "ops_start" in text
-    assert "ops_status" in text
-    assert "run it directly" not in text
-
-
 def test_reach_instruction_pip_uses_break_system_packages() -> None:
     # Kali's Python is externally managed; plain pip3 install is rejected.
     supported_pip = Capability(

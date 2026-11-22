@@ -67,7 +67,6 @@ Thumbs.db
 node_modules/
 
 # etc
-sliver-py/
 /src/
 config/*.local.*
 reference/

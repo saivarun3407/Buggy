@@ -50,7 +50,7 @@ NOT_RELEASED = {
     "buggy-sandbox-reversing": "reversing profile; Ghidra download is not checksum-pinned",
 }
 
-PROFILES = "c2-sliver,reversing,cli,operator,ad,web"
+PROFILES = "reversing,cli,operator,ad,web"
 #: Render-only secrets the compose files refuse to interpolate without.
 RENDER_SECRETS = {
     "SANDBOX_TOKEN": "test-sandbox-token",

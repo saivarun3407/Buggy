@@ -130,9 +130,6 @@ jobs:
               - 'package.json'
               - 'package-lock.json'
               - '.github/workflows/ci.yml'
-            c2-sliver:
-              - 'containers/c2-sliver.Dockerfile'
-              - '.github/workflows/ci.yml'
 
   # ── Compose validation guardrail ─────────────────────────────────
   # Closes #215. Catches docker-compose YAML drift early: if a future

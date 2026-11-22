@@ -20,7 +20,7 @@ COMPOSE       := docker compose
 # ``$(COMPOSE_DEV)``. Closes #214.
 COMPOSE_DEV   := docker compose -f docker-compose.yml -f docker-compose.dev.yml
 COMPOSE_WATCH := docker compose -f docker-compose.yml -f docker-compose.dev.yml -f docker-compose.watch.yml
-PROFILES_ALL  := --profile cli --profile c2-sliver
+PROFILES_ALL  := --profile cli
 WEB_DIR       := clients/web
 
 # Dogfood: isolated $BUGGY_HOME so the launcher can onboard, write .env,

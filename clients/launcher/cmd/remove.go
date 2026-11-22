@@ -54,8 +54,7 @@ func runRemove(cmd *cobra.Command, args []string) error {
 	home := config.BuggyHome()
 	c := compose.New()
 
-	// Phase 1: Stop containers + drop named volumes (postgres / neo4j /
-	// sliver). Down() alone leaves them behind, occupying GB of disk and
+	// Phase 1: Stop containers + drop named volumes (postgres / neo4j). Down() alone leaves them behind, occupying GB of disk and
 	// poisoning a subsequent reinstall with stale schema state.
 	ui.Info("Stopping services and removing volumes...")
 	_ = c.DownAndPurge()
