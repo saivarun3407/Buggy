@@ -111,6 +111,7 @@ RESUME_FLAGS = (
     "force_agent",
     "no_recon_wait",
     "fail_on_issues",
+    "create_accounts",
 )
 
 #: Polite for a target you named yourself; program imports default lower.
@@ -218,6 +219,20 @@ def _build_parser() -> argparse.ArgumentParser:
         "not held for approval.",
     )
     p.add_argument("--no-agent", action="store_true", help="Recon and report only; no LLM.")
+    p.add_argument(
+        "--create-accounts",
+        action="store_true",
+        help="Allow Buggy to register up to two test accounts on the target and sign in with "
+        "them. This is your approval for those registration and login requests only. Needs "
+        "--account-email unless --lab.",
+    )
+    p.add_argument(
+        "--account-email",
+        default="",
+        help="Email pattern for accounts Buggy creates, with {tag} where a random tag goes, "
+        "e.g. you+{tag}@your-domain.example. It must be an address you control and that the "
+        "program allows for test accounts.",
+    )
     p.add_argument(
         "--finalize",
         action="store_true",
@@ -334,6 +349,7 @@ def build_scope(args: argparse.Namespace) -> dict[str, Any]:
     lab = bool(args.lab)
     sandbox_blocked = not (lab or args.allow_sandbox_network)
     private = lab or args.internal or any(_is_private(h) for h in hosts)
+    accounts = _account_creation(args)
     return {
         "targets": targets,
         "hosts": hosts,
@@ -344,6 +360,7 @@ def build_scope(args: argparse.Namespace) -> dict[str, Any]:
             "min_inter_request_delay_ms": max(1, 1000 // rps),
             "max_concurrent_connections": min(5, rps),
             "sandbox_egress": "blocked" if sandbox_blocked else "scoped",
+            **({"account_creation": accounts} if accounts else {}),
         },
         "document_extra": {
             "authorization": "Operator confirmed authorization on the command line.",
@@ -364,6 +381,37 @@ def build_scope(args: argparse.Namespace) -> dict[str, Any]:
 _PATTERN_RE = re.compile(
     r"^(?:\*{1,2}\.)?(?:[a-z0-9_](?:[a-z0-9_-]{0,61}[a-z0-9_])?\.)*[a-z0-9_](?:[a-z0-9_-]{0,61}[a-z0-9_])?$"
 )
+
+
+_EMAIL_TEMPLATE = re.compile(r"^[^@\s{}]*\{tag\}[^@\s{}]*@[A-Za-z0-9.-]+\.[A-Za-z]{2,}$")
+#: The reserved test domain used for accounts on a training target (``--lab``).
+LAB_ACCOUNT_EMAIL = "buggy+{tag}@example.test"
+MAX_CREATED_ACCOUNTS = 2
+
+
+def _account_creation(args: argparse.Namespace) -> dict[str, Any] | None:
+    """The operator's switch for account creation, as it is written into the scope.
+
+    Registering an account changes the target, so it happens only when the
+    operator asked for it on this command line, with an email address pattern
+    they control. Raises ``RuntimeError`` (a usage error) when it is unusable.
+    """
+    if not getattr(args, "create_accounts", False):
+        return None
+    template = (getattr(args, "account_email", "") or "").strip()
+    if not template and getattr(args, "lab", False):
+        template = LAB_ACCOUNT_EMAIL
+    if not template:
+        raise RuntimeError(
+            "--create-accounts needs --account-email with an address you control, for example "
+            "you+{tag}@your-domain.example ({tag} is replaced by a random tag per account)"
+        )
+    if not _EMAIL_TEMPLATE.match(template):
+        raise RuntimeError(
+            f"--account-email {template!r} is not usable: it must be one email address with "
+            "{tag} in the part before the @"
+        )
+    return {"enabled": True, "email_template": template, "max_accounts": MAX_CREATED_ACCOUNTS}
 
 
 def pattern_errors(patterns: list[str]) -> list[str]:
@@ -419,6 +467,12 @@ def _describe(scope: dict[str, Any], mode: str) -> list[str]:
         ),
         f"  port scan       {'top 100 ports' if doc['pipeline']['port_scan'] else 'off'}",
     ]
+    accounts = extra.get("account_creation")
+    if accounts:
+        lines.append(
+            f"  test accounts   Buggy may register up to {accounts['max_accounts']} "
+            f"(emails like {accounts['email_template']})"
+        )
     if scope["out_of_scope"]:
         lines.insert(2, f"  out of scope    {', '.join(scope['out_of_scope'])}")
     return lines
@@ -533,6 +587,7 @@ def hunt_settings(args: argparse.Namespace, scope: dict[str, Any]) -> dict[str, 
             "recon_timeout": int(args.recon_timeout),
             "timeout": int(args.timeout),
             "fail_on": args.fail_on,
+            "account_email": getattr(args, "account_email", "") or "",
         },
     }
 
@@ -554,6 +609,7 @@ _OPTION_CHECKS: dict[str, Any] = {
     "recon_timeout": _is_int,
     "timeout": _is_int,
     "fail_on": lambda value: value is None or value in SEVERITIES,
+    "account_email": lambda value: isinstance(value, str),
 }
 
 
@@ -1619,6 +1675,7 @@ def build_result(
         "probes": _probes_result(outcome.get("probes")),
         "access": _access_result(outcome.get("access")),
         "signed_in": _signed_in_result(outcome.get("signed_in")),
+        "accounts": outcome.get("accounts") or {"enabled": False},
         "state": _probes_result(outcome.get("state")),
         "not_tested": list(outcome.get("not_tested") or []),
         "coverage": list(outcome.get("coverage") or []),
@@ -1741,6 +1798,85 @@ def _held(counts: dict[str, Any], slug: str) -> str:
         if waiting
         else ""
     )
+
+
+def _write_operations(records: dict[str, list[dict[str, Any]]]) -> list[dict[str, Any]]:
+    """Write operations recon knows from an API description, with their body field names."""
+    grouped: dict[tuple[str, str], list[str]] = {}
+    for record in records.get("parameter", []):
+        raw = record.get("attrs")
+        attrs: dict[str, Any] = raw if isinstance(raw, dict) else {}
+        method, url = str(attrs.get("method") or "").upper(), str(attrs.get("url") or "")
+        if attrs.get("location") == "body" and method == "POST" and url and attrs.get("name"):
+            grouped.setdefault((method, url), []).append(str(attrs["name"]))
+    return [
+        {"method": method, "url": url, "body_fields": sorted(set(fields))}
+        for (method, url), fields in sorted(grouped.items())
+    ]
+
+
+def run_account_creation(
+    engagement: str, records: dict[str, list[dict[str, Any]]]
+) -> dict[str, Any]:
+    """Ask the gateway to register and sign in the test accounts the operator allowed.
+
+    The gateway does it and keeps the credentials; this side only learns the
+    account names. It refuses unless the operator's switch is in the enforced
+    scope, so calling it without the switch sends nothing.
+    """
+    seeds = _service_urls(records)
+    if not seeds:
+        return {"ok": False, "enabled": True, "created": [], "reused": [], "failed": [],
+                "reason": "recon found no live service to look for a sign-up on"}  # fmt: skip
+    result = _capture(
+        "accounts_provision",
+        engagement,
+        seeds_json=json.dumps(seeds),
+        api_operations_json=json.dumps(_write_operations(records)),
+    )
+    if "created" not in result:
+        return {"ok": False, "enabled": True, "created": [], "reused": [], "failed": [],
+                "reason": str(result.get("detail") or result.get("error") or "not available")[:300]}  # fmt: skip
+    names = [str(n) for n in [*(result.get("created") or []), *(result.get("reused") or [])]]
+    failed = [f for f in result.get("failed") or [] if isinstance(f, dict)]
+    return {
+        "ok": bool(names),
+        "enabled": bool(result.get("enabled", True)),
+        "created": [str(n) for n in result.get("created") or []],
+        "reused": [str(n) for n in result.get("reused") or []],
+        "failed": [
+            {"reason": str(f.get("reason") or ""), "detail": str(f.get("detail") or "")[:200]}
+            for f in failed
+        ],
+        "reason": "" if names else "; ".join(str(f.get("reason")) for f in failed) or "no account",
+    }
+
+
+def _accounts_stage(
+    args: argparse.Namespace,
+    slug: str,
+    scope: dict[str, Any],
+    records: dict[str, list[dict[str, Any]]],
+) -> dict[str, Any] | None:
+    """Create test accounts when the operator allowed it for this run; print what happened."""
+    if not scope["enforcement_extra"].get("account_creation") or getattr(args, "no_probes", False):
+        return None
+    result = run_account_creation(slug, records)
+    if result["ok"]:
+        made = ", ".join(result["created"]) or "none new"
+        kept = f"; reused {', '.join(result['reused'])}" if result["reused"] else ""
+        print(f"  test accounts    created {made}{kept}", file=sys.stderr)
+    else:
+        print(
+            f"  test accounts    could not be created: {result['reason']}. Declare accounts "
+            f"yourself in ~/.buggy/secrets/{slug}/identities.json",
+            file=sys.stderr,
+        )
+    for failure in result["failed"]:
+        print(f"    not created: {failure['reason']} {failure['detail']}".rstrip(), file=sys.stderr)
+    if args.non_interactive:
+        print(json.dumps({"type": "accounts", **result}))
+    return result
 
 
 def _signed_in_stage(
@@ -2008,6 +2144,7 @@ def run_stages(  # noqa: PLR0912, PLR0915
     access: dict[str, Any] | None = None
     signed_in: dict[str, Any] | None = None
     writes: dict[str, Any] | None = None
+    accounts: dict[str, Any] | None = None
     state, summary = "skipped", None
     recon_done = False
     if args.mode != "enforce":
@@ -2069,6 +2206,7 @@ def run_stages(  # noqa: PLR0912, PLR0915
                             file=sys.stderr,
                         )
                     probes = _sweep_stage(args, slug, records)
+                    accounts = _accounts_stage(args, slug, scope, records)
                     access = _access_stage(args, slug, records)
                     signed_in = _signed_in_stage(args, slug, records)
                     writes = _state_stage(args, slug, records, signed_in)
@@ -2084,6 +2222,7 @@ def run_stages(  # noqa: PLR0912, PLR0915
         "access": access,
         "signed_in": signed_in,
         "state": writes,
+        "accounts": accounts,
     }
     outcome["not_tested"] = not_tested(slug, args, probes, access, signed_in=signed_in)
     outcome["coverage"] = class_coverage(outcome, slug)

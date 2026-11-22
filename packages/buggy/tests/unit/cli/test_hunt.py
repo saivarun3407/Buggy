@@ -833,6 +833,7 @@ class TestExitCodesAndTheResultFile:
             "probes": {"ran_sweep": False},
             "access": {"ran": False, "reason": "not run"},
             "signed_in": {"ran": False, "reason": "not run"},
+            "accounts": {"enabled": False},
             "state": {"ran_sweep": False},
             "complete": True,
         }

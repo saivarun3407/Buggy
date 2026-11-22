@@ -28,6 +28,8 @@ var (
 	huntNoAgent        bool
 	huntNoProbes       bool
 	huntAgent          string
+	huntCreateAccounts bool
+	huntAccountEmail   string
 	huntProbeBudget    string
 	huntLab            bool
 	huntInternal       bool
@@ -76,6 +78,8 @@ func init() {
 	huntCmd.Flags().BoolVarP(&huntYes, "yes", "y", false, "I am authorized to test these targets; do not prompt")
 	huntCmd.Flags().BoolVar(&huntNoAgent, "no-agent", false, "Recon and report only; no LLM")
 	huntCmd.Flags().StringVar(&huntAgent, "agent", agentAuto, "Who runs the agent stage: auto (Buggy's agents when a model is configured, else Claude Code on this machine if installed), builtin, or claude-code")
+	huntCmd.Flags().BoolVar(&huntCreateAccounts, "create-accounts", false, "Allow Buggy to register up to two test accounts on the target (your approval for those requests); needs --account-email unless --lab")
+	huntCmd.Flags().StringVar(&huntAccountEmail, "account-email", "", "Email pattern you control for created accounts, with {tag}, e.g. you+{tag}@your-domain.example")
 	huntCmd.Flags().BoolVar(&huntNoProbes, "no-probes", false, "Do not run the automatic read-only probe sweep after recon")
 	huntCmd.Flags().StringVar(&huntProbeBudget, "probe-budget", "", "Most probe runs the automatic sweep makes (default 40; 0 turns it off)")
 	huntCmd.Flags().BoolVar(&huntLab, "lab", false, "Training target you own: no approval holds, private addresses allowed")
@@ -116,6 +120,8 @@ type huntFlags struct {
 	noAgent        bool
 	noProbes       bool
 	agent          string // auto | builtin | claude-code
+	createAccounts bool
+	accountEmail   string
 	claudeCode     bool   // decided once: Claude Code runs the agent stage
 	probeBudget    string // a number; empty: not set
 	lab            bool
@@ -144,6 +150,8 @@ func currentHuntFlags() huntFlags {
 		noAgent:        huntNoAgent,
 		noProbes:       huntNoProbes,
 		agent:          huntAgent,
+		createAccounts: huntCreateAccounts,
+		accountEmail:   huntAccountEmail,
 		probeBudget:    huntProbeBudget,
 		lab:            huntLab,
 		internal:       huntInternal,
@@ -216,6 +224,7 @@ func huntOperatorCommand(targets []string, f huntFlags) []string {
 		// agent stage; the launcher runs Claude Code afterwards.
 		{"--no-agent", f.noAgent || f.lite || f.claudeCode},
 		{"--no-probes", f.noProbes},
+		{"--create-accounts", f.createAccounts},
 		{"--lab", f.lab},
 		{"--internal", f.internal},
 		{"--allow-sandbox-network", f.allowSandbox},
@@ -227,6 +236,9 @@ func huntOperatorCommand(targets []string, f huntFlags) []string {
 	}
 	if f.rps > 0 {
 		cliArgs = append(cliArgs, "--rps", strconv.Itoa(f.rps))
+	}
+	if f.accountEmail != "" {
+		cliArgs = append(cliArgs, "--account-email", f.accountEmail)
 	}
 	if f.probeBudget != "" {
 		cliArgs = append(cliArgs, "--probe-budget", f.probeBudget)
