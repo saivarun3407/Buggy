@@ -145,22 +145,6 @@ def test_prompt_does_not_advertise_uninstalled_tools() -> None:
         )
 
 
-def test_ghidra_not_advertised_as_bash_binary() -> None:
-    """Ghidra lives in the ghidra-mcp sidecar, not the bash sandbox. The
-    prompt must reach it only through the dedicated-tools section, never as
-    an installed base/profile bash command (regression for the review
-    finding that profile tools were unreachable)."""
-    from buggy.agents.prompts import builder
-
-    block = builder._KALI_ENVIRONMENT
-    base_and_profile = block.split("**Via dedicated tools")[0]
-    assert "ghidra" not in base_and_profile.lower(), (
-        "ghidra is sidecar-delivered and must not appear as a bash binary"
-    )
-    assert "**Via dedicated tools" in block
-    assert "ghidra" in block  # still discoverable via the dedicated-tools line
-
-
 def test_impacket_prompt_uses_real_executable_names() -> None:
     """The AD section must advertise the real impacket-prefixed commands,
     not the non-existent ``secretsdump.py`` names."""
@@ -267,25 +251,6 @@ def test_skills_use_real_baked_in_command_names() -> None:
                 rel = skill.relative_to(_REPO_ROOT)
                 offenders.append(f"{rel}: {pattern!r} → use {correct!r}")
     assert not offenders, "skills invoke tools under non-installed names:\n" + "\n".join(offenders)
-
-
-def test_promoted_tool_binaries_are_documented() -> None:
-    """The tunneling/DFIR skills that were flagged must now positively name
-    the real registry binaries, so the fix can't silently regress to a
-    tool-free workflow."""
-    lateral = (
-        _SKILLS_ROOT / "standard" / "post-exploit" / "lateral-movement" / "SKILL.md"
-    ).read_text(encoding="utf-8")
-    for binary in ("ligolo-proxy", "ligolo-agent", "chisel server", "chisel client"):
-        assert binary in lateral, f"lateral-movement skill no longer documents {binary!r}"
-
-    rootkit = (_SKILLS_ROOT / "standard" / "reverser" / "rootkit-analysis" / "SKILL.md").read_text(
-        encoding="utf-8"
-    )
-    assert "vol -f" in rootkit, "rootkit-analysis skill no longer runs volatility via `vol`"
-
-    dfir = (_SKILLS_ROOT / "standard" / "dfir" / "SKILL.md").read_text(encoding="utf-8")
-    assert "plaso-log2timeline" in dfir, "dfir skill no longer names plaso-log2timeline"
 
 
 def test_capability_pip_packages_is_last_field() -> None:

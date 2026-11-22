@@ -13,7 +13,6 @@ from buggy.skill_audit.aliases import (
 @pytest.mark.parametrize(
     ("raw", "expected"),
     [
-        ("reverser", "reverse-engineering"),
         ("re", "reverse-engineering"),
         ("contracts", "smart-contracts"),
         ("cloud-native", "cloud"),

@@ -15,7 +15,6 @@ from buggy.agents.standard.cloud_hunter import create_cloud_hunter_agent
 from buggy.agents.standard.contract_auditor import create_contract_auditor_agent
 from buggy.agents.standard.exploit import create_exploit_agent
 from buggy.agents.standard.recon import create_recon_agent
-from buggy.agents.standard.reverser import create_reverser_agent
 from buggy.agents.standard.soundwave import create_soundwave_agent
 
 __all__ = [
@@ -25,7 +24,6 @@ __all__ = [
     "create_asvs_assessor_agent",
     "create_exploit_agent",
     "create_buggy_agent",
-    "create_reverser_agent",
     "create_contract_auditor_agent",
     "create_cloud_hunter_agent",
     "create_blue_cell_agent",

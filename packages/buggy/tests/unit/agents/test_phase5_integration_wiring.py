@@ -100,7 +100,6 @@ _STANDARD_FACTORIES = [
     ("soundwave", "buggy.agents.standard.soundwave", "create_soundwave_agent"),
     ("blue_cell", "buggy.agents.standard.blue_cell", "create_blue_cell_agent"),
     ("asvs_assessor", "buggy.agents.standard.asvs_assessor", "create_asvs_assessor_agent"),
-    ("reverser", "buggy.agents.standard.reverser", "create_reverser_agent"),
     (
         "contract_auditor",
         "buggy.agents.standard.contract_auditor",

@@ -222,54 +222,6 @@ RUN apt-get update \
     && rm -rf /var/lib/apt/lists/*
 ENV INSANE_CHROMIUM_PATH=/usr/bin/chromium
 
-# ── Reverse Engineering: Ghidra 12.1 (opt-in) ──
-#
-# radare2 + binwalk are lightweight CLIs and live in the base apt set
-# above, so bash can run them in every sandbox. Only Ghidra (JDK 21 +
-# the ~500 MB suite) is gated by this build ARG so the default sandbox
-# image stays lean. Enable with:
-#   docker build --build-arg INSTALL_REVERSING=true ...
-# or, via docker-compose, set INSTALL_REVERSING=true in .env when running
-# with COMPOSE_PROFILES=reversing. The ghidra-mcp sidecar service in
-# docker-compose.yml builds this image with the ARG set to true.
-#
-# When disabled (default), ghidra_available() returns False and the
-# tools/reversing/tools.py @tool wrappers surface a clean "Ghidra not
-# installed — enable the reversing profile" error to the agent rather
-# than crashing. The MCP path (http://ghidra-mcp:8089) is still wired
-# up — agents can use the sidecar without the host sandbox having
-# Ghidra installed locally.
-#
-# Pinned to the 20260513 build of Ghidra 12.1 so the image is
-# reproducible. To upgrade: bump the URL + verify the SHA-256 against
-# the GitHub release page, then bump GHIDRA_SHA256 below.
-ARG INSTALL_REVERSING=false
-ARG GHIDRA_VERSION=12.1
-ARG GHIDRA_BUILD_DATE=20260513
-ARG GHIDRA_SHA256=""
-RUN --mount=type=cache,target=/var/cache/apt,sharing=locked,id=sandbox-apt-cache \
-    --mount=type=cache,target=/var/lib/apt/lists,sharing=locked,id=sandbox-apt-lists \
-    if [ "$INSTALL_REVERSING" = "true" ]; then \
-        apt-get update && \
-        apt-get install -y --no-install-recommends --no-install-suggests \
-            openjdk-21-jdk-headless \
-            unzip && \
-        curl -fsSL -o /tmp/ghidra.zip \
-            "https://github.com/NationalSecurityAgency/ghidra/releases/download/Ghidra_${GHIDRA_VERSION}_build/ghidra_${GHIDRA_VERSION}_PUBLIC_${GHIDRA_BUILD_DATE}.zip" && \
-        if [ -n "$GHIDRA_SHA256" ]; then \
-            echo "$GHIDRA_SHA256  /tmp/ghidra.zip" | sha256sum -c - ; \
-        fi && \
-        unzip -q /tmp/ghidra.zip -d /opt && \
-        mv "/opt/ghidra_${GHIDRA_VERSION}_PUBLIC" /opt/ghidra && \
-        rm /tmp/ghidra.zip ; \
-    else \
-        echo "INSTALL_REVERSING=false — skipping JDK 21 + Ghidra (radare2 + binwalk are in the base image)" ; \
-    fi
-
-ENV GHIDRA_INSTALL_DIR=/opt/ghidra \
-    GHIDRA_MCP_URL=http://ghidra-mcp:8089 \
-    JAVA_HOME=/usr/lib/jvm/java-21-openjdk-amd64
-
 # Ship only the modules the daemon actually imports:
 #   - buggy/__init__.py     — package marker (light-weight, just reads __version__)
 #   - buggy/sandbox_kernel/ — shared sandbox primitives: TmuxSessionManager,

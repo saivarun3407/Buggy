@@ -233,7 +233,6 @@ _OPERATIONAL_ROLES = {
     "recon",
     "exploit",
     "analyst",
-    "reverser",
     "contract_auditor",
     "cloud_hunter",
     # NOTE: read-only roles are in _PASSIVE_ROLES (below),

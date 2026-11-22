@@ -30,12 +30,11 @@ func TestNew(t *testing.T) {
 func TestAllProfiles(t *testing.T) {
 	profiles := AllProfiles()
 	// ADR-0006 Sprint 2 expanded the catalog to cover every workload
-	// the launcher may need to tear down: cli + reversing, plus the
-	// one-off operator shell that writes the control root = 3 profiles =
-	// 6 cli args (--profile NAME).
+	// the launcher may need to tear down: cli plus the one-off operator
+	// shell that writes the control root = 2 profiles = 4 cli args
+	// (--profile NAME).
 	expected := []string{
 		"--profile", "cli",
-		"--profile", "reversing",
 		"--profile", "operator",
 	}
 	if len(profiles) != len(expected) {

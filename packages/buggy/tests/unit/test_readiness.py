@@ -149,10 +149,10 @@ def test_unsafe_binary_name_is_refused():
 
 
 def test_sidecar_is_not_probed_but_reported():
-    ghidra = next(s for s in readiness.binaries() if s.binary == "ghidra")
-    assert ghidra.probed is False
-    assert "'ghidra'" not in readiness.probe_script(readiness.binaries())
-    status = readiness.parse_probe_output("", [ghidra])[0]
+    sidecar = ToolSpec("svc-tool", "svc-tool", "svc-tool", (), delivery="sidecar")
+    assert sidecar.probed is False
+    assert "'svc-tool'" not in readiness.probe_script([sidecar])
+    status = readiness.parse_probe_output("", [sidecar])[0]
     assert status.found is None and "sidecar" in status.error
 
 
@@ -253,8 +253,8 @@ def test_generated_script_runs_for_real_with_sh(tmp_path, monkeypatch):
 # their own rather than through whichever shipped role happens to use one.
 GATED = readiness.Domain("gated", ("runtime", "ad"), profiles=("gated",))
 DOMAINS = (*readiness.DOMAINS, GATED)
-AD_PROFILE = {"gated": ["svc-a", "svc-b"], "reversing": ["ghidra-mcp"]}
-ALL_SERVICES = ["svc-a", "svc-b", "ghidra-mcp", "sandbox"]
+AD_PROFILE = {"gated": ["svc-a", "svc-b"], "extra": ["svc-c"]}
+ALL_SERVICES = ["svc-a", "svc-b", "svc-c", "sandbox"]
 
 
 def _statuses(missing: set[str] = frozenset()):
@@ -311,13 +311,15 @@ def test_missing_profile_service_is_not_available_with_profile_named():
 
 
 def test_tool_service_down_degrades_with_profile_named():
-    services = [s for s in ALL_SERVICES if s != "ghidra-mcp"]
+    # A tool reached through its own service (not a sandbox binary).
+    spec = ToolSpec(
+        "svc-tool", "svc-tool", "svc-tool", ("gated",), delivery="sidecar", requires_service="svc-c"
+    )
+    services = [s for s in ALL_SERVICES if s != "svc-c"]
     rows = readiness.domain_readiness(
-        _statuses(), services, profile_services=AD_PROFILE, domains=DOMAINS
+        _statuses(), services, profile_services=AD_PROFILE, specs=[spec], domains=DOMAINS
     )
-    assert _domain(rows, "reverser")["status"] == (
-        "degraded (missing: ghidra (needs profile reversing))"
-    )
+    assert _domain(rows, "gated")["status"] == "degraded (missing: svc-tool (needs profile extra))"
 
 
 def test_unknown_running_services_never_reports_ready_for_a_profile():
@@ -332,7 +334,7 @@ def test_unknown_running_services_never_reports_ready_for_a_profile():
 def test_compose_profiles_read_from_repo_compose():
     profiles = readiness.compose_profile_services(REPO / "docker-compose.yml")
     assert "web" in profiles["web"]
-    assert "ghidra-mcp" in profiles["reversing"]
+    assert "operator" in profiles["operator"]
     assert "sandbox" not in {s for names in profiles.values() for s in names}
 
 
@@ -342,7 +344,7 @@ def test_compose_profiles_read_from_repo_compose():
 @pytest.fixture
 def compose_file(tmp_path):
     path = tmp_path / "compose.yml"
-    path.write_text("services:\n  sandbox: {}\n  ghidra-mcp: {profiles: [reversing]}\n")
+    path.write_text("services:\n  sandbox: {}\n  web: {profiles: [web]}\n")
     return path
 
 
@@ -380,11 +382,11 @@ def test_cli_json_shape(compose_file):
 
 def test_cli_domain_filter_and_table(compose_file):
     code, text, _ = _cli(
-        ["check", "--domain", "reverser", "--compose", str(compose_file)],
+        ["check", "--domain", "analyst", "--compose", str(compose_file)],
         services=["sandbox"],
     )
     assert code == 0
-    assert "reverser  degraded (missing: ghidra (needs profile reversing))" in text
+    assert "analyst  ready" in text
     assert "recon" not in text.split("\n\n")[0]
 
 
@@ -392,7 +394,6 @@ def test_cli_require_exit_codes(compose_file):
     base = ["check", "--compose", str(compose_file)]
     assert _cli([*base, "--require", "recon"], services=ALL_SERVICES)[0] == 0
     assert _cli([*base, "--require", "recon"], missing={"nmap"}, services=ALL_SERVICES)[0] == 4
-    assert _cli([*base, "--require", "reverser"], services=["sandbox"])[0] == 4
     # Not ready but not required: still exit 0.
     assert _cli(base, missing={"nmap"}, services=["sandbox"])[0] == 0
     assert _cli([*base, "--require", "no-such-domain"], services=ALL_SERVICES)[0] == 2
@@ -403,19 +404,22 @@ def test_cli_reads_running_services_from_docker_compose(compose_file):
 
     def run(argv):
         calls.append(list(argv))
-        return 0, "sandbox\nghidra-mcp\n"
+        return 0, "sandbox\nweb\n"
 
     code, text, _ = _cli(
-        ["check", "--json", "--compose", str(compose_file), "--require", "reverser"], run=run
+        ["check", "--json", "--compose", str(compose_file), "--require", "recon"], run=run
     )
     assert calls == [["docker", "compose", "ps", "--services", "--status", "running"]]
-    assert code == 0 and json.loads(text)["running_services"] == ["ghidra-mcp", "sandbox"]
+    assert code == 0 and json.loads(text)["running_services"] == ["sandbox", "web"]
 
     code, text, _ = _cli(
-        ["check", "--json", "--compose", str(compose_file), "--require", "reverser"],
+        ["check", "--json", "--compose", str(compose_file), "--require", "recon"],
         run=lambda argv: (1, "no docker"),
     )
-    assert code == 4 and json.loads(text)["running_services"] is None
+    payload = json.loads(text)
+    assert payload["running_services"] is None
+    recon = next(d for d in payload["domains"] if d["domain"] == "recon")
+    assert "running services unknown" in recon["note"]
 
 
 def test_cli_script_prints_probe_script():

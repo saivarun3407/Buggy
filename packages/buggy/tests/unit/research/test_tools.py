@@ -253,25 +253,6 @@ contract Vault {
     # longer applies. Reintroduced in a dedicated KGStore-mock-based
     # test PR — see the Slither RFC §4.4.
 
-    def test_kg_triage_binary_persists_high_signal_indicators(
-        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
-        _configure_kg(monkeypatch, tmp_path)
-        binary = tmp_path / "agent.bin"
-        binary.write_bytes(
-            b"MZ"
-            + b"A" * 64
-            + b"\x00http://c2.example.net/callback\x00"
-            + b"system strcpy connect\x00"
-            + b"AKIAABCDEFGHIJKLMNOP\x00"
-        )
-
-        payload = json.loads(research_tools.kg_triage_binary.invoke({"path": str(binary)}))
-        rule_ids = {v["rule_id"] for v in payload["created_vulnerabilities"]}
-        assert "secrets.hardcoded" in rule_ids
-        assert "rce.primitives" in rule_ids
-        assert payload["entrypoints_added"] >= 1
-
     def test_kg_analyze_jwt_ingests_alg_none_finding(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:

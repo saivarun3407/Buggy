@@ -124,7 +124,6 @@ class TestAgentTiers:
             "detector",
             "verifier",
             "cloud_hunter",
-            "reverser",
         ):
             assert AGENT_TIERS[role] == Tier.MID
 

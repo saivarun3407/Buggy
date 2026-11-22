@@ -41,13 +41,6 @@ def test_category_filter() -> None:
     assert all(c["category"] == "recon" for c in result["capabilities"])
 
 
-def test_sidecar_reach_is_not_bash() -> None:
-    result = _invoke(query="ghidra", include_planned=True)
-    ghidra = next(c for c in result["capabilities"] if c["id"] == "ghidra")
-    assert ghidra["delivery"] == "sidecar"
-    assert "NOT bash" in ghidra["reach"]
-
-
 def test_no_match_returns_guidance_note() -> None:
     result = _invoke(query="definitely-not-a-real-tool-xyz")
     assert result["count"] == 0

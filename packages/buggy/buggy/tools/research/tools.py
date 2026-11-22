@@ -59,10 +59,6 @@ from buggy.tools.research.smart_fuzzer import SMART_FUZZER_TOOLS
 from buggy.tools.research.structured_findings import STRUCTURED_FINDING_TOOLS
 from buggy.tools.research.taint_analyzer import TAINT_TOOLS
 from buggy.tools.research.tech_detection import detect_tech_stack
-from buggy.tools.reversing.binary import identify_binary
-from buggy.tools.reversing.packer import detect_packer
-from buggy.tools.reversing.strings import extract_strings, group_by_category
-from buggy.tools.reversing.symbols import summarize_symbols
 from buggy.tools.web.jwt import parse_token
 from buggy.tools.web.oauth import analyze_oauth_callback
 from buggy.tools.web.session import analyze_cookie
@@ -1538,157 +1534,6 @@ def kg_ingest_slither(path: str) -> str:
     return _json({"ingested": ingested})
 
 
-# ── Binary triage ingestion ────────────────────────────────────────────
-
-
-@tool
-@kg_degrades
-def kg_triage_binary(path: str, max_strings: int = 400) -> str:
-    """Triage a binary for exploit-relevant signals and persist graph entities."""
-    binary_path = Path(path)
-    if not binary_path.exists():
-        return _json({"error": f"file not found: {path}"})
-
-    try:
-        blob = binary_path.read_bytes()
-    except OSError as e:
-        return _json({"error": f"failed to read binary: {e}"})
-
-    info = identify_binary(binary_path)
-    packer = detect_packer(blob)
-    extracted = extract_strings(blob)
-    if max_strings > 0:
-        extracted = extracted[:max_strings]
-    grouped = group_by_category(extracted)
-    import_tokens: list[str] = []
-    for entry in grouped.get("import", []):
-        for token in re.split(r"[^A-Za-z0-9_@.]+", entry.text):
-            if token:
-                import_tokens.append(token)
-    symbols = summarize_symbols(import_tokens)
-
-    with graph_transaction() as graph:
-        file_node = graph.upsert_node(
-            Node.make(
-                NodeKind.SOURCE_FILE,
-                str(binary_path),
-                key=f"binary::{binary_path}",
-                source="binary-triage",
-                binary_format=info.format,
-                architecture=info.architecture,
-                bitness=info.bitness,
-                nx=info.nx,
-                pie=info.pie,
-                relro=info.relro,
-                canary=info.canary,
-                packed=packer.likely_packed,
-                entropy=round(packer.entropy, 3),
-            )
-        )
-
-        created: list[dict[str, Any]] = []
-
-        def _add_binary_vuln(
-            rule_id: str, severity: Severity, description: str, **props: Any
-        ) -> None:
-            vuln = graph.upsert_node(
-                Node.make(
-                    NodeKind.VULNERABILITY,
-                    f"[binary:{rule_id}] {binary_path.name}",
-                    key=f"binary::{binary_path}::{rule_id}",
-                    scanner="binary-triage",
-                    rule_id=rule_id,
-                    severity=severity.value,
-                    description=description,
-                    file=str(binary_path),
-                    **props,
-                )
-            )
-            graph.upsert_edge(Edge.make(file_node.id, vuln.id, EdgeKind.HAS_VULN, weight=0.6))
-            created.append({"id": vuln.id, "rule_id": rule_id, "severity": severity.value})
-
-        if info.nx is False:
-            _add_binary_vuln(
-                "hardening.nx-disabled",
-                Severity.MEDIUM,
-                "NX appears disabled; memory corruption is easier to weaponize.",
-            )
-        if info.pie is False:
-            _add_binary_vuln(
-                "hardening.pie-disabled",
-                Severity.MEDIUM,
-                "PIE appears disabled; ASLR entropy is reduced for code pointers.",
-            )
-        if grouped.get("secret"):
-            sample = [s.text[:80] for s in grouped["secret"][:5]]
-            _add_binary_vuln(
-                "secrets.hardcoded",
-                Severity.HIGH,
-                "Potential hardcoded secrets were found in binary strings.",
-                sample=sample,
-            )
-        if symbols.command_exec and (symbols.dangerous_c or symbols.dynamic_code):
-            sev = Severity.CRITICAL if symbols.network else Severity.HIGH
-            _add_binary_vuln(
-                "rce.primitives",
-                sev,
-                "Binary imports command-execution primitives plus memory-unsafe APIs.",
-                command_exec=symbols.command_exec,
-                dangerous_c=symbols.dangerous_c,
-                dynamic_code=symbols.dynamic_code,
-                network=symbols.network,
-            )
-
-        if packer.likely_packed:
-            hypothesis = graph.upsert_node(
-                Node.make(
-                    NodeKind.HYPOTHESIS,
-                    f"Packed binary candidate: {binary_path.name}",
-                    key=f"binary-packed::{binary_path}",
-                    source="binary-triage",
-                    entropy=round(packer.entropy, 3),
-                    signatures=packer.signatures,
-                    notes=packer.notes,
-                )
-            )
-            graph.upsert_edge(Edge.make(file_node.id, hypothesis.id, EdgeKind.CONTAINS, weight=1.2))
-
-        entrypoints_added = 0
-        for s in grouped.get("url", [])[:25]:
-            url_node = graph.upsert_node(
-                Node.make(
-                    NodeKind.URL,
-                    s.text,
-                    key=f"url::{s.text}",
-                    source="binary-triage",
-                    offset=s.offset,
-                )
-            )
-            ep = graph.upsert_node(
-                Node.make(
-                    NodeKind.ENTRYPOINT,
-                    s.text,
-                    key=f"entrypoint::{s.text}",
-                    source="binary-triage",
-                )
-            )
-            graph.upsert_edge(Edge.make(file_node.id, url_node.id, EdgeKind.CONTAINS, weight=0.8))
-            graph.upsert_edge(Edge.make(url_node.id, ep.id, EdgeKind.EXPOSES, weight=0.7))
-            entrypoints_added += 1
-
-        return _json(
-            {
-                "binary": info.to_dict(),
-                "packer": packer.to_dict(),
-                "string_category_counts": {k: len(v) for k, v in grouped.items()},
-                "symbol_report": symbols.to_dict(),
-                "created_vulnerabilities": created,
-                "entrypoints_added": entrypoints_added,
-                "stats": graph.stats(),
-            }
-        )
-
-
 # ── Chain planner ──────────────────────────────────────────────────────
 
 
@@ -2662,7 +2507,6 @@ RESEARCH_TOOLS = [
     kg_analyze_cookie_value,
     kg_scan_solidity,
     kg_ingest_slither,
-    kg_triage_binary,
     cve_lookup,
     cve_by_package,
     cve_enrich_dependencies,

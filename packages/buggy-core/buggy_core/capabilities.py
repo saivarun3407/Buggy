@@ -697,25 +697,7 @@ CAPABILITY_REGISTRY: tuple[Capability, ...] = (
     ),
     # ── Reversing ──
     # radare2 + binwalk are lightweight apt CLIs and live in the base image,
-    # so bash can run them directly. Ghidra is a ~500 MB JDK+suite that is
-    # NOT in the sandbox where bash executes — it is reached through the
-    # dedicated ``ghidra_*`` @tool wrappers backed by the ghidra-mcp sidecar
-    # (delivery="sidecar"), so it must not be advertised as a bash binary.
-    Capability(
-        id="ghidra",
-        category="reversing",
-        description=(
-            "NSA binary analysis suite. Not runnable from bash — use the dedicated "
-            "ghidra_analyze / ghidra_decompile / ghidra_xrefs tools after "
-            "ops_start('reversing')."
-        ),
-        binaries=("ghidra",),
-        delivery="sidecar",
-        risk_tier=RiskTier.PASSIVE,
-        requires_service="ghidra-mcp",
-        requires_profile="reversing",
-        lifecycle=Lifecycle.SUPPORTED,
-    ),
+    # so bash can run them directly.
     Capability(
         id="radare2",
         category="reversing",
@@ -1009,7 +991,6 @@ ROLE_CAPABILITY_POLICY: dict[str, RoleCapabilityPolicy] = {
     "recon": RoleCapabilityPolicy(phases=("TA0043",), max_risk=RiskTier.BOUNDED_ACTIVE),
     "exploit": RoleCapabilityPolicy(phases=("TA0001", "TA0002"), max_risk=RiskTier.INTRUSIVE),
     "cloud_hunter": RoleCapabilityPolicy(phases=("TA0043", "TA0006"), max_risk=RiskTier.INTRUSIVE),
-    "reverser": RoleCapabilityPolicy(phases=("TA0002",), max_risk=RiskTier.INTRUSIVE),
     "asvs_assessor": RoleCapabilityPolicy(phases=("TA0001",), max_risk=RiskTier.BOUNDED_ACTIVE),
     "analyst": RoleCapabilityPolicy(max_risk=RiskTier.PASSIVE),
     "contract_auditor": RoleCapabilityPolicy(max_risk=RiskTier.INTRUSIVE),

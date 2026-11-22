@@ -107,7 +107,6 @@ class TestPhaseForRoleMapping:
             "analyst",
             "asvs_assessor",
             "contract_auditor",
-            "reverser",
             "blue_cell",
             "soundwave",
             "buggy",

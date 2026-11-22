@@ -67,8 +67,6 @@ def test_unknown_max_risk_raises() -> None:
 
 def test_reach_instruction_reflects_delivery() -> None:
     assert "run it directly" in reach_instruction(BINARY_TO_CAPABILITY["nmap"])
-    assert "sidecar" in reach_instruction(BINARY_TO_CAPABILITY["ghidra"])
-    assert "NOT bash" in reach_instruction(BINARY_TO_CAPABILITY["ghidra"])
 
 
 def test_reach_instruction_pip_uses_break_system_packages() -> None:

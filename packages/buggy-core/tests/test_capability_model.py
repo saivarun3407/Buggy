@@ -152,20 +152,9 @@ def test_impacket_binaries_are_prefixed_executables() -> None:
     assert not any(b.endswith(".py") for b in cap.binaries)
 
 
-def test_ghidra_is_sidecar_delivered() -> None:
-    """Ghidra is not in the bash sandbox; it is reached via the ghidra-mcp
-    sidecar and dedicated tools, so it must not be a base/profile bash tool."""
-    cap = BINARY_TO_CAPABILITY["ghidra"]
-    assert cap.delivery == "sidecar"
-    assert cap.requires_service == "ghidra-mcp"
-    assert cap.requires_profile == "reversing"
-    # ghidra must be absent from the bash-runnable base binary set.
-    assert "ghidra" not in base_binaries()
-
-
 def test_radare2_and_binwalk_are_base_installed() -> None:
     """radare2 + binwalk are lightweight CLIs wired into the base image so
-    bash can run them directly (not gated behind the reversing profile)."""
+    bash can run them directly."""
     for binary in ("radare2", "binwalk"):
         cap = BINARY_TO_CAPABILITY[binary]
         assert cap.delivery == "base", f"{binary} should be base-delivered"

@@ -119,12 +119,6 @@ export const AGENT_DISPLAY_CONFIG: Record<string, AgentDisplayMeta> = {
     role: "Domain Specialist",
     color: "#a855f7",
   },
-  reverser: {
-    name: "Reverser",
-    description: "Binary analysis — strings, packers, ROP, symbols",
-    role: "Domain Specialist",
-    color: "#ec4899",
-  },
   detector: {
     name: "Detector",
     description: "Vulnerability detection — pattern matching, triage",

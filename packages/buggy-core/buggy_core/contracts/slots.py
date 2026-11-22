@@ -252,7 +252,6 @@ SLOTS_PER_ROLE: dict[str, frozenset[MiddlewareSlot]] = {
     # and migrate to KGStore in a separate RFC.
     "analyst": _BASH_AGENT_SLOTS | {MiddlewareSlot.KG},
     "asvs_assessor": _BASH_AGENT_SLOTS,
-    "reverser": _BASH_AGENT_SLOTS,
     "contract_auditor": _BASH_AGENT_SLOTS | {MiddlewareSlot.KG},
     "cloud_hunter": _BASH_AGENT_SLOTS,
     # ── Plugin orchestrator (no EngagementContext per the existing

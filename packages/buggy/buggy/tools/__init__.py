@@ -14,7 +14,6 @@ from buggy.tools.reporting.tools import REPORTING_TOOLS
 from buggy.tools.research.patch import PATCH_TOOLS
 from buggy.tools.research.scanner_tools import SCANNER_TOOLS
 from buggy.tools.research.tools import RESEARCH_TOOLS
-from buggy.tools.reversing.tools import REVERSING_TOOLS
 from buggy.tools.web.tools import WEB_TOOLS
 
 __all__ = [
@@ -31,7 +30,6 @@ __all__ = [
     "REFERENCES_TOOLS",
     "REPORTING_TOOLS",
     "RESEARCH_TOOLS",
-    "REVERSING_TOOLS",
     "SCANNER_TOOLS",
     "WEB_TOOLS",
 ]

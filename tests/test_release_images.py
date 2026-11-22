@@ -42,15 +42,9 @@ IMAGE_LINE = re.compile(
 #: Buggy images the compose files name that a release deliberately does not
 #: publish, with the reason. Each may only be used by a profile-gated
 #: service, so no default ``docker compose up`` (or the lite stack) needs it.
-NOT_RELEASED = {
-    # Sandbox + JDK + Ghidra for the `reversing` profile. The Ghidra archive
-    # is downloaded without a pinned checksum (GHIDRA_SHA256 is empty in the
-    # compose build args), so it is not signed and published as a release
-    # image until that pin exists.
-    "buggy-sandbox-reversing": "reversing profile; Ghidra download is not checksum-pinned",
-}
+NOT_RELEASED: dict[str, str] = {}
 
-PROFILES = "reversing,cli,operator,web"
+PROFILES = "cli,operator,web"
 #: Render-only secrets the compose files refuse to interpolate without.
 RENDER_SECRETS = {
     "SANDBOX_TOKEN": "test-sandbox-token",
