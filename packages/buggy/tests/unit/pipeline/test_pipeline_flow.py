@@ -291,13 +291,14 @@ class TestFullRun:
         summary = _pipeline(env).run()
         assert summary["status"] == "completed"
         assert list(summary["stages"]) == list(STAGES)
-        assert _called(env) == [
-            "subfinder", "amass",          # 1 enumerate (+ crt.sh, built in)
-            "dnsx",                        # 2 dns
-            "naabu", "httpx",              # 3 live (4 fingerprint reuses the probe)
-            "katana", "gau", "waybackurls",  # 5 urls (+ JS parsing, built in)
-            "nuclei", "gitleaks",          # 9 issues (6 web, 7 apispec, 8 api are built in)
-        ]  # fmt: skip
+        called = _called(env)
+        # Tools that run at the same time are compared as a group.
+        assert set(called[:2]) == {"subfinder", "amass"}  # 1 enumerate (+ crt.sh, together)
+        assert called[2:5] == ["dnsx", "naabu", "httpx"]  # 2 dns, 3 live
+        # 5 urls: the crawler and the archive lookups, with the issue scan
+        # started next to them (it only needs the live services).
+        assert set(called[5:9]) == {"katana", "gau", "waybackurls", "nuclei"}
+        assert called[9:] == ["gitleaks"]  # 9 issues (6-8 are built in)
 
     def test_out_of_scope_assets_never_reach_a_tool(self, env) -> None:
         _pipeline(env).run()
@@ -389,8 +390,16 @@ class TestFullRun:
         assert argv["httpx"][argv["httpx"].index("-t") + 1] == "4"
         assert argv["naabu"][argv["naabu"].index("-rate") + 1] == "10"
         assert argv["naabu"][argv["naabu"].index("-p") + 1] == "443,8443"
-        assert argv["katana"][argv["katana"].index("-rl") + 1] == "10"
-        assert argv["nuclei"][argv["nuclei"].index("-rl") + 1] == "10"
+        # The crawler and the issue scan run at the same time, so they share the
+        # program's rate and connections: together never more than 10 req/s.
+        katana_rl = int(argv["katana"][argv["katana"].index("-rl") + 1])
+        nuclei_rl = int(argv["nuclei"][argv["nuclei"].index("-rl") + 1])
+        assert (katana_rl, nuclei_rl) == (5, 5) and katana_rl + nuclei_rl == 10
+        assert (
+            int(argv["katana"][argv["katana"].index("-c") + 1])
+            + int(argv["nuclei"][argv["nuclei"].index("-c") + 1])
+            <= 4
+        )
 
 
 class TestReRuns:
@@ -445,7 +454,7 @@ class TestReRuns:
         _pipeline(env).run()
         env["tools"].calls.clear()
         summary = _pipeline(env, force=True).run()
-        assert _called(env)[:3] == ["subfinder", "amass", "dnsx"]
+        assert set(_called(env)[:2]) == {"subfinder", "amass"} and _called(env)[2] == "dnsx"
         assert summary["diff"] == {"added": 0, "changed": 0, "removed": 0}
 
     def test_service_that_disappears_is_retired_with_what_was_found_on_it(self, env) -> None:

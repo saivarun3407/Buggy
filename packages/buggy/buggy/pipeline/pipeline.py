@@ -28,7 +28,8 @@ import shutil
 import subprocess
 import time
 from collections.abc import Callable, Iterable
-from dataclasses import dataclass, field
+from concurrent.futures import Future, ThreadPoolExecutor
+from dataclasses import dataclass, field, replace
 from pathlib import Path
 from typing import Any
 from urllib.parse import urlsplit
@@ -44,7 +45,7 @@ from buggy.pipeline.schema import (
     normalize_host,
     normalize_url,
 )
-from buggy.pipeline.scope import ScopeFilter
+from buggy.pipeline.scope import PipelineLimits, ScopeFilter
 from buggy.pipeline.store import ReconStore
 from buggy.pipeline.tools import apirecon, apispec, crtsh, jsparse, params, webrecon
 from buggy.pipeline.tools.amass import Amass
@@ -199,6 +200,21 @@ class StageStats:
         return data
 
 
+@dataclass
+class _Job:
+    """A scanner run prepared by the pipeline, ready to execute."""
+
+    stage: str
+    stats: StageStats
+    name: str
+    inputs: list[str]
+    version: str
+    invocation: Invocation
+    raw_path: Path
+    ref: str
+    assets: Iterable[str] | None
+
+
 class Pipeline:
     """One engagement's pipeline run."""
 
@@ -233,6 +249,10 @@ class Pipeline:
         self._resolver = resolver or versions.verify
         self._http_opener = http_opener
         self._limiter = RateLimiter(scope.limits.rate_limit_rps, sleep=sleep)
+        # Limits for scanners that send to the target. Halved while the early
+        # issue scan runs, so the two together stay within the program's rate.
+        self._target_limits = scope.limits
+        self._early_issues: tuple[_Job, Future[RunResult], dict[str, str]] | None = None
         self._passive_fetch = passive_fetch or (
             lambda url: fetch_passive(url, limiter=self._limiter)
         )
@@ -293,8 +313,15 @@ class Pipeline:
             self._stamp_run_failure(current, error)
             raise
         finally:
+            if self._early_issues is not None:  # the run ended before collecting it
+                self._early_issues[1].result()
+                self._early_issues = None
             summary = {
-                "stages": {name: stats.to_dict() for name, stats in self.stats.items()},
+                # In pipeline order: the issues entry is created early, when its
+                # scan starts next to the crawl.
+                "stages": {
+                    name: self.stats[name].to_dict() for name in STAGES if name in self.stats
+                },
                 "tool_versions": self._tool_versions,
                 "limits": {
                     "rate_limit_rps": self.scope.limits.rate_limit_rps,
@@ -535,6 +562,102 @@ class Pipeline:
         entry["records"] = entry.get("records", 0) + written
         return written
 
+    def _prepare_binary(
+        self,
+        stage: str,
+        stats: StageStats,
+        wrapper: Any,
+        inputs: list[str],
+        *,
+        scope_inputs: bool = True,
+        assets: Iterable[str] | None = None,
+        limits: PipelineLimits | None = None,
+        quiet: bool = False,
+    ) -> _Job | None:
+        """Everything before a scanner runs; ``None`` when it does not run at all.
+
+        With ``quiet`` a scanner that cannot run notes nothing: the caller will
+        try again the ordinary way (the early issue scan does this).
+        """
+        name = wrapper.name
+        entry = stats.tools.setdefault(name, {})
+        if self.scope.limits.passive_only and not wrapper.passive:
+            if not quiet:
+                entry["skipped"] = "passive_only"
+                self._note(name, "skipped", "passive_only", assets)
+            return None
+        if scope_inputs:
+            inputs = self.scope.admit(inputs, stage=stage, tool=name, direction="input")
+        if not inputs:
+            if not quiet:
+                entry.setdefault("skipped", "no in-scope inputs")
+            return None
+        try:
+            binary, version = self._resolver(name)
+        except versions.ToolVersionError as exc:
+            if not quiet:
+                entry["error"] = str(exc)
+                log.error("pipeline: %s unavailable: %s", name, exc)
+                self._note(name, "failed", str(exc)[:200], assets)
+            return None
+        self._tool_versions[name] = version
+        invocation = wrapper.invocation(
+            binary, inputs, limits or self._target_limits, self._workdir()
+        )
+        raw_path, ref = self._raw_path(stage, name)
+        return _Job(stage, stats, name, list(inputs), version, invocation, raw_path, ref, assets)
+
+    def _execute(self, job: _Job) -> RunResult:
+        return self._executor(job.name, job.invocation, job.raw_path)
+
+    def _finish_binary(self, job: _Job, result: RunResult) -> tuple[str, str, str]:
+        """Everything after a scanner ran: raw output registered, outcome noted, raw text read."""
+        name, ref, version = job.name, job.ref, job.version
+        self.store.register_raw_output(
+            ref,
+            run_id=self.run_id,
+            engagement=self.engagement,
+            stage=job.stage,
+            tool=name,
+            tool_version=version,
+            argv=list(result.argv),
+            sha256=result.sha256,
+            bytes=result.size,
+            exit_code=result.exit_code,
+            started_at=result.started_at,
+            finished_at=result.finished_at,
+        )
+        entry = job.stats.tools.setdefault(name, {})
+        entry.update(
+            {
+                "version": version,
+                "exit_code": result.exit_code,
+                "inputs": len(job.inputs),
+                "raw_ref": ref,
+                "seconds": round(result.finished_at - result.started_at, 2),
+            }
+        )
+        if result.timed_out:
+            entry["error"] = "timed out"
+        elif result.exit_code not in (0, None) and result.size == 0:
+            entry["error"] = result.stderr_tail[-300:] or f"exit {result.exit_code}"
+        problem = ""
+        if result.timed_out:
+            problem = "timed out"
+        elif result.exit_code not in (0, None):
+            problem = f"exit {result.exit_code}"
+        if not problem:
+            self._note(name, "complete", assets=job.assets)
+        elif result.size > 0:
+            self._note(name, "partial", f"{problem}, output may be incomplete", job.assets)
+        else:
+            self._note(name, "failed", f"{problem}, no output", job.assets)
+        try:
+            raw = job.raw_path.read_text(encoding="utf-8", errors="replace")
+        except OSError:
+            raw = ""
+        return raw, ref, version
+
     def _run_binary(
         self,
         stage: str,
@@ -550,71 +673,35 @@ class Pipeline:
         How the run went is noted for the coverage stamps: for every asset
         the stage handles, or for ``assets`` only when given.
         """
-        name = wrapper.name
-        entry = stats.tools.setdefault(name, {})
-        if self.scope.limits.passive_only and not wrapper.passive:
-            entry["skipped"] = "passive_only"
-            self._note(name, "skipped", "passive_only", assets)
-            return "", "", ""
-        if scope_inputs:
-            inputs = self.scope.admit(inputs, stage=stage, tool=name, direction="input")
-        if not inputs:
-            entry.setdefault("skipped", "no in-scope inputs")
-            return "", "", ""
-        try:
-            binary, version = self._resolver(name)
-        except versions.ToolVersionError as exc:
-            entry["error"] = str(exc)
-            log.error("pipeline: %s unavailable: %s", name, exc)
-            self._note(name, "failed", str(exc)[:200], assets)
-            return "", "", ""
-        self._tool_versions[name] = version
-        invocation = wrapper.invocation(binary, inputs, self.scope.limits, self._workdir())
-        raw_path, ref = self._raw_path(stage, name)
-        result = self._executor(name, invocation, raw_path)
-        self.store.register_raw_output(
-            ref,
-            run_id=self.run_id,
-            engagement=self.engagement,
-            stage=stage,
-            tool=name,
-            tool_version=version,
-            argv=list(result.argv),
-            sha256=result.sha256,
-            bytes=result.size,
-            exit_code=result.exit_code,
-            started_at=result.started_at,
-            finished_at=result.finished_at,
+        job = self._prepare_binary(
+            stage, stats, wrapper, inputs, scope_inputs=scope_inputs, assets=assets
         )
-        entry.update(
-            {
-                "version": version,
-                "exit_code": result.exit_code,
-                "inputs": len(inputs),
-                "raw_ref": ref,
-                "seconds": round(result.finished_at - result.started_at, 2),
-            }
-        )
-        if result.timed_out:
-            entry["error"] = "timed out"
-        elif result.exit_code not in (0, None) and result.size == 0:
-            entry["error"] = result.stderr_tail[-300:] or f"exit {result.exit_code}"
-        problem = ""
-        if result.timed_out:
-            problem = "timed out"
-        elif result.exit_code not in (0, None):
-            problem = f"exit {result.exit_code}"
-        if not problem:
-            self._note(name, "complete", assets=assets)
-        elif result.size > 0:
-            self._note(name, "partial", f"{problem}, output may be incomplete", assets)
-        else:
-            self._note(name, "failed", f"{problem}, no output", assets)
-        try:
-            raw = raw_path.read_text(encoding="utf-8", errors="replace")
-        except OSError:
-            raw = ""
-        return raw, ref, version
+        if job is None:
+            return "", "", ""
+        return self._finish_binary(job, self._execute(job))
+
+    def _run_together(
+        self, stage: str, stats: StageStats, runs: list[tuple[Any, list[str], bool]]
+    ) -> list[tuple[str, str, str]]:
+        """Run several scanners of one stage at the same time; results in the order given.
+
+        ``runs`` is ``(wrapper, inputs, scope_inputs)`` per scanner. Only use it
+        for scanners that do not all send to the target: their request rates add up.
+        """
+        jobs = [
+            self._prepare_binary(stage, stats, wrapper, inputs, scope_inputs=scoped)
+            for wrapper, inputs, scoped in runs
+        ]
+        started = [job for job in jobs if job is not None]
+        if not started:
+            return [("", "", "")] * len(jobs)
+        with ThreadPoolExecutor(max_workers=len(started)) as pool:
+            futures = {id(job): pool.submit(self._execute, job) for job in started}
+            results = {key: future.result() for key, future in futures.items()}
+        return [
+            ("", "", "") if job is None else self._finish_binary(job, results[id(job)])
+            for job in jobs
+        ]
 
     def _records(self, record_type: RecordType, *, limit: int = 1000) -> list[StoredRecord]:
         out: list[StoredRecord] = []
@@ -672,13 +759,21 @@ class Pipeline:
         if not pending:
             return
         targets = list(pending)
-        for wrapper in (Subfinder(), Amass()):
+        # All three sources are passive (none sends to the target), so they run
+        # at the same time: the two scanners and the certificate log lookups.
+        with ThreadPoolExecutor(max_workers=4) as pool:
+            bodies = {
+                root: pool.submit(self._passive_fetch, crtsh.query_url(root)) for root in targets
+            }
+            wrappers = (Subfinder(), Amass())
             # Enumeration roots are derived from in_scope patterns, not scan
             # targets, so they are not themselves scope-filtered; every name
             # the tools return is.
-            raw, ref, version = self._run_binary(
-                "enumerate", stats, wrapper, targets, scope_inputs=False
+            outputs = self._run_together(
+                "enumerate", stats, [(wrapper, targets, False) for wrapper in wrappers]
             )
+            fetched = {root: future.result() for root, future in bodies.items()}
+        for wrapper, (raw, ref, version) in zip(wrappers, outputs, strict=True):
             if raw:
                 self._store(
                     "enumerate",
@@ -689,7 +784,7 @@ class Pipeline:
                     raw_ref=ref,
                 )
         for root in targets:
-            body = self._passive_fetch(crtsh.query_url(root))
+            body = fetched[root]
             entry = stats.tools.setdefault(crtsh.NAME, {"version": versions.BUILTIN_VERSION})
             if body is None:
                 entry["error"] = "crt.sh unreachable"
@@ -1112,6 +1207,7 @@ class Pipeline:
         self._processed_services = list(pending)
         if not pending:
             return
+        self._start_early_issues()
         katana = Katana(resolvers=self._resolvers)
         live_hosts = {host_of(url) for url in pending}
         crawl_from = list(pending) + [
@@ -1120,21 +1216,15 @@ class Pipeline:
             if host_of(seed) in live_hosts
             and seed.rstrip("/") not in {u.rstrip("/") for u in pending}
         ]
-        raw, ref, version = self._run_binary("urls", stats, katana, crawl_from)
-        if raw:
-            self._store(
-                "urls",
-                stats,
-                katana.name,
-                ((r, r.asset) for r in katana.parse(raw)),
-                version=version,
-                raw_ref=ref,
-            )
         hosts = sorted({host_of(url) for url in pending if not _is_address(host_of(url))})
-        for wrapper in (Gau(), Waybackurls()):
-            if not hosts:
-                break
-            raw, ref, version = self._run_binary("urls", stats, wrapper, hosts)
+        # The archive lookups ask public archives, never the target, so they run
+        # while the crawler does; only the crawler counts against the rate limit.
+        runs: list[tuple[Any, list[str], bool]] = [(katana, crawl_from, True)]
+        if hosts:
+            runs += [(Gau(), hosts, True), (Waybackurls(), hosts, True)]
+        for (wrapper, _inputs, _scoped), (raw, ref, version) in zip(
+            runs, self._run_together("urls", stats, runs), strict=True
+        ):
             if raw:
                 self._store(
                     "urls",
@@ -1815,16 +1905,78 @@ class Pipeline:
 
     # ── stage 9: known issues ───────────────────────────────────────
 
-    def _stage_issues(self, stats: StageStats) -> None:
-        services = {
+    def _issue_inputs(self) -> dict[str, str]:
+        return {
             record.value: record.content_hash
             for record in self._records(RecordType.HTTP_SERVICE)
             if self._wanted(record.asset)
             and self.scope.admit([record.value], stage="issues", tool="nuclei", direction="input")
         }
+
+    def _start_early_issues(self) -> None:
+        """Start the known-issue scan now, next to the crawl and the web and API recon.
+
+        It needs only the live services, which exist from stage 3 on, and it is
+        the slowest scanner. It gets half of the rate limit and half of the
+        connections; the crawler and the built-in requests get the other half
+        until it finishes, so together they never exceed the program's rate.
+        The issues stage collects the result. Nothing starts when the stage is
+        disabled, the run is passive, the rate cannot be split, or every input
+        is cached.
+        """
+        limits = self.scope.limits
+        if "issues" in limits.disabled_stages or limits.passive_only or limits.rate_limit_rps < 2:
+            return
+        now = time.time()
+        pending: dict[str, str] = {}
+        for key, input_hash in self._issue_inputs().items():
+            cached = self.store.cached_input(self.engagement, "issues", key)
+            fresh = (
+                cached is not None
+                and cached["input_hash"] == input_hash
+                and now - float(cached["completed_at"]) < self.max_age
+            )
+            if self.force or not fresh:
+                pending[key] = input_hash
+        if not pending:
+            return
+        half = replace(
+            limits,
+            rate_limit_rps=limits.rate_limit_rps // 2,
+            concurrency=max(1, limits.concurrency // 2),
+        )
+        rest = replace(
+            limits,
+            rate_limit_rps=limits.rate_limit_rps - half.rate_limit_rps,
+            concurrency=max(1, limits.concurrency - half.concurrency),
+        )
+        stats = self.stats.setdefault("issues", StageStats())
+        job = self._prepare_binary(
+            "issues", stats, self._nuclei, list(pending), limits=half, quiet=True
+        )
+        if job is None:
+            return
+        self._target_limits = rest
+        self._limiter.set_rate(rest.rate_limit_rps)
+        pool = ThreadPoolExecutor(max_workers=1)
+        future = pool.submit(self._execute, job)
+        future.add_done_callback(lambda _done: self._limiter.set_rate(limits.rate_limit_rps))
+        pool.shutdown(wait=False)
+        self._early_issues = (job, future, pending)
+
+    def _stage_issues(self, stats: StageStats) -> None:
+        services = self._issue_inputs()
         pending = self._pending("issues", stats, services)
+        early, self._early_issues = self._early_issues, None
+        result: RunResult | None = None
+        if early is not None:
+            result = early[1].result()  # the scan started next to the crawl
+            self._target_limits = self.scope.limits
         if pending:
-            raw, ref, version = self._run_binary("issues", stats, self._nuclei, list(pending))
+            if early is not None and result is not None and set(early[2]) == set(pending):
+                raw, ref, version = self._finish_binary(early[0], result)
+            else:
+                raw, ref, version = self._run_binary("issues", stats, self._nuclei, list(pending))
             if ref:
                 by_origin = {_origin(url): url for url in pending}
                 self._store(

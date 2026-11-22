@@ -459,10 +459,10 @@ class TestInThePipeline:
         _pipeline(env).run()
         assert _parameters(env)
         # The external calls are exactly the ones the stages made before.
-        assert [name for name, _inputs, _argv in env["tools"].calls] == [
+        assert sorted(name for name, _inputs, _argv in env["tools"].calls) == sorted([
             "subfinder", "amass", "dnsx", "naabu", "httpx",
             "katana", "gau", "waybackurls", "nuclei", "gitleaks",
-        ]  # fmt: skip
+        ])  # fmt: skip
         # Every request is a known file, a spec or discovery probe, a script
         # fetch or one API endpoint profile, never with a query: no URL a
         # parameter was read from is ever requested as it was found.

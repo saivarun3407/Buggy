@@ -50,6 +50,7 @@ class Katana:
                 "-d",
                 str(limits.crawl_depth),
                 "-jc",
+                "-fx",  # forms and their fields, so every input a page offers is recorded
                 "-fs",
                 "fqdn",
                 "-ef",
@@ -93,6 +94,17 @@ class Katana:
                 "found_in": str(request.get("source") or ""),
                 "tag": str(request.get("tag") or ""),
             }
+            forms = [
+                {
+                    "action": str(form.get("action") or ""),
+                    "method": str(form.get("method") or "GET").upper(),
+                    "parameters": [str(p) for p in form.get("parameters") or [] if p][:50],
+                }
+                for form in (response.get("forms") or [])[:20]
+                if isinstance(form, dict)
+            ]
+            if forms:
+                attrs["form"] = forms
             yield Record(
                 type=RecordType.JS_FILE if is_javascript(url, content_type) else RecordType.URL,
                 asset=asset,

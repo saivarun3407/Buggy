@@ -20,6 +20,37 @@ pipeline; `test_guards.py::TestNoLLMInTheLoop` enforces it.
 | 8 | `api` | API recon: API roots and versions, OAuth / OpenID discovery, one unauthenticated GET per API endpoint | discovery documents and the endpoint GETs |
 | 9 | `issues` | nuclei (vetted set), gitleaks on fetched JS and listed public repos | nuclei only |
 
+## What runs at the same time
+
+```text
+enumerate   subfinder ─┬─ amass ─┬─ crt.sh            (all passive, together)
+dns         dnsx
+live        naabu → httpx
+            ├─ nuclei (known issues) ─────────────────────────────┐  half the rate
+urls        ├─ katana ─┬─ gau ─┬─ waybackurls → JS parsing         │  other half
+web         │  known files, headers, sign-in pages                  │
+apispec     │  OpenAPI / GraphQL probes, inputs                     │
+api         │  API roots, OAuth discovery, endpoint profiles        │
+issues      └─ collects nuclei ←───────────────────────────────────┘ → gitleaks
+```
+
+- The enumeration sources never touch the target, so they run together.
+- gau and waybackurls ask public archives, so they run while katana crawls.
+- nuclei only needs the live services, so it starts with the crawl. While it
+  runs it gets half of the program's rate and connections, and katana plus
+  the built-in requests (JS fetch, web, API description and API recon) get
+  the other half. Together they never exceed the rate. When nuclei finishes,
+  the built-in requests get the full rate back. With a rate of 1 request per
+  second it does not start early.
+- The stages after `live` stay in order: each reads what the one before it
+  stored.
+
+katana runs with form extraction (`-fx`): every form, its method, action and
+field names is kept on the page record, and the parameter extraction turns
+each field into a `form` input. The report's **Inputs** section lists every
+place the site accepts a value: form fields, query strings, JSON bodies, path
+ids, headers and cookies.
+
 ## Web and API recon
 
 Both stages are built in (no binary), read-only, rate-limited, and send every

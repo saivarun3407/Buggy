@@ -440,6 +440,47 @@ def _table(headers: list[str], rows: list[list[str]]) -> list[str]:
     return lines
 
 
+#: Where a value can be put, in the order the inputs section lists them.
+_INPUT_PLACES = (
+    ("form", "form fields"),
+    ("query", "query string"),
+    ("body", "JSON / request body"),
+    ("path", "path segments (ids)"),
+    ("header", "headers"),
+    ("cookie", "cookies"),
+)
+
+
+def _inputs_section(records: dict[str, list[dict[str, Any]]]) -> list[str]:
+    """Every place a value can be put into the site, by where it goes, from ``parameter`` records."""
+    parameters = records.get("parameter", [])
+    if not parameters:
+        return []
+    by_place: dict[str, list[dict[str, Any]]] = {}
+    for record in parameters:
+        by_place.setdefault(str(_attrs(record).get("location") or "other"), []).append(record)
+    lines = ["## Inputs", ""]
+    lines.append(
+        f"{len(parameters)} place(s) where the site accepts a value. Each is tested class by class."
+    )
+    lines.append("")
+    rows = []
+    for place, label in _INPUT_PLACES:
+        found = by_place.get(place, [])
+        if not found:
+            continue
+        examples = []
+        for record in found[:4]:
+            attrs = _attrs(record)
+            examples.append(
+                f"`{attrs.get('name')}` at {attrs.get('method') or ''} {attrs.get('url') or ''}".strip()
+            )
+        rows.append([label, str(len(found)), "; ".join(examples)])
+    lines += _table(["Where", "Count", "Examples"], rows)
+    lines.append("")
+    return lines
+
+
 def _web_section(records: dict[str, list[dict[str, Any]]]) -> list[str]:
     """Sign-in pages, header findings and published files, from the ``web`` stage."""
     surface = records.get("auth_surface", [])
@@ -562,6 +603,7 @@ def render_report(
             ["URLs and endpoints", str(counts.get("url", 0) + counts.get("endpoint", 0))],
             ["API specifications", str(counts.get("api_spec", 0) + counts.get("graphql", 0))],
             ["API operations", str(counts.get("api_operation", 0))],
+            ["Inputs (places a value can be put)", str(counts.get("parameter", 0))],
             ["API roots", str(counts.get("api_base", 0))],
             ["Sign-in related pages", str(counts.get("auth_surface", 0))],
             ["Known issues (distinct)", str(len(issues))],
@@ -687,6 +729,7 @@ def render_report(
         lines += _table(["Location", "What"], rows)
         lines.append("")
 
+    lines += _inputs_section(records)
     lines += _web_section(records)
     lines += _api_section(records)
 

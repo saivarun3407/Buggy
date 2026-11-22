@@ -34,6 +34,11 @@ class RateLimiter:
         self._lock = threading.Lock()
         self._next = 0.0
 
+    def set_rate(self, rps: float) -> None:
+        """Change the rate, e.g. while another tool uses part of the same budget."""
+        with self._lock:
+            self._interval = 1.0 / rps if rps > 0 else 0.0
+
     def wait(self) -> float:
         """Block until the next slot; return how long was slept."""
         if self._interval <= 0:

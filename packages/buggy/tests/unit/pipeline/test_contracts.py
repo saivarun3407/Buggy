@@ -738,8 +738,13 @@ class TestInThePipeline:
         )
         # Same tools, same order, same inputs (gitleaks is given a per-run directory).
         with_contracts = [(n, i) for n, i, _argv in env["tools"].calls if n != "gitleaks"]
-        assert with_contracts == [(n, i) for n, i, _argv in plain["tools"].calls if n != "gitleaks"]
-        assert [c[0] for c in env["tools"].calls] == [c[0] for c in plain["tools"].calls]
+        # Tools that run at the same time may finish in either order.
+        assert sorted(with_contracts) == sorted(
+            (n, i) for n, i, _argv in plain["tools"].calls if n != "gitleaks"
+        )
+        assert sorted(c[0] for c in env["tools"].calls) == sorted(
+            c[0] for c in plain["tools"].calls
+        )
         assert len(with_contracts) == 9
 
     def test_nothing_out_of_scope_in_a_contract_is_stored_or_requested(self, env) -> None:
