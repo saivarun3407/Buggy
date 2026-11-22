@@ -132,10 +132,6 @@ _PHASE_FOR_ROLE: dict[str, str] = {
     "exploit": "web-exploitation",
     "analyst": "analyst",
     "asvs_assessor": "analyst",
-    # Blue Cell is the purple-team detection-validation agent (defensive sibling
-    # of the Red Cell); adversary-emulation is the seeded meta phase for the
-    # red/blue validation bridge — there is no dedicated blue-team phase.
-    "blue_cell": "adversary-emulation",
     "soundwave": "planning",
     "buggy": "orchestration",
     # Bounty bundle (fork-only) — phase-scope each appsec / bug-bounty

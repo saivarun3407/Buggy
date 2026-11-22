@@ -532,7 +532,6 @@ AGENT_TIERS: dict[str, Tier] = {
     # Tool-heavy with moderate iteration.
     "detector": Tier.MID,
     "verifier": Tier.MID,
-    "blue_cell": Tier.MID,
     # Bounty bundle (fork-only). HIGH for the high-payout chained-logic
     # specialists (account takeover, multi-step business-logic abuse,
     # SSRF → cloud pivot); MID for the structured-audit / enumeration
@@ -563,7 +562,6 @@ AGENT_TEMPERATURES: dict[str, float] = {
     "exploiter": 0.2,
     "detector": 0.2,
     "verifier": 0.2,
-    "blue_cell": 0.2,
     "patcher": 0.2,
     "analyst": 0.2,
     "asvs_assessor": 0.2,

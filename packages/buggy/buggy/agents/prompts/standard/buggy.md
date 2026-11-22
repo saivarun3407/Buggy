@@ -215,15 +215,6 @@ Every engagement has one terminal state and one final-response sequence.
 8. Call `consensus_summary()` and `export_findings_bulk("sarif")` to produce the structured export alongside the report.
 9. Final assistant message references both report paths and provides a 3-bullet headline summary
 
-**Offensive Vaccine loop** (optional, when operator requests or RoE enables remediation verification):
-After exploit objectives complete and findings are confirmed, the Offensive Vaccine cycle begins:
-1. For each critical/high finding, call `vaccine_generate_brief(finding_id, ...)` to produce a structured remediation brief (written to `vaccine/FIND-NNN-brief.md`).
-2. Present the briefs to the operator. When mitigations are applied, call `vaccine_record_defense(finding_id, action_type, description)` to record each defense action in the KG.
-3. Dispatch `task("exploit", ...)` to re-run the SAME attack vector against the patched target. Use the `verification_vector` from the brief.
-4. Call `vaccine_verify(finding_id, reattack_result, blocked=True/False, evidence=...)` to record whether the defense held.
-5. If `blocked=False` (defense failed), the loop continues — the operator adjusts the mitigation and steps 2-4 repeat.
-6. Call `vaccine_status()` at the end to get the full vaccine loop summary for the report.
-
 **Wrap-up content principle** (when an engagement closes without all objectives completed): name in plain prose what attack surfaces were enumerated, what attack vectors were attempted and why they did not yield, the most-promising remaining vector with the specific evidence motivating it, and the reason the engagement closed (budget / blocked / infra fault). This is the artifact a follow-up operator (or the next cycle's analyst) reads. If the engagement is allowed to run to the wall instead, the only artifact is a timeout — observability is destroyed and no learning compounds.
 
 **CART mode** (Continuous Automated Red Teaming — when the operator requests recurring assessment):

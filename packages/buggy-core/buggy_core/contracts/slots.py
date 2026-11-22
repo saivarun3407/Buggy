@@ -200,7 +200,7 @@ _BASH_AGENT_SLOTS: frozenset[MiddlewareSlot] = _BASE_SLOTS | {
     # dumps, HTTP bodies, file reads, scanner output). They get the
     # parsing firewall so oversized output is compressed to the
     # security-relevant essentials before it floods the planner context.
-    # Planning-only (soundwave), read-only (blue_cell/detector), and the
+    # Planning-only (soundwave), read-only (detector), and the
     # orchestrator (buggy, which consumes sub-agent transcripts, not
     # raw tool bytes) deliberately skip it.
     MiddlewareSlot.PARSING_FIREWALL,
@@ -232,7 +232,6 @@ SLOTS_PER_ROLE: dict[str, frozenset[MiddlewareSlot]] = {
     # ── Standard non-bash agent (planning + interview) ──
     "soundwave": _BASE_SLOTS | {MiddlewareSlot.ENGAGEMENT_CONTEXT},
     # ── Standard read-only agent (Blue Cell — detection coverage, no bash) ──
-    "blue_cell": _BASE_SLOTS,
     # ── Standard bash-executing specialists ──
     "recon": _BASH_AGENT_SLOTS,
     # The exploit agent additionally carries the KG middleware: before

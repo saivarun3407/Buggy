@@ -6,8 +6,7 @@
     "soundwave": "./packages/buggy/buggy/agents/standard/soundwave.py:graph",
     "exploit": "./packages/buggy/buggy/agents/standard/exploit.py:graph",
     "analyst": "./packages/buggy/buggy/agents/standard/analyst.py:graph",
-    "asvs_assessor": "./packages/buggy/buggy/agents/standard/asvs_assessor.py:graph",
-    "blue_cell": "./packages/buggy/buggy/agents/standard/blue_cell.py:graph"
+    "asvs_assessor": "./packages/buggy/buggy/agents/standard/asvs_assessor.py:graph"
   },
   "env": ".env",
   "python_version": "3.13",

@@ -19,4 +19,3 @@ ignore: |
   build/
   uv.lock
   package-lock.json
-  packages/buggy/buggy/skills/standard/blue_cell/rules/

@@ -19,7 +19,7 @@ Middleware stack (selected for orchestration):
   10. PatchToolCallsMiddleware — repair dangling tool calls
 
 The orchestrator carries engagement-level intelligence tools (cross-session
-memory, OSINT feeds, consensus validation, structured export, vaccine loop,
+memory, OSINT feeds, consensus validation, structured export,
 CART scheduling) directly — these are coordination concerns that span
 sub-agent lifetimes. All offensive work still goes through task() delegation;
 SandboxNotificationMiddleware lives on each sub-agent (where bash runs).
@@ -67,7 +67,6 @@ from buggy.backends import build_sandbox_backend, make_agent_backend
 from buggy.core.subagent_streaming import StreamingRunnable
 from buggy.llm import LLMFactory
 from buggy.tools.assessment import ASSESSMENT_TOOLS
-from buggy.tools.defense.vaccine import VACCINE_TOOLS
 from buggy.tools.interaction import request_scope_amendment
 from buggy.tools.research.cart import CART_TOOLS
 from buggy.tools.research.consensus import CONSENSUS_TOOLS
@@ -178,7 +177,7 @@ def create_buggy_agent(
         #    to avoid an unusable tool.
         # 2. Engagement-level intelligence & coordination tools:
         #    cross-session memory (recall/store), OSINT feeds (KEV/GHSA),
-        #    vaccine loop, consensus validation, structured export, CART,
+        #    consensus validation, structured export, CART,
         #    and finding-ID allocation for parallel dispatch. These carry no
         #    daemon dependency, so they are always registered.
         # 3. ``request_scope_amendment``: the operator-approval channel for
@@ -202,7 +201,6 @@ def create_buggy_agent(
         orchestrator_tools = [
             *ASSESSMENT_TOOLS,
             *ENGAGEMENT_INTEL_TOOLS,
-            *VACCINE_TOOLS,
             *CONSENSUS_TOOLS,
             *STRUCTURED_FINDING_TOOLS,
             *CART_TOOLS,

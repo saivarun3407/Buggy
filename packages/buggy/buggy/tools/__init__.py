@@ -5,7 +5,6 @@ from buggy.tools.bash import (
     bash_output,
     bash_status,
 )
-from buggy.tools.defense import DEFENSE_TOOLS
 from buggy.tools.evidence import EVIDENCE_TOOLS
 from buggy.tools.references.tools import REFERENCES_TOOLS
 from buggy.tools.reporting.tools import REPORTING_TOOLS
@@ -20,7 +19,6 @@ __all__ = [
     "bash_output",
     "bash_status",
     "BASH_TOOLS",
-    "DEFENSE_TOOLS",
     "EVIDENCE_TOOLS",
     "PATCH_TOOLS",
     "REFERENCES_TOOLS",

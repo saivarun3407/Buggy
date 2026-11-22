@@ -98,7 +98,6 @@ _STANDARD_FACTORIES = [
     ("exploit", "buggy.agents.standard.exploit", "create_exploit_agent"),
     ("analyst", "buggy.agents.standard.analyst", "create_analyst_agent"),
     ("soundwave", "buggy.agents.standard.soundwave", "create_soundwave_agent"),
-    ("blue_cell", "buggy.agents.standard.blue_cell", "create_blue_cell_agent"),
     ("asvs_assessor", "buggy.agents.standard.asvs_assessor", "create_asvs_assessor_agent"),
 ]
 

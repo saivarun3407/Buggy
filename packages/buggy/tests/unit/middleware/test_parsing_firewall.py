@@ -356,7 +356,7 @@ class TestSlotRegistration:
         from buggy_core.contracts.slots import SLOTS_PER_ROLE, MiddlewareSlot
 
         # Planning-only, read-only, and the orchestrator do not get it.
-        for role in ("soundwave", "blue_cell", "detector", "buggy"):
+        for role in ("soundwave", "detector", "buggy"):
             assert MiddlewareSlot.PARSING_FIREWALL not in SLOTS_PER_ROLE[role], role
 
     def test_parsing_firewall_is_outer_of_untrusted_output(self) -> None:
