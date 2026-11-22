@@ -101,22 +101,6 @@ Output cap: **3 files/objective** (`shells.json`, `creds/initial.json`, one note
 | `findings/evidence/` | Raw | Evidence backing a finding | exploit.md:24 |
 | `timeline.jsonl` | JSON Lines (append) | Real activity/finding events | exploit.md:24 |
 
-#### Post-exploit — `agents/prompts/standard/postexploit.md`
-
-Output cap: **5 files/objective** across the `post-exploit/` tree.
-
-| File | Format | When / why | Cite |
-|------|--------|-----------|------|
-| `findings/FIND-{NNN}.md` | Markdown | Success terminal artifact (new cred/escalation/lateral hop) | postexploit.md:20,33 |
-| `post-exploit/creds/` | JSON/loot | Credential storage (plaintext only here, encrypt loot) | postexploit.md:16,35 |
-| `post-exploit/privesc/` | Markdown/loot | Privilege-escalation artifacts | postexploit.md:35 |
-| `post-exploit/lateral/` | Markdown/loot | Lateral-movement artifacts | postexploit.md:35 |
-| `post-exploit/loot/` | loot | Collected loot | postexploit.md:35 |
-| `post-exploit/network_map.json` | JSON | Internal network topology | postexploit.md:35 |
-| `post-exploit/EXIT_REPORT.md` | Markdown | Escalation-block / exit terminal artifact | postexploit.md:37,51 |
-| `findings/evidence/` | Raw | Evidence backing a finding | postexploit.md:20 |
-| `timeline.jsonl` | JSON Lines (append) | Real activity/finding events | postexploit.md:20 |
-
 #### Analyst — `agents/prompts/standard/analyst.md`
 
 Primary output is the **knowledge graph**, not flat files.
@@ -128,23 +112,6 @@ Primary output is the **knowledge graph**, not flat files.
 | scanner output files | `bash(... -o /workspace/<file>)` | e.g. `nuclei … -o /workspace/nuclei.jsonl` then ingest | analyst.md:119–120 |
 
 (Analyst writes `findings/FIND-NNN.md` only via the shared finding protocol when promoting a confirmed finding.)
-
-### Domain specialists
-
-| Agent | File(s) instructed | When / why | Cite |
-|-------|-------------------|-----------|------|
-| AD operator (`ad_operator.md`) | `findings/credentials/` (obtained certs/creds); KG via `kg_record` (`kind="Credential"`/`Finding`) | Cert/credential capture, manual-confirmed AD work | ad_operator.md:23,56 |
-| Cloud hunter (`cloud_hunter.md`) | `findings/secrets/SECRET-<NNN>.md` | Every plaintext secret | cloud_hunter.md:30 |
-| Contract auditor (`contract_auditor.md`) | `findings/FIND-NNN.md`; KG via `kg_record` (`kind="Finding"`) | Foundry-validated findings | contract_auditor.md:21,26 |
-| Reverser (`reverser.md`) | `findings/FIND-NNN.md`; `findings/binaries/<binary>.md` | Every observation; one record per binary examined | reverser.md:16,23 |
-| Mobile operator (`mobile_operator.md`) | `findings/credentials/`; `findings/components/`; `recon/endpoints.md` | Creds, exported components, backend URLs | mobile_operator.md:23–24 |
-| Phisher (`phisher.md`) | `findings/credentials/CAMPAIGN-<id>.md`; `evidence/`, `findings/credentials/` | Per campaign capture | phisher.md:29,44 |
-| Wireless operator (`wireless_operator.md`) | `recon/airspace.md` | Airspace recon (BSSID/PMF/clients) | wireless_operator.md:25 |
-| Blue Cell (`blue_cell.md`) | No files — `defense_brief(engagement_name=...)` tool + `DetectionFired` KG nodes | Read-only out-brief | blue_cell.md:41 |
-| Forensicator (`forensicator.md`) | Skill-driven (loads `skills/standard/dfir/SKILL.md`); analysis-only, no fixed file contract in prompt | — | forensicator.md:13 |
-| OSINT / ICS / IoT / Supply-chain operators | Skill-driven (load their `skills/standard/<domain>/SKILL.md` catalog); file outputs come from the loaded subskill, no fixed path in the agent prompt | — | osint_operator.md:11; ics_operator.md:27; iot_operator.md:45; supply_chain_operator.md:12 |
-
----
 
 ## 2. Per-skill write instructions
 
@@ -215,7 +182,7 @@ item below records the original conflict and its **Resolution**.
 
 1. **Credential file path: subdir vs underscore.**
    - Exploit prompt + post-exploit prompt: `exploit/creds/initial.json`
-     (`exploit.md:23`, `postexploit.md:71`).
+     (`exploit.md:23`).
    - Exploit reporting skill: `exploit/creds_initial.json`
      (`exploit/reporting:219`).
    These name the same artifact two different ways. Downstream readers
@@ -272,7 +239,7 @@ item below records the original conflict and its **Resolution**.
    `runtime/shutdown.py:420` checkpoints `plan/opplan.json`. soundwave writes
    the planning bundle to `plan/*.json`. But several prompts and skills
    referenced the docs **without** the `plan/` prefix (e.g. analyst/exploit/
-   postexploit "check `roe.json`", soundwave templates "Read/Write `roe.json`",
+   soundwave templates "Read/Write `roe.json`",
    `buggy/orchestration` and `exploit/reporting` file-layout trees showing
    root-level docs). **Resolution:** every *path-action* reference (read / write
    / check / update / file-layout tree) was normalized to the `plan/` prefix

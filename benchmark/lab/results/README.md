@@ -1,7 +1,7 @@
 # Lab results — 2026-11-19
 
 Apps: Juice Shop v17.1.1 and DVGA. DVWA and crAPI have ground truth but were
-not run. The XBOW benchmark was not run.
+not run.
 
 | Class | Known | pipeline only | probes (lab-tested) | agent + pipeline | agent, no pipeline |
 |---|---:|:---:|:---:|:---:|:---:|

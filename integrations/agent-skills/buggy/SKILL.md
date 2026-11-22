@@ -12,10 +12,9 @@ metadata:
 
 # Buggy engagements (over MCP)
 
-Drive **Buggy** — an autonomous multi-agent red-team framework — as if its
-CLI were in this chat. Run an authorized engagement end to end (recon →
-exploitation → post-exploitation → reporting) across web, API, network, Active
-Directory, cloud, mobile, smart-contract, and binary targets, then **watch it
+Drive **Buggy** — an authorized web app and API testing system — as if its
+CLI were in this chat. Run an authorized engagement end to end (scope → recon
+→ probes → findings → reporting) against a web app or API, then **watch it
 progress and steer it as it runs**.
 
 You interact through the `buggy_*` MCP tools (listed below). The heavy
@@ -27,8 +26,8 @@ work runs inside the Buggy server; you are the operator at the console.
   `thread_id`. That is the handle for *every* other tool — there are no run
   ids to track.
 - The **orchestrator** (`buggy` graph) builds an OPPLAN and delegates to
-  specialist sub-agents (recon, exploit, postexploit, analyst, reverser,
-  cloud_hunter, ad_operator, mobile_operator, …) via a `task()` tool. You watch
+  specialist sub-agents (recon, exploit, analyst, api_security,
+  authn_session, business_logic, …) via a `task()` tool. You watch
   that narrative and nudge it.
 - Engagements are **long and asynchronous** (minutes to hours). `start` returns
   immediately; you **poll** and narrate. **Never block** waiting for completion.

@@ -1,8 +1,7 @@
 """Regression tests for the Blue Cell defensive KG vocabulary.
 
-The Offensive Vaccine / Blue Cell loop (``docs/features/blue-cell.md``)
-records *proven* detection coverage in the engagement knowledge graph:
-each fired detection becomes a ``DetectionFired`` node linked
+The (removed) Offensive Vaccine / Blue Cell loop recorded *proven* detection
+coverage in the engagement knowledge graph: each fired detection becomes a ``DetectionFired`` node linked
 ``-[:DETECTED]->`` the offensive ``Finding`` it caught and
 ``-[:USES_RULE]->`` the ``DefenseAction`` (Sigma/YARA artifact) that
 produced it.

@@ -207,7 +207,6 @@ What the launcher handles for you:
 - Uses `podman compose` (Podman 4.4+ built-in); falls back to the `podman-compose` Python wrapper on older Podman.
 
 Rootless Podman caveats:
-- The `c2-sliver` profile binds privileged ports (443, 53). On rootless Podman you need either `sudo setcap CAP_NET_BIND_SERVICE=+eip $(which podman)` or add `net.ipv4.ip_unprivileged_port_start = 53` to `/etc/sysctl.conf`. Or just run rootful.
 - Bind mounts under your home directory work transparently. Mounting `/var/run/...` requires `--security-opt label=disable` on SELinux distros (Fedora, RHEL).
 
 ### Using nerdctl

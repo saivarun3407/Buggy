@@ -90,7 +90,7 @@ Minimum Python version: **3.13**
 ### Activating plugin bundles
 
 Buggy defaults to the lean `standard` bundle. To activate additional
-bundles (e.g. the `plugins` bundle that ships `vulnresearch`), use the
+bundles (e.g. the `bounty` web/API bundle), use the
 4-tier hierarchy (highest precedence wins):
 
 1. **`BUGGY_PLUGINS` env var** — runtime override:
@@ -110,7 +110,7 @@ bundles (e.g. the `plugins` bundle that ships `vulnresearch`), use the
 4. **Hardcoded default** — `["standard"]`.
 
 The OSS repo itself ships with both bundles enabled via the project-level
-`pyproject.toml` (so `make dev` / `make benchmark` work out of the box).
+`pyproject.toml` (so `make dev` works out of the box).
 End-user installs that just `pip install buggy` get the lean
 `standard`-only default (neo4j and other heavy features are opt-in extras,
 e.g. `buggy[neo4j]`). Downstream Docker images override via

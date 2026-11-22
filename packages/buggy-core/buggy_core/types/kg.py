@@ -89,8 +89,8 @@ class NodeKind(StrEnum):
     DEFENSE_ACTION = "DefenseAction"
     # Offensive Vaccine — verification re-attack result
     VERIFICATION = "Verification"
-    # Active Directory (BloodHound 5.x — see
-    # docs/design/2026-06-04-bloodhound-kgstore-mapping.md). AD-prefixed
+    # Active Directory (BloodHound 5.x; the mapping design doc was removed
+    # with the AD tooling, see docs/deletion-inventory.md). AD-prefixed
     # kinds coexist with the generic identity kinds above; the
     # AD operator's BloodHound ingest emits these, and chain analysis
     # filters with ``MATCH (u:ADUser)-[:MEMBER_OF*]->(:ADGroup ...)``.
@@ -108,8 +108,8 @@ class NodeKind(StrEnum):
     AD_NT_AUTH_STORE = "ADNTAuthStore"
     AD_ISSUANCE_POLICY = "ADIssuancePolicy"
     AD_LOCAL_GROUP = "ADLocalGroup"
-    # Solidity (Slither ``--json`` — see
-    # docs/design/2026-06-04-slither-kgstore-mapping.md). ``Contract`` and
+    # Solidity (Slither ``--json``; the mapping design doc was removed with
+    # the contract tooling, see docs/deletion-inventory.md). ``Contract`` and
     # ``SourceFile`` are already defined above and reused.
     SOLIDITY_FUNCTION = "Function"
     SOLIDITY_STATE_VAR = "StateVar"
@@ -175,8 +175,7 @@ class EdgeKind(StrEnum):
     # Offensive Vaccine (defense → finding, verification → finding)
     MITIGATES = "MITIGATES"
     VERIFIES = "VERIFIES"
-    # Active Directory (BloodHound 5.x — see
-    # docs/design/2026-06-04-bloodhound-kgstore-mapping.md). The generic
+    # Active Directory (BloodHound 5.x; see the AD node kinds above). The generic
     # ``MEMBER_OF`` / ``HAS_SESSION`` / ``ADMIN_TO`` / ``OWNS`` /
     # ``CAN_ACCESS`` above are reused where the BHCE edge name matches.
     ALLOWED_TO_DELEGATE = "ALLOWED_TO_DELEGATE"

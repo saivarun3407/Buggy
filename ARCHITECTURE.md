@@ -14,7 +14,7 @@ The fork adds six things on top of upstream:
 | 3 | Proof gate (a finding needs a PoC plus live Caido evidence) | `tools/reporting/proof_gate.py` |
 | 4 | White-box reconciliation (SAST SARIF → exploit queue) | `reconciliation/` |
 | 5 | Wiring: recorder on analyst, reconciliation on exploit | `agents/standard/*.py`, `agents/middleware_slots.py` |
-| 6 | `engage` CLI, session broker, Devin delegation, KG dedup, refusal circuit, kg_recorder | `cli/engage.py`, `tools/session/`, `tools/devin/`, `llm/factory.py`, `benchmark/kg_recorder.py` |
+| 6 | `engage` CLI, session broker, Devin delegation, KG dedup, refusal circuit | `cli/engage.py`, `tools/session/`, `tools/devin/`, `llm/factory.py` |
 
 ---
 
@@ -28,52 +28,41 @@ flowchart TB
     WEB["Web dashboard (Next.js)<br/>clients/web"]
     ENG["buggy-cli engage<br/>cli/engage.py"]
     MCP["MCP server<br/>mcp_server/"]
-    BEN["Benchmark harness<br/>benchmark/"]
   end
 
   subgraph MGMT["buggy-net (management plane)"]
-    LG["LangGraph API :2024<br/>langgraph.json → 20 graphs<br/>+ plugins_api"]
+    LG["LangGraph API :2024<br/>langgraph.json → 5 graphs<br/>+ plugins_api"]
     LLM["LiteLLM :4000<br/>config/litellm.yaml + OAuth handlers"]
-    PG[("PostgreSQL :5432<br/>litellm · buggy_web · bloodhound")]
+    PG[("PostgreSQL :5432<br/>litellm · buggy_web")]
     SK["Skillogy :9100<br/>skill catalog + own Neo4j"]
-    BH["BHCE :8081 + bhce-neo4j<br/>(profile: ad)"]
-    GH["ghidra-mcp<br/>(profile: reversing)"]
   end
 
   NEO[("Neo4j KGStore :7687<br/>dual-homed")]
 
   subgraph OPS["sandbox-net (operations plane)"]
     SB["Sandbox (Kali)<br/>sandbox_server daemon + tmux<br/>nftables egress allowlist"]
-    C2["Sliver C2<br/>(profile: c2-sliver)"]
     T["In-scope targets"]
   end
 
-  OC["opscontrol daemon (host)<br/>docker compose --profile X up"]
   CAIDO["Caido proxy<br/>(external, CLI)"]
   DEVIN["Devin API<br/>(opt-in, outside envelope)"]
   PROV["LLM providers<br/>Anthropic · OpenAI · Gemini · …"]
 
-  L --> OC
   L --> LG
   CLI -->|LangGraph SDK / SSE| LG
   WEB -->|LangGraph SDK / SSE| LG
   WEB --> PG
   ENG -->|writes plan/roe.json, then runs.stream| LG
   MCP --> LG
-  BEN --> LG
   LG --> LLM --> PROV
   LLM --> PG
   LG -->|HTTP to sandbox daemon| SB
   LG --> NEO
   LG --> SK
-  LG --> BH
-  LG --> GH
-  LG -->|ops_start/stop| OC
   LG -.->|proof gate / replay| CAIDO
   LG -.->|devin_delegate| DEVIN
   SB --> NEO
   SB --> T
-  SB --> C2
 ```
 
 ---
@@ -85,20 +74,17 @@ Defined in `docker-compose.yml` (plus `.dev`, `.watch`, `.tun` overlays). Docker
 | Service | Network | Purpose | Started |
 |---|---|---|---|
 | `litellm` | buggy-net | One OpenAI-compatible LLM endpoint for every agent. It handles fallback, spend tracking and OAuth subscription handlers (`config/*_handler.py`). | core |
-| `postgres` | buggy-net | LiteLLM keys and spend, web dashboard DB (Prisma), BHCE DB (`containers/postgres-init/`) | core |
+| `postgres` | buggy-net | LiteLLM keys and spend, web dashboard DB (Prisma, `containers/postgres-init/`) | core |
 | `neo4j` | **both** | The engagement knowledge graph (KGStore). The sandbox writes to it and agents read it. | core |
 | `skillogy` | buggy-net | REST skill catalog (`find_skill` / `load_skill` / `traverse`) with a server-side ACL per role | core |
 | `langgraph` | buggy-net | Hosts every agent graph (`langgraph.json`) plus `server/plugins_api.py` | core |
 | `sandbox` | sandbox-net | Kali image. `sandbox_server` (FastAPI) runs commands in tmux; `sandbox_kernel/egress.py` applies the nftables allowlist. | core |
 | `cli` | buggy-net | Ink terminal client | core |
 | `web` | buggy-net | Next.js dashboard; port 3000, terminal WebSocket 3003 | on demand (`/web`) |
-| `c2-sliver` | sandbox-net | Sliver team server | `ops_start("c2-sliver")` |
-| `bhce`, `bhce-neo4j`, `bhce-postgres-init` | buggy-net | BloodHound CE for the AD attack graph | `ops_start("ad")` |
-| `ghidra-mcp` | buggy-net | Reverse-engineering backend | `ops_start("reversing")` |
 
-**Network rule:** nothing on `sandbox-net` can reach LiteLLM, Postgres, LangGraph, the web dashboard or BHCE. Neo4j is the only shared service. The real network boundary for attack traffic is the sandbox's nftables egress allowlist.
+**Network rule:** nothing on `sandbox-net` can reach LiteLLM, Postgres, LangGraph or the web dashboard. Neo4j is the only shared service. The real network boundary for attack traffic is the sandbox's nftables egress allowlist.
 
-**Host side:** `clients/launcher` is a Go binary (`buggy start|stop|status|onboard|update|logs`). It drives docker compose and registers the **opscontrol** daemon (`clients/launcher/internal/opscontrol`), which starts and stops specialist profiles when agents ask.
+**Host side:** `clients/launcher` is a Go binary (`buggy start|stop|status|onboard|update|logs`). It drives docker compose.
 
 ---
 
@@ -114,7 +100,7 @@ packages/
     utils/                env.py (env_flag/env_float), normalize.py (host/endpoint), engagement_scope.py
     subscriptions.py      provider-subscription detection (BUGGY_AUTH_*)
   buggy/           The framework
-    agents/               build.py, middleware_slots.py, standard/ (20 roles), plugins/ (vulnresearch), bounty/, prompts/
+    agents/               build.py, middleware_slots.py, standard/ (buggy, soundwave, recon, exploit, analyst), bounty/, prompts/
     middleware/           every middleware in the stack (see §6)
     tools/                every agent tool (see §7)
     llm/                  factory.py (model + fallback + refusal circuit), router.py, models.py
@@ -127,13 +113,12 @@ packages/
     server/plugins_api.py extra HTTP routes mounted on LangGraph
     skillogy/             skill-catalog service (builder, server, client, embeddings)
     skills/               SKILL.md tree (standard/, shared/, benchmark/) + .graph/
-    blue_cell/            Offensive-Vaccine detection rule matching
     cli/                  python CLI: engage, auth, audit, scan, telemetry, workflows
     telemetry/            OTel config (default off in this fork)
   buggy-sdk/       Plugin SDK (scaffold, examples, testing helpers)
 clients/                launcher (Go), cli (Ink), web (Next.js), shared
 config/                 litellm.yaml + provider OAuth handlers
-benchmark/              XBOW / Cybench / CyberGym / ExploitBench runners, kg_recorder, kg_seed_learnings
+benchmark/              lab/ (local practice-app scoring) + the evidence-record contract
 containers/             Dockerfiles + entrypoints
 ```
 
@@ -187,12 +172,9 @@ Plugins (`buggy-sdk`, entry points `buggy.subagents`, `buggy.skills`, …) can a
 | Group | Agents | Role |
 |---|---|---|
 | Planner | `soundwave` | Interview, plan bundle |
-| Orchestrator | `buggy` | Reads OPPLAN and dispatches sub-agents through `task()`. Holds ops, session and Devin tools. It does no hands-on work itself. |
-| Kill chain | `recon` → `exploit` → `postexploit`, `analyst`, `reverser` | `recon` always goes first and emits `SURFACE_COUNTS`. `exploit` holds the reconciliation tools. `analyst` holds the proof-gated recorder. |
-| Domain operators | `ad_operator`, `cloud_hunter`, `contract_auditor`, `phisher`, `mobile_operator`, `wireless_operator`, `osint_operator`, `iot_operator`, `ics_operator`, `forensicator`, `supply_chain_operator`, `asvs_assessor` | Specialist work; some ask opscontrol for sidecars |
-| Vulnresearch (plugin) | `scanner` → `detector` → `verifier` → `patcher` → `exploiter` (`agents/plugins/`) | 5-stage pipeline. State passes **only** through the KG. The verifier is adversarial and tries to disprove each claim. |
+| Orchestrator | `buggy` | Reads OPPLAN and dispatches sub-agents through `task()`. Holds session and Devin tools. It does no hands-on work itself. |
+| Kill chain | `recon` → `exploit`, `analyst` | `recon` always goes first and emits `SURFACE_COUNTS`. `exploit` holds the reconciliation tools. `analyst` holds the proof-gated recorder. |
 | Bug bounty | `agents/bounty/*` (api_security, ssrf_cloud, authn_session, graphql, llm_security, …) | Bounty-class hunters |
-| Defense | `blue_cell`, `retrospective` | Offensive Vaccine: attack path → detection rule; post-run learnings |
 
 Sub-agents start with a **fresh context per objective**. Anything durable goes to `workspace/` and Neo4j, never agent memory.
 
@@ -234,16 +216,15 @@ declaration order of `MiddlewareSlot` (`buggy-core/contracts/slots.py`). Each ro
 | 11 | kg | `middleware/kg.py`, `kg_internal/` | KG tools and ingest (skipped if the Neo4j env vars are missing) |
 | 12 | event-log | `middleware/event_logging.py` → `runtime/event_log.py` | Append-only event log for each engagement |
 | 13 | sandbox-notification | `middleware/notifications.py` | Injects background-command completions as `<system-reminder>` |
-| 14 | opscontrol-notification | `middleware/opscontrol_notifications.py` | Injects workload state changes (e.g. "BHCE is up") |
-| 15 | budget | `middleware/budget.py` | Token and cost budget per run |
-| 16 | model-override | `middleware/model_override.py` | Runtime `/model` switch |
-| 17 | model-fallback | langchain `ModelFallbackMiddleware` | Ordered fallback model list for the role |
-| 18 | proxy-key-override | `middleware/proxy_key_override.py` | Per-run LiteLLM key |
-| 19 | summarization | deepagents | Compacts context when it grows long |
-| 20 | prompt-caching | `AnthropicPromptCachingMiddleware` | Cache breakpoints |
-| 21 | patch-tool-calls | deepagents | Repairs dangling tool calls |
+| 14 | budget | `middleware/budget.py` | Token and cost budget per run |
+| 15 | model-override | `middleware/model_override.py` | Runtime `/model` switch |
+| 16 | model-fallback | langchain `ModelFallbackMiddleware` | Ordered fallback model list for the role |
+| 17 | proxy-key-override | `middleware/proxy_key_override.py` | Per-run LiteLLM key |
+| 18 | summarization | deepagents | Compacts context when it grows long |
+| 19 | prompt-caching | `AnthropicPromptCachingMiddleware` | Cache breakpoints |
+| 20 | patch-tool-calls | deepagents | Repairs dangling tool calls |
 
-Middleware from plugins is appended after slot 21.
+Middleware from plugins is appended after slot 20.
 
 ---
 
@@ -253,20 +234,16 @@ Middleware from plugins is appended after slot 21.
 |---|---|---|
 | `bash/` | `bash`, background jobs, tmux sessions, interactive prompts | Sandbox daemon |
 | `filesystem.py` | workspace file I/O | `/workspace` bind mount |
-| `network/`, `web/`, `browser/` | scanners, HTTP, JWT, OAuth, GraphQL, browser automation | Targets via the sandbox |
+| `web/`, `browser/` | HTTP, JWT, OAuth, GraphQL, browser automation | Targets via the sandbox |
 | `proxy/` | Caido proxy (history, replay); `CaidoError(kind, exit_code)` | `caido` CLI |
 | `reporting/` | `report_record_finding` (**proof gate**), CVSS, HackerOne, Bugcrowd, SARIF, executive and timeline renderers, `kg_adapter` | Caido, Neo4j, workspace |
 | `research/` | CVE lookup, SAST orchestration, SARIF, taint, secrets, SCA, IaC, fuzzing, chain planning, dedupe, bounty scope | NVD/OSV/EPSS, Neo4j |
-| `ad/` | BHCE client (HMAC), ADCS, delegation, GPO and shadow-cred audits | BHCE |
-| `cloud/`, `contracts/`, `reversing/` | cloud, smart-contract and RE tooling | ghidra-mcp etc. |
-| `ops/` | `ops_start/ops_stop/ops_status` (orchestrator only) | opscontrol daemon |
 | `session/` *(fork)* | `session_store/get/list/clear` over `workspace/sessions/<host>.json`, so auth material is reused rather than re-fought | workspace |
 | `devin/` *(fork)* | `devin_delegate` (opt-in). **Outside the enforcement envelope**: no RoE, egress, proof gate or audit. | Devin API |
 | `evidence/` | asciicast recordings | workspace |
 | `references/` | killchain, methodology, payload and one-liner corpora | local data |
 | `skills.py`, `skills_registry.py` | skill tooling | Skillogy |
 | `opplan.py` | OPPLAN CRUD | state |
-| `mcp/` | MCP client tools | external MCP servers |
 
 ---
 
@@ -319,10 +296,9 @@ The model actually served is logged for audit. The removed `claude4_compat` evas
 
 | Store | What lives there | Written by | Read by |
 |---|---|---|---|
-| **Neo4j KGStore** | `Host`, `Service`, `Vulnerability`, `Finding`, `Credential`, `Technique`, `AttackPath`; edges `EXPLOITS`, `REQUIRES`, `AFFECTS`, `LEADS_TO` (`buggy_core/types/kg.py`) | KG middleware and tools, the proof gate (`kg_adapter.publish_finding_node` with a canonical-key MERGE), the sandbox, `kg_recorder` | `kg_query` (findings ranked passes-first, errors in a separate field), the chain planner, vulnresearch stages, blue_cell |
+| **Neo4j KGStore** | `Host`, `Service`, `Vulnerability`, `Finding`, `Credential`, `Technique`, `AttackPath`; edges `EXPLOITS`, `REQUIRES`, `AFFECTS`, `LEADS_TO` (`buggy_core/types/kg.py`) | KG middleware and tools, the proof gate (`kg_adapter.publish_finding_node` with a canonical-key MERGE), the sandbox | `kg_query` (findings ranked passes-first, errors in a separate field), the chain planner |
 | **Skillogy Neo4j** | `:Skill` graph built from `skills/**/SKILL.md` | Skillogy builder at startup | `SkillogyMiddleware` |
-| **BHCE** | AD graph from SharpHound ZIPs | `bhce_ingest_zip` | `bhce_cypher` |
-| **PostgreSQL** | LiteLLM spend and keys, dashboard data, BHCE DB | LiteLLM, web, BHCE | same |
+| **PostgreSQL** | LiteLLM spend and keys, dashboard data | LiteLLM, web | same |
 | **LangGraph checkpoints** | thread state | LangGraph | LangGraph |
 | **workspace/** (per engagement) | `plan/` (roe.json draft, conops, OPPLAN), `FIND-*.md`, PoCs, `sessions/<host>.json`, event log, `.scratch/`. The enforced `roe.json`, approvals and audit ledgers live in the separate `control/` and `audit/` trees | agents, middleware | agents, reports, operator |
 
@@ -340,41 +316,27 @@ flowchart LR
     M --> Q["queue: per-class ordered items<br/>+ finding_template (file, line, cwe, rule)<br/>queue_is_actionable"]
   end
   subgraph BB["Black-box"]
-    RC["recon → SURFACE_COUNTS"] --> EX["exploit / domain operators<br/>traffic via Caido"]
+    RC["recon → SURFACE_COUNTS"] --> EX["exploit / web-API specialists<br/>traffic via Caido"]
   end
   Q --> EX
-  EX --> VR["verifier (adversarial):<br/>cheap disproofs → PoC disproof → impact challenge"]
-  VR --> RF["report_record_finding (analyst)"]
+  EX --> RF["report_record_finding (analyst)"]
   RF --> PG{"Proof gate<br/>PoC fields present?<br/>Caido request ids exist and match?"}
   PG -- FAIL --> RJ[Rejected → re-plan]
   PG -- PASS --> KG[("Neo4j FINDING<br/>canonical key MERGE")]
   PG -- UNVERIFIABLE<br/>(proxy unreachable) --> KG
   KG --> RP["Caido replay entries<br/>(BUGGY_FINDING_REPLAY)"]
   KG --> OUT["Reports: HackerOne · Bugcrowd ·<br/>SARIF · executive · timeline"]
-  KG --> BC["blue_cell → detections"]
 ```
 
 Proof gate outcomes (`tools/reporting/proof_gate.py`):
 
 - **PASS**: every cited `http_exchange_id` exists in Caido and holds a real request. The finding is persisted with `live_verified=True`.
 - **FAIL**: a cited id is missing or doesn't match, or a required PoC field is empty. The finding is rejected.
-- **UNVERIFIABLE**: the Caido CLI is missing, timed out, or no client is configured. The finding is persisted with `evidence_unverified=True` and a warning. See the review note in §14.
+- **UNVERIFIABLE**: the Caido CLI is missing, timed out, or no client is configured. The finding is persisted with `evidence_unverified=True` and a warning. See the review note in §13.
 
 ---
 
-## 12. Dynamic workloads (opscontrol)
-
-```
-orchestrator ──ops_start("ad")──► opscontrol daemon (host, systemd/launchd)
-                                     └─ docker compose --profile ad up -d   (state: starting → running → stopped)
-OpsControlNotificationMiddleware polls /v1/profiles each turn → <system-reminder> on state change
-```
-
-The allowed workloads are `ad`, `c2-sliver`, `c2-havoc`, `reversing`, `cloud`, `mobile`, `phishing`, `forensics`, `ics`, `iot`, `supply-chain` and `wireless`.
-
----
-
-## 13. End-to-end sequence (one engagement)
+## 12. End-to-end sequence (one engagement)
 
 ```mermaid
 sequenceDiagram
@@ -414,13 +376,12 @@ sequenceDiagram
   LG->>Op: report (FIND-*.md, HackerOne/SARIF/executive)
 ```
 
-The benchmark mode (`BENCHMARK_MODE`, `benchmark/harness.py`) follows the same path. The harness spins up
-the XBOW or CTF challenge containers, sends each challenge to the orchestrator and checks the flag. It then
-records the outcome and learnings to Neo4j through `kg_recorder` (off the event loop, with writes serialized by a lock).
+`benchmark/lab` scores the deterministic hunt against the local practice apps in
+`docker-compose.lab.yml` (Juice Shop, DVGA, DVWA); see `benchmark/lab/README.md`.
 
 ---
 
-## 14. Enforcement envelope and known gaps
+## 13. Enforcement envelope and known gaps
 
 **What is enforced**
 
@@ -441,7 +402,7 @@ records the outcome and learnings to Neo4j through `kg_recorder` (off the event 
 - **KG dedup is weak.** The canonical key never gets a vuln class from the recorder. `normalize_host` splits on `@` before the path. An empty target merges every finding with the same title.
 - **Devin delegation** runs completely outside the envelope.
 
-## 15. Deterministic services (bug-bounty path)
+## 14. Deterministic services (bug-bounty path)
 
 Rule: anything a tool can do deterministically is code, not an agent. Agents
 query structured results and spend tokens on choosing, chaining and judging.

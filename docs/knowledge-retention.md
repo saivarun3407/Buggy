@@ -52,8 +52,7 @@ workflow that beat the documented one — promote it into the committed corpus:
 4. Regenerate the graph (`make build-skill-graph`) so `skills.cypher` stays
   in sync.
 
-This mirrors the field-journal / contribute-back model used by the
-[reverse-skill](integrations/reverse-skill.md) integration: raw engagement
+This is a field-journal / contribute-back model: raw engagement
 notes live and die with the engagement, while distilled precedent flows back
 into the committed skill corpus. Skills are the only long-term memory the
 repo keeps.

@@ -306,7 +306,6 @@ to honor the original semantics.
 | `buggy.tools.bash` | `BASH_TOOLS` (the four bash tools), `set_sandbox` |
 | `buggy.tools.research`, `buggy.tools.references` | KG / CVE / payload tools |
 | `buggy.tools.interaction` | `ask_user_question`, `complete_engagement_planning` |
-| `buggy.tools.ops` | `ops_start`, `ops_stop`, `ops_status` (orchestrator-only, ADR-0006) |
 | `buggy.backends` | `HTTPSandbox`, `build_sandbox_backend`, `make_agent_backend` |
 | `buggy.llm` | `LLMFactory` |
 | `buggy_core.types.engagement` | `RoE`, `CONOPS`, `DeconflictionPlan`, `OPPLAN`, `ThreatProfile`, `CleanupPlan`, `AbortPlan`, `ContactPlan`, `DataHandlingPlan` |

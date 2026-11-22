@@ -86,8 +86,7 @@ RUN --mount=type=cache,target=/var/cache/apt,sharing=locked,id=sandbox-apt-cache
         netexec \
         # ── AD attack chain — Responder → ntlmrelayx → secretsdump ──
         # responder + python3-impacket are both in kali-rolling apt; they
-        # chain together for the canonical internal-network AD attack
-        # documented in docs/red-team/tools-techniques.md.
+        # chain together for the canonical internal-network AD attack.
         responder \
         python3-impacket \
         impacket-scripts \
@@ -105,14 +104,12 @@ RUN --mount=type=cache,target=/var/cache/apt,sharing=locked,id=sandbox-apt-cache
         tcpdump \
         tshark \
         socat \
-        # ── Mobile triage host-side (Mobile agent) ──
+        # ── Mobile triage host-side ──
         # adb + apktool are in kali-rolling apt and let the agent do quick
         # APK / device triage from the bash tool without leaving the sandbox.
         adb \
         apktool \
-        # ── Reverse engineering / firmware (lightweight CLIs; Ghidra is
-        # kept out of the base image and delivered via the ghidra-mcp
-        # sidecar — see the INSTALL_REVERSING block below) ──
+        # ── Reverse engineering / firmware (lightweight CLIs) ──
         radare2 \
         binwalk \
         # ── YARA (DFIR validation; complements yara-x on the host) ──

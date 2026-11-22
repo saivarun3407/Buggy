@@ -1,61 +1,48 @@
 # Agents
 
-Buggy ships a **multi-agent stack** organized by kill chain phase: three orchestrators (Buggy, Vulnresearch, Soundwave), a roster of specialist sub-agents under Buggy (recon → exploit → post-exploit → domain operators), the five-stage Vulnresearch pipeline (`scanner → detector → verifier → patcher → exploiter`), and the `blue_cell` defense agent for the Offensive Vaccine loop. Each agent starts with a **fresh context window** per objective — no accumulated noise, no context degradation. Findings persist to disk (`workspace/`) and the knowledge graph, not agent memory.
+Buggy's built-in agents test web apps and APIs. The orchestrator (`buggy`)
+reads the OPPLAN and delegates to specialist sub-agents; `soundwave` writes the
+engagement plan for a new engagement. The same work can instead be done by
+Claude Code through the agent bridge (see [Claude Code agent](claude-code-agent.md)).
+
+Every role that sends requests or reads results gets the stack's own tool
+servers (`tools/stack_mcp.py`): the recon store, the scope server, the
+evidence gateway and the scoped browser.
 
 ---
 
 ## Agent Roster
 
-### Orchestrators
+### Orchestrator and planner
 
 | Agent | Role |
 |-------|------|
-| **Buggy** | Main red-team orchestrator. Reads the OPPLAN, dispatches objectives to specialist sub-agents, and tracks status transitions. Sub-agents: `recon`, `exploit`, `postexploit`, `analyst`, `reverser`, `contract_auditor`, `cloud_hunter`, `ad_operator`, `phisher`, `mobile_operator`, `wireless_operator`, `osint_operator`, `iot_operator`, `ics_operator`, `forensicator`, `supply_chain_operator`. |
-| **Vulnresearch** | Vulnerability research orchestrator — runs the five-stage pipeline (`scanner → detector → verifier → patcher → exploiter`) with state passed between stages exclusively through the knowledge graph. |
-| **Soundwave** | Engagement planner. Standalone graph (not a sub-agent of Buggy). Interviews the operator and writes the eight-document engagement bundle — RoE, Threat Profile, CONOPS, Deconfliction, Contact, Data Handling, Abort, Cleanup. The orchestrator builds the OPPLAN. |
+| **Buggy** | Orchestrator. Reads the OPPLAN, dispatches objectives to the sub-agents below through `task()`, and tracks status transitions. |
+| **Soundwave** | Engagement planner. Standalone graph (not a sub-agent of Buggy). Interviews the operator and writes the engagement bundle (RoE, CONOPS, OPPLAN and the supporting documents) that the orchestrator consumes. |
 
-### Reconnaissance
-
-| Agent | Role |
-|-------|------|
-| **Recon** | Port scanning, service enumeration, DNS, subdomain discovery, OSINT. Populates the knowledge graph with hosts and services. |
-
-### Vulnerability Research Pipeline
-
-Sub-agents of the **Vulnresearch** orchestrator. State flows between stages via the knowledge graph; each stage runs with fresh context.
-
-| Stage | Agent | Output |
-|-------|-------|--------|
-| Discovery | **Scanner** | Vulnerability candidates with CVE/CVSS |
-| Analysis | **Detector** | Confidence-rated findings, detection rules |
-| Confirmation | **Verifier** | Verified findings (2+ methods for CRITICAL/HIGH) |
-| Exploitation | **Exploiter** | Working proof-of-concept |
-| Remediation | **Patcher** | Patch code or configuration fix |
-
-### Exploitation & Post-Exploitation
+### Standard sub-agents
 
 | Agent | Role |
 |-------|------|
-| **Exploit** | Initial access and exploitation tactics. Web/AD attacks (SQLi, SSTI, Kerberoasting, ADCS abuse, credential attacks). |
-| **Post-Exploit** | Privilege escalation, lateral movement, credential harvesting, persistence. Operates via C2 sessions once initial access is established. |
+| **Recon** | Reads the deterministic recon store and plans what to probe; does not send probes itself. |
+| **Exploit** | Tests a web or API weakness through the evidence gateway and records what it proved. |
+| **Analyst** | Source and dependency review, chaining findings, and the proof-gated finding recorder. |
 
-### Domain Specialists
+### Web/API specialists (`bounty` bundle)
 
 | Agent | Role |
 |-------|------|
-| **AD Operator** | Active Directory attacks — Kerberoasting, AS-REP roasting, ADCS ESC1-ESC15, DCSync, BloodHound path analysis. |
-| **Cloud Hunter** | Cloud infrastructure attacks — IAM privilege escalation, S3 bucket exposure, Kubernetes RBAC escapes, metadata service abuse. |
-| **Contract Auditor** | Solidity / EVM smart contract audits — reentrancy, oracle manipulation, flash loan abuse, access control. |
-| **Reverser** | Binary analysis and reverse engineering — ELF/PE/Mach-O triage, packer detection, ROP gadget inventories, Ghidra/radare2 recon. |
-| **Analyst** | Vulnerability research and reporting — source code review, static analysis (semgrep/bandit/gitleaks), dependency CVE sweeps, multi-hop exploit chain construction. |
-| **Phisher** | Initial-access via phishing / social engineering (MITRE T1566.\*) — GoPhish campaigns, evilginx2 MFA-bypass token capture, M365/O365 OAuth device-code harvest, lookalike domains, pretext engineering. Mandatory lure deconfliction with the blue team before sending. |
-| **Mobile Operator** | Android / iOS application attacks — static analysis (apktool/jadx/class-dump), dynamic instrumentation (frida/objection), SSL pinning + root/jailbreak bypass, exported-component abuse, WebView JS bridge exploitation, MobSF. |
-| **Wireless Operator** | Wi-Fi / BLE / Zigbee / sub-GHz attacks — WPA2 handshake / PMKID capture, WPA3-SAE downgrade, WPA-Enterprise evil-twin, KARMA / Mana, deauth, WPS Pixie Dust, BLE GATT, Zigbee Touchlink, sub-GHz replay. Requires hardware passthrough or an SSH dropbox. |
-| **OSINT Operator** | Passive open-source intelligence — domain/email/employee/breach/code-leak/infra footprinting. Read-only; feeds Recon and Exploit. |
-| **IoT Operator** | IoT / embedded device attacks — firmware acquisition + binwalk extraction, hardcoded credentials, U-Boot / `/dev/mem`, and BLE/Zigbee/Z-Wave/sub-GHz/LoRaWAN radios. |
-| **ICS Operator** | ICS / OT / SCADA attacks (Modbus, DNP3, S7comm, BACnet, OPC-UA). RoE-gated; read-only enumeration first, lab/canary-only for writes. |
-| **Forensicator** | DFIR / purple-team validation — disk/memory/log/network timeline analysis, IOC extraction, attack→detection mapping. |
-| **Supply Chain Operator** | Software supply-chain attacks — dependency confusion, typosquatting, malicious packages (npm/PyPI/crates), CI/CD + build-step compromise. |
+| **Scout** | Intake: program selection and the enforced scope. |
+| **ASVS** | Maps coverage to OWASP ASVS 5.0 requirements. |
+| **MITRE ATT&CK** | Maps observed behaviour to ATT&CK techniques. |
+| **API security** | REST/OpenAPI weaknesses (BOLA/BFLA, mass assignment, injection). |
+| **AuthN / session** | Sign-in, session, token and account-takeover weaknesses. |
+| **Business logic** | Workflow abuse and race conditions. |
+| **Client-side** | XSS, DOM issues and other browser-side weaknesses. |
+| **GraphQL** | GraphQL schema exposure, authorization and query abuse. |
+| **LLM / AI app** | Prompt injection and other weaknesses of LLM features. |
+| **Secrets / CI-CD** | Exposed secrets and build-pipeline exposure. |
+| **SSRF / cloud metadata** | SSRF and what it reaches. |
 
 ---
 
@@ -102,7 +89,7 @@ Bash-executing agents and the orchestrator additionally get:
 |------------|------|---------|
 | `SkillsMiddleware` | `skills` | Loads `SKILL.md` frontmatter, filters by agent role, and injects matching skill descriptions into the system prompt. Full skill content is fetched on demand via the `load_skill` tool — `read_file` / `bash cat` **do not** resolve `/skills/*` (that tree is served in-process by a local `FilesystemBackend`, not the sandbox). |
 | `FilesystemMiddleware` | `filesystem` | Provides `read_file`, `write_file`, `edit_file`, `ls`, `glob`, `grep` tools backed by the sandbox filesystem. Execute is intentionally stripped — agents use the dedicated `bash` tool for command execution. |
-| `SubAgentMiddleware` | `subagent` | Allows orchestrators (Buggy, Vulnresearch) to delegate objectives to specialist sub-agents via the `task()` tool. |
+| `SubAgentMiddleware` | `subagent` | Allows the orchestrator (Buggy) to delegate objectives to specialist sub-agents via the `task()` tool. |
 | `OPPLANMiddleware` | `opplan` | Injects the current OPPLAN progress table into every LLM call and provides CRUD tools for objective management. |
 | `ModelOverrideMiddleware` | `model-override` | Per-objective model selection. Orchestrator only. |
 | `ModelFallbackMiddleware` | `model-fallback` | Switches to a fallback model on provider outage, rate limit, or context overflow. Conditional — skipped when no fallback chain is configured. |
@@ -126,14 +113,7 @@ EngagementContext → RoEEnforcement → HITLApproval → UntrustedOutput → Pr
                   → ModelFallback → Summarization → AnthropicPromptCaching → PatchToolCalls
 ```
 
-**Vulnresearch (Orchestrator)** — base + sub-agent dispatch. No `EngagementContext` (it consumes its parent's context), no `ModelOverride`, no `HITLApproval`, no `SandboxNotification`.
-
-```
-RoEEnforcement → UntrustedOutput → PromptInjectionShield → Skills → Filesystem → SubAgent → OPPLAN
-              → EventLog → Budget → ModelFallback → Summarization → AnthropicPromptCaching → PatchToolCalls
-```
-
-**Bash-executing specialists** (Recon, Exploit, Post-Exploit, Analyst, Reverser, Contract Auditor, Cloud Hunter, AD Operator, Phisher, Mobile Operator, Wireless Operator — and the plugin specialists Verifier, Patcher, Scanner, Exploiter) — the full bash-agent stack including `EngagementContext` and `SandboxNotification`.
+**Bash-executing specialists** (Recon, Exploit, Analyst and the web/API specialists) — the full bash-agent stack including `EngagementContext` and `SandboxNotification`.
 
 ```
 EngagementContext → RoEEnforcement → HITLApproval → UntrustedOutput → PromptInjectionShield
@@ -142,13 +122,6 @@ EngagementContext → RoEEnforcement → HITLApproval → UntrustedOutput → Pr
 ```
 
 These specialists also have the `bash` tool for command execution inside the sandbox; `FilesystemMiddleware` covers all file I/O.
-
-**Detector (read-only plugin specialist)** — base set only. No `bash`, no `EngagementContext`, no `SandboxNotification`, no `HITLApproval`.
-
-```
-RoEEnforcement → UntrustedOutput → PromptInjectionShield → Skills → Filesystem → EventLog → Budget
-              → ModelFallback → Summarization → AnthropicPromptCaching → PatchToolCalls
-```
 
 **Soundwave (Planner)** — base set + `EngagementContext`. No `bash`, no sub-agents, no `SandboxNotification`, no `HITLApproval` (document generation only).
 

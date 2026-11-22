@@ -145,12 +145,6 @@ Upgrade vsftpd to 2.3.5 or later.
 
 ---
 
-## Phase 3: Offensive Vaccine (planned)
-
-The defense feedback loop is planned for a future implementation. See [Offensive Vaccine](offensive-vaccine.md).
-
----
-
 ## Outputs
 
 Everything an engagement produces lands under its workspace directory:

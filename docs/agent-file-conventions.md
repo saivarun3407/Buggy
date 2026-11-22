@@ -212,20 +212,13 @@ it may produce) and writes a specific set of artifacts.
 - **Credential preservation (Rule 15):** the moment any high-value secret is
   captured, `write_file("exploit/creds/credentials.md", "<verbatim secret>")`
   **before doing anything else**, so it survives summarization. `creds/` is
-  the canonical credentials location across the kill chain; post-exploit
-  reads and extends it at `post-exploit/creds/`.
+  the canonical credentials location across the kill chain.
 - **Vector lock:** while a confirmed vector is being worked but access isn't
   yet achieved, `exploit/ACTIVE.md` holds the working state; switching vuln
   class without writing `exploit/PIVOT.md` is forbidden.
 - **Mandatory handoff:** exactly one terminal artifact — `findings/FIND-NNN.md`
   (success), `exploit/CONVERGED.md`, `exploit/PIVOT.md` + negative
   `findings/FIND-NNN.md`, or `exploit/EXIT_REPORT.md` (see §5).
-
-### Post-exploit (`postexploit.md`)
-
-- Extends the credentials tree at `post-exploit/creds/`.
-- Writes `findings/FIND-NNN.md` for privilege escalation, credential access,
-  lateral movement, and discovery, following the same finding protocol.
 
 ### Analyst (`analyst.md`)
 
@@ -393,8 +386,6 @@ At engagement close, the orchestrator runs the final-report sequence
    `report/finding-NNN.md` (heavyweight CVSS 4.0 vector, CWE, MITRE
    mapping, remediation), cross-referenced against the CONOPS success
    criteria.
-5. Call `ops_cleanup_engagement()` to stop any sidecar workloads (BHCE,
-   Sliver) tagged to the engagement.
 
 ---
 

@@ -20,25 +20,20 @@ Buggy runs on two Docker networks. Management infrastructure (LLM proxy, databas
 │                     │       │       sandbox-net            │
 │  LiteLLM    :4000   │       │                              │
 │  PostgreSQL :5432   │       │  Sandbox (Kali Linux)        │
-│  LangGraph  :2024   │       │  C2 Server (Sliver)          │
+│  LangGraph  :2024   │       │                              │
 │  Web        :3000   │       │  Victim targets              │
 │                     │       │                              │
 │  Neo4j ◀────────────┼───────┼──▶ Neo4j  :7687/:7474        │
 │  (KGStore — dual-homed bolt:// for agent + sandbox writes)  │
 │                     │       │                              │
-│  BHCE       :8081   │       │                              │
-│  BHCE-Neo4j (intl.) │       │                              │
-│  (AD attack-graph sidecar, buggy-net only)             │
 └─────────────────────┘       └──────────────────────────────┘
        Management                       Operations
-   (LLM, persistence, UI)        (exploitation, C2, targets)
+   (LLM, persistence, UI)        (sandbox, targets)
 ```
 
-**Network boundaries.** The sandbox cannot reach LiteLLM, PostgreSQL, the LangGraph API, the web dashboard, the BHCE API, or BHCE's Neo4j — none of the management services are routable from `sandbox-net`. The agent inside LangGraph cannot reach attack tooling over a TCP socket; the only channel into the sandbox is `docker exec` via the Docker socket bind-mount.
+**Network boundaries.** The sandbox cannot reach LiteLLM, PostgreSQL, the LangGraph API or the web dashboard — none of the management services are routable from `sandbox-net`. The agent inside LangGraph cannot reach attack tooling over a TCP socket; the only channel into the sandbox is `docker exec` via the Docker socket bind-mount.
 
 **KGStore Neo4j is the one cross-network shared service** — it sits on both networks because the sandbox writes findings into it (`bolt://neo4j:7687` from inside Kali) and the agent reads them back (`bolt://neo4j:7687` from inside LangGraph). It's a knowledge store, not a privileged service: the agent's credentials never traverse it, and a compromised sandbox can't pivot through Neo4j to LiteLLM or the API surface.
-
-**BHCE has its own dedicated Neo4j** on `buggy-net` only. Neo4j Community Edition allows one user database per server and KGStore already occupies it, so BHCE gets a separate instance to avoid label/constraint collisions with its `dawgs` driver. See [ADR-0005](adr/0005-bloodhound-via-bhce-rest-client.md). The sandbox does **not** see the BHCE Neo4j — the AD attack-graph pipeline is a management-plane concern only; the sandbox produces SharpHound ZIPs and hands them to the agent, never talks to BHCE directly.
 
 ---
 
@@ -80,17 +75,6 @@ Graph database for the cross-domain attack graph (web, cloud, smart-contract fin
 
 **Dual-homed by design**: the sandbox writes operational findings into the graph (`cypher-shell` from inside Kali), and the agent in LangGraph reads them back to plan the next objective. Both networks see the same Neo4j instance on the same `bolt://neo4j:7687` URI.
 
-### BloodHound Community Edition sidecar (`buggy-net`, BHCE API on host port 8081)
-
-AD attack-graph layer, introduced by [ADR-0005](adr/0005-bloodhound-via-bhce-rest-client.md). Two containers:
-
-- `bhce` — `docker.io/specterops/bloodhound` pinned to the v9.2.2 release commit. Speaks the official BHCE REST API (HMAC-signed, OpenAPI 3.0.3 at `/api/v2/spec`).
-- `bhce-neo4j` — dedicated `neo4j:4.4.42-community` for BHCE's graph. No host port exposure; only the `bhce` container talks bolt to it.
-
-Postgres is reused from the existing `postgres` container — `containers/postgres-init/02-bloodhound-db.sh` pre-creates the `bloodhound` database plus the `pg_trgm` extension so BHCE's goose migrations bootstrap cleanly on first boot.
-
-Agents call BHCE through `buggy.tools.ad.bh_tools.bhce_status` / `bhce_cypher` / `bhce_ingest_zip` and the shared `buggy.tools.ad.bhce_client.BHCEClient` HMAC-3-chain signer. The in-house `bh_ingest_zip` / `adcs_post_process` / `dcsync_check` / `delegation_audit` / `gpo_audit` / `shadow_creds_audit` / `adcs_audit` tools emit `DeprecationWarning` on every call and will move to `buggy.compat` next minor.
-
 ### Skillogy (`buggy-net`, REST API on host port 9100)
 
 Standalone skill catalog service introduced by [ADR-0008](adr/0008-skillogy-hard-acl-phase1a.md). Three pieces:
@@ -107,7 +91,7 @@ Agents reach Skillogy through `SkillogyMiddleware`, which is a thin REST client.
 - `load_skill(name_or_path)` — fetches the body + frontmatter of one skill.
 - `traverse(from_path, edge_types?, depth=2)` — explicit BFS from a seed skill.
 
-Every middleware call carries an `allowed_path_prefixes` parameter set by the agent factory (e.g. `["skills/standard/ad/", "skills/shared/"]`); Skillogy enforces this hard ACL server-side, so prompt-injected widening attempts cannot escape the role's slice. Cross-role reads only succeed when the target lives under `skills/shared/`.
+Every middleware call carries an `allowed_path_prefixes` parameter set by the agent factory (e.g. `["skills/standard/exploit/", "skills/shared/"]`); Skillogy enforces this hard ACL server-side, so prompt-injected widening attempts cannot escape the role's slice. Cross-role reads only succeed when the target lives under `skills/shared/`.
 
 The Neo4j instance Skillogy uses is **not** the same as the engagement KGStore — they have different schemas, different write semantics, and run as separate containers so a long catalog rebuild can't lock engagement reads.
 
@@ -116,35 +100,13 @@ The Neo4j instance Skillogy uses is **not** the same as the engagement KGStore �
 Hardened Kali Linux container. Runs:
 - All agent-issued bash commands (via persistent tmux sessions)
 - Offensive tools: nmap, sqlmap, Impacket, Metasploit, Nuclei
-- Sliver C2 client (`sliver-client`) with auto-generated operator config
 - Interactive sessions for tools like `msfconsole`, `evil-winrm`
 
 The sandbox is the only place where commands actually execute. LangGraph reaches it via the Docker socket, not the network.
 
-### C2 Server (`sandbox-net`, Sliver — dynamic-spawn)
-
-Sliver team server runs alongside the sandbox on the operational network. Features:
-- mTLS, HTTPS, and DNS-based C2 channels
-- Implant generation (Windows, Linux, macOS)
-- Session management for post-exploitation
-
-Brought up on demand by the orchestrator via `ops_start("c2-sliver")` after a foothold is gained — see [ADR-0006](adr/0006-agent-driven-container-lifecycle.md). Default `buggy start` keeps the C2 plane cold. Future profile: `c2-havoc` (slated for a later release; the orchestrator's prompt and the opscontrol allowlist already accept it).
-
 ### Web Dashboard (`buggy-net`, port 3000 + terminal WebSocket on 3003 — dynamic-spawn)
 
 Next.js 16 application providing a browser-based control plane. v1.1.8 made this dynamic: it no longer comes up on `buggy start`. From inside the CLI, run `/web` to spawn it; `/web url` prints the URL; `/web down` stops the container without removing it. See [Web Dashboard](web-dashboard.md).
-
-### Dynamic Workload Lifecycle ([ADR-0006](adr/0006-agent-driven-container-lifecycle.md))
-
-The orchestrator (and only the orchestrator) controls specialist infrastructure through three tools:
-
-- `ops_start("<workload>")` — returns immediately with `state: "starting"`. The opscontrol daemon (a host-binary supervised by systemd / launchd) calls `docker compose --profile <workload> up -d` in a background goroutine and tracks the state machine `starting → running → stopped` per workload.
-- `ops_status` — fallback for daemon reachability checks; routine polling is discouraged because the middleware below already delivers transitions.
-- `ops_stop("<workload>")` — graceful shutdown via `docker compose stop`.
-
-The `OpsControlNotificationMiddleware` polls the daemon's `/v1/profiles` socket once per turn and, when a workload's state changes, injects a `<system-reminder>` HumanMessage on the very next inference — so the agent learns about a BHCE cold-start completion (or failure) without polling. Same shape as Claude Code's background-bash auto-notification pattern.
-
-Allowed workloads: `ad`, `c2-sliver`, `c2-havoc`, `reversing`, `cloud`, `mobile`, `phishing`, `forensics`, `ics`, `iot`, `supply-chain`, `wireless`. Today's compose ships sidecar services for `ad`, `c2-sliver`, and `reversing`; the rest of the allowlist names workloads whose specialist agents work directly inside the sandbox.
 
 ---
 
@@ -199,7 +161,7 @@ Orchestrator reads OPPLAN
   Findings appended to disk
         │
         ▼
-  Next objective (or Vaccine phase if all done)
+  Next objective
 ```
 
 ---
@@ -211,6 +173,5 @@ Orchestrator reads OPPLAN
 | Sandbox → Management services | Separate Docker networks; LiteLLM/PostgreSQL/LangGraph/Web are not routable from `sandbox-net` |
 | LangGraph → Sandbox | Docker socket only (no TCP) |
 | Sandbox → KGStore Neo4j | Allowed (intentional shared service for cross-domain attack graph writes) |
-| Sandbox → BHCE API / BHCE Neo4j | Blocked — BHCE lives on `buggy-net` only; the sandbox produces SharpHound ZIPs and hands them to the agent, which then ingests via `bhce_ingest_zip`. There is no sandbox-side bolt or REST path into BHCE. |
-| Credential isolation | Provider API keys + the BHCE HMAC token live on `buggy-net`; the sandbox never sees them |
+| Credential isolation | Provider API keys live on `buggy-net`; the sandbox never sees them |
 | Host isolation | All commands run inside Docker; no host filesystem access except the engagement-scoped `/workspace` bind mount |

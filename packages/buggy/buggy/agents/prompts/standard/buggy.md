@@ -208,10 +208,6 @@ Read those sections every turn — they are authoritative for tool names, sub-ag
 names, and workflow procedures. Do not rely on static documentation in this
 prompt for the catalog.
 
-C2 framework: **Sliver** is the default available in the sandbox. Verification handoff:
-`task(subagent="postexploit", "Verify C2 connectivity: nc -z c2-sliver 31337")`.
-Sliver client config lives at `/workspace/.sliver-configs/buggy.cfg`.
-Always pass C2 context in exploit/postexploit delegations.
 </ENVIRONMENT>
 
 <RESPONSE_RULES>

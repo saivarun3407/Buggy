@@ -46,70 +46,21 @@ at the virtual prefix `/skills/`. The tree has three roots:
 - `/skills/standard/<dir>/` — built-in OSS roles. The default source list for a
   standard role is `[f"/skills/standard/{role}/", "/skills/shared/"]`
   (`skills_sources_for`, `agents/middleware_slots.py:102`).
-- `/skills/plugins/<name>/` — plugin specialists. These agents pass an explicit
-  `skill_sources=` kwarg to `build_middleware` rather than relying on the
-  `/skills/standard/{role}/` fallback.
+- `/skills/bounty/<role>/` — the web/API specialists. These agents pass an
+  explicit `skill_sources=` kwarg to `build_middleware` rather than relying on
+  the `/skills/standard/{role}/` fallback.
 - `/skills/shared/` — cross-cutting protocols injected into every standard role.
 
 | Directory | Agent(s) | Coverage |
 |-----------|---------|----------|
 | `/skills/standard/soundwave/` | Soundwave | RoE templates, ConOps, OPPLAN generation, threat profiles |
-| `/skills/shared/` | Every standard role | OPSEC, defense evasion, workflow protocols, finding format, deconfliction |
+| `/skills/shared/` | Every role | OPSEC, finding protocol, defensive-assessment workflows, references |
 | `/skills/standard/recon/` | Recon | Passive recon, active recon, web recon, cloud recon, OSINT, reporting |
-| `/skills/standard/exploit/` | Exploit | Web exploitation, Active Directory attacks |
-| `/skills/standard/post-exploit/` | Post-Exploit | Credential access, privilege escalation, lateral movement, C2 |
-| `/skills/standard/ad/` | AD Operator | Kerberoasting, Pass-the-Hash, BloodHound, DCSync |
-| `/skills/standard/cloud/` | Cloud Hunter | IAM escalation, S3/GCS/Azure storage attacks, metadata abuse |
-| `/skills/standard/contracts/` | Contract Auditor | Solidity analysis, reentrancy, access control, token mechanics |
-| `/skills/standard/reverser/` | Reverser | Static analysis, dynamic analysis, decompilation, binary patching |
+| `/skills/standard/exploit/` | Exploit | Web and API exploitation |
 | `/skills/standard/analyst/` | Analyst | Research, graph querying, executive summaries |
-| `/skills/standard/phisher/` | Phisher | Lure deconfliction and phishing operations |
-| `/skills/standard/mobile/` | MobileOperator | Android / iOS application attacks |
-| `/skills/standard/wireless/` | WirelessOperator | Wireless / RF attacks |
-| `/skills/standard/buggy/` | Buggy | Core orchestration procedures (engagement lifecycle, kill-chain analysis, final report) |
-| `/skills/plugins/scanner/` | Scanner | Vulnerability scanning, automated tool integration |
-| `/skills/plugins/exploiter/` | Exploiter | PoC generation, CVE reproduction, weaponization |
-| `/skills/plugins/verifier/` | Verifier | Multi-method vulnerability confirmation |
-| `/skills/plugins/detector/` | Detector | Detection rule generation, IOC extraction |
-| `/skills/plugins/patcher/` | Patcher | Remediation code, configuration hardening |
-| `/skills/plugins/vulnresearch/` | Vulnresearch (orchestrator) | Five-stage vulnerability research pipeline coordination |
-| `/skills/plugins/llm-redteam/` | LLM red-team specialist (commercial) | LLM/agentic attack techniques (ASI taxonomy) |
-| `/skills/benchmark/` | CTF / XBOW benchmark mode | Activated when `BENCHMARK_MODE=1` — flag-capture rules and challenge context handling |
-
-> **Note — role-vs-directory mismatch**: several roles do not share a name with
-> their on-disk directory. The default fallback resolves the source to
-> `/skills/standard/{role}/`, but the skills actually live under a different
-> directory name:
->
-> | Role | Resolved source (`{role}`) | On-disk directory |
-> |------|---------------------------|-------------------|
-> | `postexploit` | `/skills/standard/postexploit/` | `/skills/standard/post-exploit/` |
-> | `ad_operator` | `/skills/standard/ad_operator/` | `/skills/standard/ad/` |
-> | `cloud_hunter` | `/skills/standard/cloud_hunter/` | `/skills/standard/cloud/` |
-> | `contract_auditor` | `/skills/standard/contract_auditor/` | `/skills/standard/contracts/` |
->
-> The directories in the table above reflect where the skills actually live. This
-> mismatch is a code bug being fixed separately.
->
-> `mobile_operator` and `wireless_operator` are **not** affected: their factories
-> pass an explicit `skill_sources=` kwarg (`/skills/standard/mobile/` and
-> `/skills/standard/wireless/` respectively), so they bypass the `{role}` fallback
-> and resolve correctly.
-
-### Library categories (no consuming agent yet)
-
-These directories live under `/skills/standard/` but no role resolves to them, so
-no agent loads them today. They are authored as a skill library for future roles
-or manual `load_skill()` use.
-
-| Directory | Coverage |
-|-----------|----------|
-| `/skills/standard/dfir/` | Digital forensics & incident response |
-| `/skills/standard/ics/` | Industrial control systems / OT |
-| `/skills/standard/iot/` | IoT / embedded (firmware, Zigbee, LoRaWAN) |
-| `/skills/standard/osint/` | Open-source intelligence |
-| `/skills/standard/supply-chain/` | Supply-chain attack techniques |
-| `/skills/standard/phish/` | Phishing techniques (distinct from the consumed `phisher/` dir) |
+| `/skills/standard/buggy-orchestrator/` | Buggy | Core orchestration procedures (engagement lifecycle, kill-chain analysis, final report) |
+| `/skills/bounty/<role>/` | The web/API specialists | One skill per specialist |
+| `/skills/benchmark/` | CTF benchmark mode | Activated when `BENCHMARK_MODE=1` — flag-capture rules and challenge context handling |
 
 ---
 
@@ -240,8 +191,7 @@ The skill is automatically available to agents whose source paths include your s
 Standard roles use the default `[f"/skills/standard/{role}/", "/skills/shared/"]`
 fallback (`skills_sources_for`, `agents/middleware_slots.py:102`). Plugin specialists pass an explicit
 `skill_sources=` list instead of relying on that fallback; the bash-executing
-plugins (scanner, exploiter, detector, verifier, patcher) additionally pull
-`/skills/standard/analyst/`.
+specialists use `/skills/bounty/<role>/`.
 
 | Agent (role) | Skill sources |
 |-------|--------------|
@@ -249,23 +199,10 @@ plugins (scanner, exploiter, detector, verifier, patcher) additionally pull
 | Soundwave (`soundwave`) | `/skills/standard/soundwave/`, `/skills/shared/` |
 | Recon (`recon`) | `/skills/standard/recon/`, `/skills/shared/` |
 | Exploit (`exploit`) | `/skills/standard/exploit/`, `/skills/shared/` |
-| Post-Exploit (`postexploit`) | `/skills/standard/postexploit/`, `/skills/shared/` |
-| AD Operator (`ad_operator`) | `/skills/standard/ad_operator/`, `/skills/shared/` |
-| Cloud Hunter (`cloud_hunter`) | `/skills/standard/cloud_hunter/`, `/skills/shared/` |
-| Contract Auditor (`contract_auditor`) | `/skills/standard/contract_auditor/`, `/skills/shared/` |
-| Reverser (`reverser`) | `/skills/standard/reverser/`, `/skills/shared/` |
 | Analyst (`analyst`) | `/skills/standard/analyst/`, `/skills/shared/` |
-| Phisher (`phisher`) | `/skills/standard/phisher/`, `/skills/shared/` |
-| MobileOperator (`mobile_operator`) | `/skills/standard/mobile/`, `/skills/shared/` |
-| WirelessOperator (`wireless_operator`) | `/skills/standard/wireless/`, `/skills/shared/` |
-| Vulnresearch (`vulnresearch`) | `/skills/plugins/vulnresearch/`, `/skills/shared/` |
-| Scanner (`scanner`) | `/skills/plugins/scanner/`, `/skills/standard/analyst/`, `/skills/shared/` |
-| Exploiter (`exploiter`) | `/skills/plugins/exploiter/`, `/skills/standard/analyst/`, `/skills/shared/` |
-| Detector (`detector`) | `/skills/plugins/detector/`, `/skills/standard/analyst/`, `/skills/shared/` |
-| Verifier (`verifier`) | `/skills/plugins/verifier/`, `/skills/standard/analyst/`, `/skills/shared/` |
-| Patcher (`patcher`) | `/skills/plugins/patcher/`, `/skills/standard/analyst/`, `/skills/shared/` |
+| Web/API specialists (`api_security`, …) | `/skills/bounty/<role>/`, `/skills/shared/` |
 
-`/skills/shared/` (OPSEC, defense evasion, workflow) is appended to every standard
+`/skills/shared/` (OPSEC, finding protocol, workflows) is appended to every standard
 role's default source list — including Soundwave, which uses the same
 `skills_sources_for(role)` fallback. The `SKILLS` middleware slot is part of the base
 slot set (`buggy_core/contracts/slots.py`), so every role carries it.

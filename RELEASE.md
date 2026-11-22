@@ -79,9 +79,8 @@ flow above also still works for out-of-band releases.
 | `publish-pypi` | Opt-in (repository variable `PUBLISH_PYPI=true`): builds the wheels + sdists and publishes `buggy`, `buggy-core` and `buggy-sdk` to PyPI via Trusted Publishing (OIDC — no API token). Nothing else waits for it. |
 | `launcher` | Builds the Go launcher binaries with GoReleaser (which drafts the GitHub release) and uploads `config-checksums.txt`, a SHA-256 integrity manifest for `docker-compose.yml`, `config/litellm.yaml`, and `.env.example`. |
 | `docker` | Builds and pushes the multi-arch `litellm`, `langgraph`, `cli`, `skillogy`, `egress-guard` and `browser` images. |
-| `docker-heavy` / `docker-heavy-merge` | Builds `sandbox`, `c2-sliver` and `pipeline` on native amd64/arm64 runners (too slow under QEMU), then merges the per-arch digests into manifests. |
+| `docker-heavy` / `docker-heavy-merge` | Builds `sandbox` and `pipeline` on native amd64/arm64 runners (too slow under QEMU), then merges the per-arch digests into manifests. |
 | `docker-web` / `docker-web-merge` | Builds and merges the `web` image the same way. |
-| `docker-derived` | Builds `solver` on the release's own `buggy-langgraph:<version>`. |
 | `publish-release` | Verifies all eleven `:<version>` images exist on GHCR, promotes them to `:latest`, and flips the GitHub release from draft to published. |
 
 Every image is signed with Cosign (keyless OIDC) and ships a CycloneDX SBOM.

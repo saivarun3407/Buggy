@@ -142,11 +142,7 @@ Neo4j ports (`7474` browser, `7687` bolt) are fixed in `docker-compose.yml`.
 
 | Variable | Default | Description |
 |----------|---------|-------------|
-| `COMPOSE_PROFILES` | _(empty)_ | Explicit profile override. Leave empty for normal use — heavyweight workloads are spawned on demand by the orchestrator via `ops_start(...)` ([ADR-0006](adr/0006-agent-driven-container-lifecycle.md)). |
-
-Set explicitly only when you want a workload up at launch — e.g. `COMPOSE_PROFILES=cli,c2-sliver,ad,reversing` for CI regression runs against the whole matrix.
-
-Currently allowlisted workloads (the agent can call `ops_start("X")` for any of these): `ad`, `c2-sliver`, `c2-havoc`, `reversing`, `cloud`, `mobile`, `phishing`, `forensics`, `ics`, `iot`, `supply-chain`, `wireless`. Future C2 frameworks (Havoc, Mythic) plug in as additional `c2-*` profile services.
+| `COMPOSE_PROFILES` | _(empty)_ | Explicit profile override. Leave empty for normal use; the launcher passes the profiles it needs (`cli`, `operator`). |
 
 ### Observability (optional)
 

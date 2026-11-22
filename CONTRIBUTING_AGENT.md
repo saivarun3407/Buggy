@@ -250,8 +250,8 @@ catching them yourself first.
 ## 5. Why this exists
 
 Tests passing is necessary; it is not sufficient. Buggy's value
-proposition rests on the philosophy in
-[docs/red-team/operations.md](docs/red-team/operations.md), the
+proposition rests on the scope enforcement in
+[docs/security/scope-enforcement.md](docs/security/scope-enforcement.md), the
 isolation in [docs/security/sandbox-isolation.md](docs/security/sandbox-isolation.md),
 and the tradecraft in the published docs. None of those are
 test-enforceable in their entirety. They are enforced by the people who

@@ -53,11 +53,10 @@ explicitly here and name what you did instead.
 Example that meets the bar:
 
 > Brought the stack up with `make dev`, ran `make cli`, executed an
-> engagement against `target=10.0.2.4` with `profile=AUTOBANK`. The
-> new c2_tier=short_haul field propagated through to Sliver implant
-> generation (verified via sliver-client implants — output attached).
-> Confirmed c2_tier=long_haul produces a DNS implant. `make smoke`
-> healthy on a clean volume.
+> hunt against the local Juice Shop lab target. The new probe class
+> ran through the evidence gateway and its finding was re-proved
+> (report and audit ledger attached). `make smoke` healthy on a clean
+> volume.
 -->
 
 ## Testing

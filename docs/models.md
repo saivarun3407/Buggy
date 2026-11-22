@@ -55,9 +55,9 @@ Each agent runs at the tier suited to its workload:
 
 | Tier  | Agents                                                                                          |
 |-------|-------------------------------------------------------------------------------------------------|
-| HIGH  | `buggy`, `exploit`, `exploiter`, `patcher`, `contract_auditor`, `analyst`, `vulnresearch`   |
-| MID   | `detector`, `verifier`, `blue_cell`, `postexploit`, `ad_operator`, `cloud_hunter`, `reverser`, `phisher`, `mobile_operator`, `iot_operator`, `ics_operator`, `forensicator`, `supply_chain_operator` |
-| LOW   | `soundwave`, `recon`, `scanner`, `wireless_operator`, `osint_operator`                          |
+| HIGH  | `buggy`, `exploit`, `analyst`, `authn_session`, `business_logic`, `ssrf_cloud` |
+| MID   | `scout`, `asvs`, `mitre_attack`, `api_security`, `graphql_security`, `clientside_security`, `llm_security`, `secrets_cicd` |
+| LOW   | `soundwave`, `recon` |
 
 ### `max` — every agent on HIGH
 

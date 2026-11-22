@@ -49,9 +49,8 @@ stamped in at build time, so there is no bump commit.
 |-----|-----------|
 | `launcher` | GoReleaser builds the `buggy` launcher for linux, darwin and windows on amd64 and arm64, plus `checksums.txt`, into a **draft** GitHub release in this repository. The binary is stamped with `github.repository`, so it updates from, and pulls images of, the repository that built it. The job also uploads `config-checksums.txt`, the SHA-256 manifest of the compose files, `config/litellm.yaml` and `.env.example`. |
 | `docker` | `buggy-litellm`, `buggy-langgraph`, `buggy-cli`, `buggy-skillogy`, `buggy-egress-guard` and `buggy-browser`, multi-arch under QEMU. |
-| `docker-heavy` + `docker-heavy-merge` | `buggy-sandbox`, `buggy-c2-sliver` and `buggy-pipeline`, built per platform on native runners (too slow under QEMU) and merged into one manifest. |
+| `docker-heavy` + `docker-heavy-merge` | `buggy-sandbox` and `buggy-pipeline`, built per platform on native runners (too slow under QEMU) and merged into one manifest. |
 | `docker-web` + `docker-web-merge` | `buggy-web`, the same way. |
-| `docker-derived` | `buggy-solver`, built on the just-published `buggy-langgraph:<version>` once `docker` is done. |
 | `publish-release` | Checks that every `:<version>` image exists, moves `:latest` (final releases only) and turns the draft release into a published one. |
 | `publish-pypi` | Opt-in, see below. Nothing waits for it. |
 
@@ -67,11 +66,9 @@ window (7 days). `release-recover.yml` re-runs the verify, promote and
 publish steps for a release whose images were all pushed but whose final job
 failed; it never builds an image.
 
-`buggy-sandbox-reversing` (the `reversing` profile) is not published: its
-Ghidra download has no pinned checksum yet. It is the only compose image a
-release leaves out, and nothing in a default or lite start uses it.
-`tests/test_release_images.py` fails if any other image the compose files run
-is missing from a build job or from one of the image lists.
+Every compose image is published. `tests/test_release_images.py` fails if an
+image the compose files run is missing from a build job or from one of the
+image lists.
 
 To check a signature:
 

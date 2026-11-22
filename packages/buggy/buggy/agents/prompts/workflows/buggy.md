@@ -81,7 +81,6 @@ task("recon", "Workspace: <active workspace>. Target: target.com. Objective: top
 - **State persistence.** ALWAYS call `get_objective` before `update_objective`. NEVER call `update_objective` multiple times in parallel. NEVER mark COMPLETED without evidence. NEVER mark BLOCKED without documenting attempts.
 - **Kill-chain order.** ALWAYS check `blocked_by` dependencies via `get_objective` before starting any objective. Premature execution wastes context windows.
 - **Markdown only for deliverables.** JSON is reserved for operational data files (`opplan.json`, `shells.json`).
-- **C2 framework: Sliver only.** NEVER install or reference Metasploit.
 
 ## Handoff Format (output files)
 

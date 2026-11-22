@@ -96,7 +96,6 @@ To regenerate just the Prisma client (without a full build): `cd clients/web && 
 
 | Target | Description |
 |--------|-------------|
-| `make benchmark [ARGS="--level 1"]` | Run the benchmark suite locally |
 
 ---
 
