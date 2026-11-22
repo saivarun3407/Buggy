@@ -111,7 +111,6 @@ _STANDARD_FACTORIES = [
     ("ad_operator", "buggy.agents.standard.ad_operator", "create_ad_operator_agent"),
     ("phisher", "buggy.agents.standard.phisher", "create_phisher_agent"),
     ("osint_operator", "buggy.agents.standard.osint_operator", "create_osint_operator_agent"),
-    ("iot_operator", "buggy.agents.standard.iot_operator", "create_iot_operator_agent"),
     ("ics_operator", "buggy.agents.standard.ics_operator", "create_ics_operator_agent"),
     ("forensicator", "buggy.agents.standard.forensicator", "create_forensicator_agent"),
     (

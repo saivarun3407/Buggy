@@ -44,7 +44,6 @@ STANDARD_GRAPHS: dict[str, str] = {
     "blue_cell": "./buggy/agents/standard/blue_cell.py:graph",
     "phisher": "./buggy/agents/standard/phisher.py:graph",
     "osint_operator": "./buggy/agents/standard/osint_operator.py:graph",
-    "iot_operator": "./buggy/agents/standard/iot_operator.py:graph",
     "ics_operator": "./buggy/agents/standard/ics_operator.py:graph",
     "forensicator": "./buggy/agents/standard/forensicator.py:graph",
     "supply_chain_operator": "./buggy/agents/standard/supply_chain_operator.py:graph",

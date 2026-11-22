@@ -112,7 +112,6 @@ class TestPhaseForRoleMapping:
             "contract_auditor",
             "reverser",
             "osint_operator",
-            "iot_operator",
             "ics_operator",
             "forensicator",
             "supply_chain_operator",
