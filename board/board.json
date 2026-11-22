@@ -1,5 +1,5 @@
 {
- "updated": "2026-11-21 04:05 UTC",
+ "updated": "2026-11-22 06:31 UTC",
  "columns": [
   "backlog",
   "ready",
@@ -192,6 +192,28 @@
     "Nothing counts until it runs on the real stack"
    ],
    "we_build": "Wire, ship, verify."
+  },
+  {
+   "id": "E14",
+   "name": "URL in, report out",
+   "score_now": 1,
+   "score_target": 3,
+   "leaders": "\u2014",
+   "they_do_right": [
+    "One input (a URL) and one output (a report a defender can act on)"
+   ],
+   "we_build": "Give Buggy a URL: it maps the target, makes its own test accounts when you allow it, tests one bug class after another, records a video and the logs for every proven bug, and writes a Word report with severity, the reason for it, the payloads used and the fix."
+  },
+  {
+   "id": "E15",
+   "name": "Delete what the goal does not need",
+   "score_now": 0,
+   "score_target": 3,
+   "leaders": "\u2014",
+   "they_do_right": [
+    "The best part is no part"
+   ],
+   "we_build": "Remove every module, service, image, test and document that the URL-to-report path does not use. Anything deleted that turns out to be needed is added back with a reason."
   }
  ],
  "tasks": [
@@ -792,6 +814,143 @@
    "tests": " no agent run has been measured. The evidence contract and scorecard are ready (benchmark/RESULTS_POLICY.md).",
    "note": "Needs a model key\\",
    "order": 37
+  },
+  {
+   "id": "G1",
+   "epic": "E14",
+   "lane": "D",
+   "title": "Buggy creates its own test accounts when the operator allows it",
+   "depends": [],
+   "status": "in_progress",
+   "agent": "",
+   "branch": "",
+   "commit": "",
+   "tests": "",
+   "note": "",
+   "order": 38
+  },
+  {
+   "id": "G2",
+   "epic": "E14",
+   "lane": "C",
+   "title": "Test one bug class after another and say what happened to each",
+   "depends": [],
+   "status": "ready",
+   "agent": "",
+   "branch": "",
+   "commit": "",
+   "tests": "",
+   "note": "",
+   "order": 39
+  },
+  {
+   "id": "G3",
+   "epic": "E14",
+   "lane": "E",
+   "title": "A video and a screenshot for every proven bug",
+   "depends": [],
+   "status": "in_progress",
+   "agent": "",
+   "branch": "",
+   "commit": "",
+   "tests": "",
+   "note": "",
+   "order": 40
+  },
+  {
+   "id": "G4",
+   "epic": "E14",
+   "lane": "E",
+   "title": "Word report: what, how severe and why, payloads, proof, fix",
+   "depends": [],
+   "status": "in_progress",
+   "agent": "",
+   "branch": "",
+   "commit": "",
+   "tests": "",
+   "note": "",
+   "order": 41
+  },
+  {
+   "id": "G5",
+   "epic": "E14",
+   "lane": "I",
+   "title": "One command from URL to Word report, proven on the practice apps",
+   "depends": [
+    "G1",
+    "G2",
+    "G3",
+    "G4"
+   ],
+   "status": "backlog",
+   "agent": "",
+   "branch": "",
+   "commit": "",
+   "tests": "",
+   "note": "",
+   "order": 42
+  },
+  {
+   "id": "K1",
+   "epic": "E15",
+   "lane": "X",
+   "title": "Written list: what the URL-to-report path uses, and what it does not",
+   "depends": [],
+   "status": "in_progress",
+   "agent": "",
+   "branch": "",
+   "commit": "",
+   "tests": "",
+   "note": "",
+   "order": 43
+  },
+  {
+   "id": "K2",
+   "epic": "E15",
+   "lane": "X",
+   "title": "Delete the specialists the goal does not use",
+   "depends": [
+    "K1"
+   ],
+   "status": "backlog",
+   "agent": "",
+   "branch": "",
+   "commit": "",
+   "tests": "",
+   "note": "",
+   "order": 44
+  },
+  {
+   "id": "K3",
+   "epic": "E15",
+   "lane": "X",
+   "title": "Delete clients, marketing and documents nobody needs for the goal",
+   "depends": [
+    "K1"
+   ],
+   "status": "backlog",
+   "agent": "",
+   "branch": "",
+   "commit": "",
+   "tests": "",
+   "note": "",
+   "order": 45
+  },
+  {
+   "id": "K4",
+   "epic": "E15",
+   "lane": "X",
+   "title": "Decision: remove Buggy's own agent runtime and keep Claude Code as the only agent",
+   "depends": [
+    "K2"
+   ],
+   "status": "blocked",
+   "agent": "",
+   "branch": "",
+   "commit": "",
+   "tests": "",
+   "note": "Needs the owner's yes",
+   "order": 46
   }
  ]
 }
