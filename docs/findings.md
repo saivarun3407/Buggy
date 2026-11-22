@@ -29,12 +29,33 @@ apply). It needs no model key.
 
 | Input found by recon | Probes run |
 |---|---|
-| GET query parameter, file-like name (`file`, `path`, `page`, ...) | `path_traversal` |
-| GET query parameter, URL-like name (`url`, `next`, `redirect`, ...) | `open_redirect` |
+| GET query parameter, file-like name (`file`, `path`, `page`, ...) | `path_traversal`, `rfi` |
+| GET query parameter, URL-like name (`url`, `next`, `redirect`, ...) | `open_redirect`, `rfi` |
 | GET query parameter, id-like or numeric | `sqli` (no time payloads) |
 | any other GET query parameter | `sqli`, `xss_reflected`, `ssti` |
+| account and admin pages, pages with a form that posts (10 at most) | `clickjacking` |
 | each live service (10 at most) | `cors` |
 | each GraphQL endpoint (5 at most) | `graphql_checks` |
+
+The runs go one bug class after another, in this order: access control
+(`idor`), `sqli`, XSS (`xss_reflected`, `xss_stored`, `xss_blind`),
+`command_injection`, `ssti`, file inclusion (`path_traversal`, `rfi`),
+`clickjacking`, `csrf`, `ssrf_canary`, `open_redirect`, business logic and
+API (`numeric_boundary`, `mass_assignment`), `graphql_checks`, `cors`,
+`jwt_alg_none`. The coverage table at the end of `hunt` uses the same order.
+
+What proves each of the newer probes:
+
+| Probe | Requests | Proof | Approval |
+|---|---|---|---|
+| `xss_stored` | 7 at most | Writes `<b data-buggy="MARKER">MARKER</b>` into a text field, then the page that shows it holds that element unescaped. The page read before the write is the control. Raw only in JSON: reported as not proven. | yes |
+| `xss_blind` | 1 | Writes a payload that loads the callback URL. A callback for that token is the proof. Late callbacks are kept: planted tokens are listed in `blind-xss-planted.jsonl` in the engagement's audit folder. | yes |
+| `rfi` | 3 at most | The callback URL serves a random marker; the marker in the target's response proves inclusion. A callback alone is reported as SSRF. | no |
+| `clickjacking` | 1 | The page answers without `X-Frame-Options` DENY/SAMEORIGIN and without a closed CSP `frame-ancestors`. The result has a proof page that frames it. | no |
+| `csrf` | 3 at most | As a test account with a cookie session: the request sent from a random other site without any token is accepted like the same-site one, and refused without the session. A SameSite Strict (or Lax, for a POST) cookie ends the run. | yes |
+
+`xss_blind` and `rfi` need the callback listener (`BUGGY_CANARY_BASE_URL`).
+Without it they send nothing and say they could not test.
 
 - Never planned: request bodies, headers, cookies, path segments, any method
   but GET, any parameter that looks like a credential, and every probe that
@@ -83,7 +104,7 @@ these steps after the probe sweep. None of them uses a model.
 |---|---|
 | Signed-in crawl | For each account (three at most) the gateway signs in and walks the application with up to 120 GET requests. Links that could sign out or change something are never followed; forms are recorded, never submitted. |
 | Signed-in probes | The inputs found there that recon had not seen are probed as that account with the read-only probes. Positives are re-proven as the same account and graded. |
-| Write operations | Forms that post, and the write operations of the API description, become state-changing probe runs: a negative or zero business quantity, a privileged field the client should not set, injection in a body or form field, a shell probe on a field that names a host or command. Each run is handed to the gateway and **waits for your approval**; `hunt --resume` sends the ones you allowed. 15 runs at most per run (`--state-probe-budget`). |
+| Write operations | Forms that post, and the write operations of the API description, become state-changing probe runs: a negative or zero business quantity, a privileged field the client should not set, injection in a body or form field, a shell probe on a field that names a host or command, stored and blind XSS in text fields, and one CSRF check per operation as that account. Each run is handed to the gateway and **waits for your approval**; `hunt --resume` sends the ones you allowed. 15 runs at most per run (`--state-probe-budget`). |
 | Owned objects | An object URL only one account reached is asked for as the other accounts. It is reported only when the owner's `markers` come back to a non-owner, so declare markers. |
 
 `hunt` prints one block per step and lists, at the end, what was not tested

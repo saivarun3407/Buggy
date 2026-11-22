@@ -40,9 +40,12 @@ class TestWhichProbe:
             ([], ("sqli", "xss_reflected", "ssti")),
             (["id-like"], ("sqli",)),
             (["numeric"], ("sqli",)),
-            (["file-like"], ("path_traversal",)),
-            (["url-like"], ("open_redirect",)),
-            (["file-like", "url-like", "numeric"], ("path_traversal", "open_redirect", "sqli")),
+            (["file-like"], ("path_traversal", "rfi")),
+            (["url-like"], ("open_redirect", "rfi")),
+            (
+                ["file-like", "url-like", "numeric"],
+                ("path_traversal", "open_redirect", "rfi", "sqli"),
+            ),
             (["auth-like"], ()),
             (["auth-like", "id-like"], ()),
         ],
@@ -90,9 +93,10 @@ class TestParameters:
             ]
         }
         plan = steps(records)
-        assert [s["probe"] for s in plan] == ["path_traversal"]
-        query = dict(parse_qsl(urlsplit(plan[0]["params"]["url"]).query))
-        assert query == {"page": "home.html"}
+        assert sorted(s["probe"] for s in plan) == ["path_traversal", "rfi"]
+        for step in plan:
+            query = dict(parse_qsl(urlsplit(step["params"]["url"]).query))
+            assert query == {"page": "home.html"}
 
     def test_siblings_keep_their_known_values(self) -> None:
         url = "https://a.test/list"
@@ -114,12 +118,14 @@ class TestParameters:
                 parameter("https://a.test/c", "id", hints=["id-like"]),
             ]
         }
-        urls = {s["probe"]: s["params"]["url"] for s in steps(records)}
-        assert urls == {
-            "path_traversal": "https://a.test/a?file=index.html",
-            "open_redirect": "https://a.test/b?next=%2F",
-            "sqli": "https://a.test/c?id=1",
-        }
+        urls = sorted((s["probe"], s["params"]["url"]) for s in steps(records))
+        assert urls == [
+            ("open_redirect", "https://a.test/b?next=%2F"),
+            ("path_traversal", "https://a.test/a?file=index.html"),
+            ("rfi", "https://a.test/a?file=index.html"),
+            ("rfi", "https://a.test/b?next=index.html"),
+            ("sqli", "https://a.test/c?id=1"),
+        ]
 
     def test_one_name_is_probed_on_two_urls_of_a_host_at_most(self) -> None:
         records = {
@@ -202,3 +208,70 @@ class TestBudget:
         records = self.records()
         again = {"parameter": list(reversed(records["parameter"]))}
         assert steps(records) == steps(again)
+
+
+class TestFraming:
+    def test_account_admin_and_form_pages_get_one_clickjacking_run(self) -> None:
+        records = {
+            "auth_surface": [
+                {"value": "https://a.test/account/settings", "attrs": {"kind": "account"}},
+                {"value": "https://a.test/admin", "attrs": {"kind": "admin"}},
+                {"value": "https://a.test/logout", "attrs": {"kind": "logout"}},
+                {"value": "https://a.test/login", "attrs": {"kind": "login"}},
+            ],
+            "url": [
+                {
+                    "value": "https://a.test/profile",
+                    "attrs": {"form": [{"action": "/profile/save", "method": "POST"}]},
+                },
+                {"value": "https://a.test/search", "attrs": {"form": [{"method": "GET"}]}},
+            ],
+            "parameter": [
+                parameter("https://a.test/comments", "text", location="form", method="POST"),
+                parameter("https://a.test/admin", "name", location="form", method="POST"),
+            ],
+        }
+        framed = [s for s in steps(records) if s["probe"] == "clickjacking"]
+        assert [s["params"] for s in framed] == [
+            {"url": "https://a.test/account/settings"},
+            {"url": "https://a.test/admin"},
+            {"url": "https://a.test/comments"},
+            {"url": "https://a.test/profile"},
+        ]
+        assert framed[0]["why"] == "account page"
+
+    def test_pages_are_capped(self) -> None:
+        records = {
+            "auth_surface": [
+                {"value": f"https://a.test/account/{n}", "attrs": {"kind": "account"}}
+                for n in range(30)
+            ]
+        }
+        framed = steps(records, budget=sweep.MAX_BUDGET)
+        assert len(framed) == sweep.MAX_FRAME_PAGES
+
+
+class TestTestingOrder:
+    def test_probes_run_in_the_owners_order(self) -> None:
+        assert sweep.PROBE_ORDER == (
+            "idor", "sqli", "xss_reflected", "xss_stored", "xss_blind", "command_injection",
+            "ssti", "path_traversal", "rfi", "clickjacking", "csrf", "ssrf_canary",
+            "open_redirect", "numeric_boundary", "mass_assignment", "graphql_checks", "cors",
+            "jwt_alg_none",
+        )  # fmt: skip
+        assert set(sweep.PROBE_ORDER) == set(REGISTRY)
+        shuffled = [{"probe": name, "n": n} for n, name in enumerate(reversed(sweep.PROBE_ORDER))]
+        shuffled.append({"probe": "sqli", "n": 99})
+        ordered = sweep.by_class(shuffled)
+        assert [s["probe"] for s in ordered][:3] == ["idor", "sqli", "sqli"]
+        assert [s["n"] for s in ordered if s["probe"] == "sqli"] == [16, 99]  # order kept
+        assert [s["probe"] for s in ordered][-1] == "jwt_alg_none"
+
+    def test_classes_follow_the_probe_order_and_access_control_is_first(self) -> None:
+        assert sweep.CLASS_ORDER[:7] == (
+            "access_control", "injection", "xss", "file_handling", "misconfiguration", "csrf",
+            "ssrf",
+        )  # fmt: skip
+        assert "csrf" not in sweep.NO_AUTOMATIC_CHECK
+        unknown = sweep.by_class([{"probe": "later"}, {"probe": "idor"}])
+        assert [s["probe"] for s in unknown] == ["idor", "later"]

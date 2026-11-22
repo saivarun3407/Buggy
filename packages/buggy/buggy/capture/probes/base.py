@@ -108,6 +108,9 @@ class ProbeSpec:
     # False for a probe that takes credential headers itself and compares
     # identities on its own: a run-wide ``identity`` would mix two auth sources.
     accepts_identity: bool = True
+    # True for a probe that only means something signed in (csrf): a run
+    # without ``identity`` is refused before an approval is asked for.
+    requires_identity: bool = False
 
 
 def require(params: dict[str, Any], *names: str) -> None:

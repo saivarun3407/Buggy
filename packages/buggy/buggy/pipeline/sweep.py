@@ -1,10 +1,10 @@
 """Probe sweep plan: which read-only probes to run on which inputs.
 
 Fixed rules, no network and no model. :func:`plan` reads the recon records
-(``parameter``, ``http_service``, ``graphql``) and returns the probe runs that
-are worth making, most valuable first, within a budget. The caller sends each
-step to the capture server's ``probe_run``; a positive result is queued,
-re-proven and graded there, by code.
+(``parameter``, ``http_service``, ``graphql``, ``auth_surface``, ``url``) and
+returns the probe runs that are worth making, most valuable first, within a
+budget. The caller sends each step to the capture server's ``probe_run``; a
+positive result is queued, re-proven and graded there, by code.
 
 Only what cannot change state is planned:
 
@@ -13,22 +13,26 @@ Only what cannot change state is planned:
 * never a parameter that looks like a credential (hint ``auth-like``, or an
   example the pipeline redacted);
 * only probes whose requests are read-only: ``sqli`` (no time payloads),
-  ``xss_reflected``, ``ssti``, ``open_redirect``, ``path_traversal``, ``cors``
-  and ``graphql_checks``. Probes that write, or that need test accounts, are
-  left to a run the operator approves.
+  ``xss_reflected``, ``ssti``, ``open_redirect``, ``path_traversal``, ``rfi``,
+  ``clickjacking``, ``cors`` and ``graphql_checks``. Probes that write, or that
+  need test accounts, are left to a run the operator approves
+  (:func:`plan_state_changing`).
 
 Which probe a parameter gets is decided by its hints:
 
 ==============  =====================================
-``file-like``   ``path_traversal``
-``url-like``    ``open_redirect``
+``file-like``   ``path_traversal``, ``rfi``
+``url-like``    ``open_redirect``, ``rfi``
 ``id-like``     ``sqli``
 ``numeric``     ``sqli``
 (none of them)  ``sqli``, ``xss_reflected``, ``ssti``
 ==============  =====================================
 
 Every live service gets one ``cors`` run and every GraphQL endpoint one
-``graphql_checks`` run.
+``graphql_checks`` run. Pages that hold a state-changing form, and account
+and admin pages (``auth_surface``), get one ``clickjacking`` run each.
+
+:func:`by_class` puts the planned runs in testing order (``PROBE_ORDER``).
 """
 
 from __future__ import annotations
@@ -44,21 +48,32 @@ MAX_BUDGET = 500
 MAX_URLS_PER_NAME = 2
 MAX_SERVICES = 10
 MAX_GRAPHQL = 5
+#: Pages that get a ``clickjacking`` run, at most.
+MAX_FRAME_PAGES = 10
+#: ``auth_surface`` kinds whose page is worth framing (it holds account data or actions).
+FRAME_KINDS = ("account", "admin")
 REDACTED = "<redacted>"
 
 #: Lower runs first. The order follows what a positive is worth.
 PRIORITY: dict[str, int] = {
     "graphql_checks": 0,
     "path_traversal": 1,
-    "sqli": 2,
-    "ssti": 3,
-    "open_redirect": 4,
-    "xss_reflected": 5,
-    "cors": 6,
+    "rfi": 2,
+    "sqli": 3,
+    "ssti": 4,
+    "open_redirect": 5,
+    "xss_reflected": 6,
+    "clickjacking": 7,
+    "cors": 8,
 }
 TEXT_PROBES = ("sqli", "xss_reflected", "ssti")
 #: A baseline value when recon saw the parameter without one.
-DEFAULT_VALUE = {"path_traversal": "index.html", "open_redirect": "/", "sqli": "1"}
+DEFAULT_VALUE = {
+    "path_traversal": "index.html",
+    "rfi": "index.html",
+    "open_redirect": "/",
+    "sqli": "1",
+}
 
 
 def _attrs(record: dict[str, Any]) -> dict[str, Any]:
@@ -84,6 +99,8 @@ def probes_for(hints: list[str]) -> tuple[str, ...]:
         chosen.append("path_traversal")
     if "url-like" in hints:
         chosen.append("open_redirect")
+    if "file-like" in hints or "url-like" in hints:
+        chosen.append("rfi")
     if "id-like" in hints or "numeric" in hints:
         chosen.append("sqli")
     return tuple(chosen) or TEXT_PROBES
@@ -171,6 +188,53 @@ def _endpoint_steps(records: list[dict[str, Any]], probe: str, cap: int, why: st
     ]
 
 
+def _form_writes(form: Any) -> bool:
+    return isinstance(form, dict) and str(form.get("method") or "GET").upper() != "GET"
+
+
+def _frame_steps(records: dict[str, list[dict[str, Any]]]) -> list[dict[str, Any]]:
+    """One ``clickjacking`` run per page worth framing: account and admin pages first.
+
+    Pages come from ``auth_surface`` records (kind account or admin), from
+    crawled ``url`` records that carry a form that posts, and from the action
+    URL of a state-changing form's fields (often the same page).
+    """
+    pages: dict[str, str] = {}
+
+    def add(url: str, why: str) -> None:
+        page = _http_url(url).split("#", 1)[0]
+        if page and page not in pages:
+            pages[page] = why
+
+    surfaces = []
+    for record in records.get("auth_surface", []):
+        attrs = _attrs(record)
+        kind = str(attrs.get("kind") or "")
+        url = _http_url(attrs.get("url")) or _http_url(record.get("value"))
+        if kind in FRAME_KINDS and url:
+            surfaces.append((url, f"{kind} page"))
+    forms = []
+    for record in records.get("url", []):
+        raw = _attrs(record).get("form")
+        listed = raw if isinstance(raw, list) else []
+        if any(_form_writes(form) for form in listed):
+            forms.append((str(record.get("value") or ""), "page with a form that posts"))
+    for (method, url, kind), _fields in _body_operations(records.get("parameter", [])).items():
+        if kind == "form":
+            forms.append((url, f"action of a form sent with {method}"))
+    for url, why in sorted(surfaces) + sorted(forms):
+        add(url, why)
+    return [
+        {
+            "probe": "clickjacking",
+            "host": urlsplit(url).netloc.lower(),
+            "params": {"url": url},
+            "why": why,
+        }
+        for url, why in list(pages.items())[:MAX_FRAME_PAGES]
+    ]
+
+
 def plan(
     records: dict[str, list[dict[str, Any]]], *, budget: int = DEFAULT_BUDGET
 ) -> dict[str, Any]:
@@ -186,6 +250,7 @@ def plan(
     )
     steps += _parameter_steps(records.get("parameter", []))
     steps += _endpoint_steps(records.get("http_service", []), "cors", MAX_SERVICES, "live service")
+    steps += _frame_steps(records)
 
     turn: dict[tuple[str, str], int] = defaultdict(int)
     ordered: list[tuple[int, int, str, int, dict[str, Any]]] = []
@@ -207,10 +272,15 @@ STATE_PRIORITY: dict[str, int] = {
     "numeric_boundary": 0,
     "mass_assignment": 1,
     "sqli": 2,
-    "command_injection": 3,
-    "ssti": 4,
-    "xss_reflected": 5,
+    "csrf": 3,
+    "command_injection": 4,
+    "xss_stored": 5,
+    "ssti": 6,
+    "xss_reflected": 7,
+    "xss_blind": 8,
 }
+#: Text fields one ``xss_blind`` run plants in, at most (the probe's own bound).
+BLIND_FIELDS = 5
 #: A field with one of these words in its name carries a business quantity.
 QUANTITY_WORDS = frozenset(
     {
@@ -308,7 +378,7 @@ def _field_probes(parameter: dict[str, Any]) -> tuple[str, ...]:
         return ("command_injection", "sqli")
     if "numeric" in hints or "id-like" in hints:
         return ("sqli",)
-    return ("sqli", "ssti", "xss_reflected")
+    return ("sqli", "ssti", "xss_reflected", "xss_stored")
 
 
 def plan_state_changing(
@@ -322,9 +392,11 @@ def plan_state_changing(
     Read from ``parameter`` records whose location is ``body`` (API
     specifications and contracts) or ``form`` (HTML forms that post). For
     every write operation a body is built from the fields recon knows, with
-    their examples or a value their name implies. Planned per operation: one ``mass_assignment`` run, and per
-    field ``numeric_boundary`` (a business quantity), ``command_injection``
-    (a field that names a host or a command) or the injection probes.
+    their examples or a value their name implies. Planned per operation: one
+    ``mass_assignment`` run (JSON), one ``xss_blind`` run over its text fields,
+    one ``csrf`` run when an ``identity`` is given; and per field
+    ``numeric_boundary`` (a business quantity), ``command_injection`` (a field
+    that names a host or a command) or the injection probes and ``xss_stored``.
 
     Nothing here is sent by planning. The caller hands each step to
     ``probe_run``, where a run that can change state is held until the
@@ -355,6 +427,8 @@ def plan_state_changing(
             common = {"url": f"{url}?{urlencode(body)}", "method": "GET", "state_changing": True}
         if identity:
             common["identity"] = identity
+        where = "query" if method == "GET" else kind
+        path = urlsplit(url).path
         if kind == "json":
             steps.append(
                 {
@@ -362,6 +436,26 @@ def plan_state_changing(
                     "host": host,
                     "params": {**common, "extra_fields": dict(PRIVILEGED_FIELDS)},
                     "why": f"{method} operation that stores an object",
+                }
+            )
+        if identity:
+            # Forgery only means something for a signed-in user's request.
+            steps.append(
+                {
+                    "probe": "csrf",
+                    "host": host,
+                    "params": {**common, "location": where},
+                    "why": f"{method} {path} as a signed-in user, sent from another site",
+                }
+            )
+        texts = [p["name"] for p in fields if "xss_reflected" in _field_probes(p)]
+        if texts:
+            steps.append(
+                {
+                    "probe": "xss_blind",
+                    "host": host,
+                    "params": {**common, "parameters": texts[:BLIND_FIELDS], "location": where},
+                    "why": f"text fields of {method} {path}, rendered later by someone else",
                 }
             )
         for parameter in fields:
@@ -372,7 +466,6 @@ def plan_state_changing(
                         continue  # the boundary probe sends JSON
                     params.update({"field": parameter["name"], "values": [-1, 0]})
                 else:
-                    where = "query" if method == "GET" else kind
                     params.update({"parameter": parameter["name"], "location": where})
                     if probe == "sqli":
                         params["allow_time"] = False
@@ -399,34 +492,32 @@ def plan_state_changing(
 
 #: The class every planned probe tests (the probe registry's own classes).
 PROBE_CLASS: dict[str, str] = {
+    "idor": "access_control",
     "sqli": "injection",
-    "ssti": "injection",
-    "command_injection": "injection",
     "xss_reflected": "xss",
+    "xss_stored": "xss",
+    "xss_blind": "xss",
+    "command_injection": "injection",
+    "ssti": "injection",
     "path_traversal": "file_handling",
+    "rfi": "file_handling",
+    "clickjacking": "misconfiguration",
+    "csrf": "csrf",
+    "ssrf_canary": "ssrf",
     "open_redirect": "open_redirect",
     "numeric_boundary": "business_logic",
     "mass_assignment": "api",
     "graphql_checks": "graphql",
     "cors": "misconfiguration",
-    "idor": "access_control",
     "jwt_alg_none": "auth_session",
-    "ssrf_canary": "ssrf",
 }
-#: One class after another, in this order. Every class of the findings model is here.
+#: The order the probes run in: access control first, then injection, XSS, file
+#: inclusion, framing, forgery, server-side requests, then the rest.
+PROBE_ORDER: tuple[str, ...] = tuple(PROBE_CLASS)
+#: The coverage table's order: each class where its first probe runs, then the
+#: classes no probe tests. Every class of the findings model is here.
 CLASS_ORDER: tuple[str, ...] = (
-    "injection",
-    "xss",
-    "file_handling",
-    "open_redirect",
-    "access_control",
-    "business_logic",
-    "api",
-    "graphql",
-    "misconfiguration",
-    "auth_session",
-    "ssrf",
-    "csrf",
+    *dict.fromkeys(PROBE_CLASS.values()),
     "crypto",
     "info_exposure",
 )
@@ -434,7 +525,6 @@ CLASS_ORDER: tuple[str, ...] = (
 NO_AUTOMATIC_CHECK: dict[str, str] = {
     "auth_session": "needs a session token to tamper with, which only the agent stage handles",
     "ssrf": "needs an input that makes the server fetch a URL, chosen by the agent stage",
-    "csrf": "no automatic check exists; the agent stage tests it",
     "crypto": "no automatic check exists; scanner results and the agent stage cover it",
     "info_exposure": "covered by the scanner's known issues, not by a probe",
 }
@@ -446,11 +536,17 @@ def class_of(probe: str) -> str:
 
 
 def by_class(steps: list[dict[str, Any]]) -> list[dict[str, Any]]:
-    """``steps`` in testing order: one class after another, order kept within a class."""
+    """``steps`` in testing order (``PROBE_ORDER``); the order of one probe's runs is kept.
 
-    def rank(step: dict[str, Any]) -> int:
-        cls = class_of(str(step.get("probe")))
-        return CLASS_ORDER.index(cls) if cls in CLASS_ORDER else len(CLASS_ORDER)
+    A probe outside ``PROBE_ORDER`` runs after all of them, by its class.
+    """
+
+    def rank(step: dict[str, Any]) -> tuple[int, int]:
+        probe = str(step.get("probe"))
+        if probe in PROBE_ORDER:
+            return PROBE_ORDER.index(probe), 0
+        cls = class_of(probe)
+        return len(PROBE_ORDER), CLASS_ORDER.index(cls) if cls in CLASS_ORDER else len(CLASS_ORDER)
 
     return sorted(steps, key=rank)
 
@@ -459,6 +555,7 @@ __all__ = [
     "CLASS_ORDER",
     "NO_AUTOMATIC_CHECK",
     "PROBE_CLASS",
+    "PROBE_ORDER",
     "by_class",
     "class_of",
     "DEFAULT_BUDGET",

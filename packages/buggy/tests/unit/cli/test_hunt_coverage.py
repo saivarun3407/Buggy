@@ -37,7 +37,7 @@ def test_the_probe_classes_are_the_registrys() -> None:
     assert {name: spec.vuln_class for name, spec in REGISTRY.items()} == sweep.PROBE_CLASS
 
 
-def test_checks_run_one_class_after_another(monkeypatch) -> None:
+def test_checks_run_in_the_probe_order(monkeypatch) -> None:
     seen: list[str] = []
 
     def capture(tool: str, _engagement: str, **arguments) -> dict:
@@ -51,9 +51,8 @@ def test_checks_run_one_class_after_another(monkeypatch) -> None:
         for name in ("cors", "xss_reflected", "sqli", "open_redirect", "ssti", "path_traversal")
     ]
     out = hunt._run_steps("acme", {"steps": steps, "left_out": 0}, "[]")  # noqa: SLF001
-    classes = [sweep.class_of(name) for name in seen]
-    assert classes == sorted(classes, key=sweep.CLASS_ORDER.index)
-    assert seen[:2] == ["sqli", "ssti"]  # the order inside a class is kept
+    assert seen == ["sqli", "xss_reflected", "ssti", "path_traversal", "open_redirect", "cors"]
+    assert seen == sorted(seen, key=sweep.PROBE_ORDER.index)
     assert out["by_class"]["injection"] == {"checks": 2, "held": 0, "positive": 0, "proven": 0}
 
 
@@ -113,4 +112,4 @@ def test_the_table_is_printed_and_is_in_the_result_file(capsys) -> None:
     assert "bug classes, in the order they were tested" in err
     assert "injection        3 checks, 1 proven" in err and "ssrf             not tested: " in err
     result = hunt.build_result("acme", outcome, {}, now=1.0)
-    assert json.loads(json.dumps(result))["coverage"][0]["class"] == "injection"
+    assert json.loads(json.dumps(result))["coverage"][0]["class"] == "access_control"

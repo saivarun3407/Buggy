@@ -11,6 +11,8 @@ from buggy.capture.probes.base import Context, ProbeInputError, ProbeSpec
 from buggy.capture.probes.execution import command_injection, ssti
 from buggy.capture.probes.injection import sqli
 from buggy.capture.probes.misc import cors, open_redirect, path_traversal
+from buggy.capture.probes.stored import xss_blind, xss_stored
+from buggy.capture.probes.web import clickjacking, csrf, rfi
 from buggy.capture.probes.xss import xss_reflected
 
 REGISTRY: dict[str, ProbeSpec] = {
@@ -213,6 +215,89 @@ REGISTRY: dict[str, ProbeSpec] = {
             },
             False, cors,
         ),
+        ProbeSpec(
+            "xss_stored", "xss", "CWE-79",
+            "Does markup written through one text field come back unescaped on a page? Reads "
+            "the read-back pages, writes <b data-buggy=MARKER>MARKER</b> (nothing runs), reads "
+            "them again. At most 7 requests.",
+            {
+                "url": "the write endpoint (a form's action or an API collection)",
+                "parameter": "the text field to write (dotted path for json)",
+                "method": "HTTP method (default POST; GET for location query)",
+                "location": "where the field lives: form | json | query (default form)",
+                "body": "the rest of a valid request body (object or string)",
+                "headers": "optional headers, e.g. auth",
+                "readback_urls": "up to 3 pages that show the stored value (default: the write "
+                "URL, and its parent for a PUT/PATCH)",
+            },
+            True, xss_stored,
+        ),
+        ProbeSpec(
+            "xss_blind", "xss", "CWE-79",
+            "Is a stored value rendered later by some browser (an admin page)? Writes a payload "
+            "that loads a callback URL into each named text field; proof is the callback. One "
+            "request; needs the callback listener.",
+            {
+                "url": "the write endpoint",
+                "parameters": "the text fields to plant in (at most 5), or parameter for one",
+                "method": "HTTP method (default POST; GET for location query)",
+                "location": "where the fields live: form | json | query (default form)",
+                "body": "the rest of a valid request body (object or string)",
+                "headers": "optional headers, e.g. auth",
+                "wait_seconds": "how long to wait for a callback (default 5, at most 20); "
+                "later callbacks are picked up from the planted list",
+            },
+            True, xss_blind,
+        ),
+        ProbeSpec(
+            "rfi", "file_handling", "CWE-98",
+            "Does one named parameter make the server include a remote file? A callback URL "
+            "that serves a random marker; the marker in the response proves inclusion, a "
+            "callback alone is reported as SSRF. At most 3 requests; needs the callback listener.",
+            {
+                "url": "endpoint (the query string may already carry the parameter; for "
+                "location path it carries a {parameter} placeholder)",
+                "parameter": "name of the file-like or URL-like parameter",
+                "method": "HTTP method (default GET); any other method counts as "
+                "state-changing and goes through the approval gate",
+                "location": "where the parameter lives: query | json | form | path "
+                "(default query)",
+                "value": "a valid baseline value (default: the value already in the request)",
+                "body": "request body for json/form (object or string)",
+                "headers": "optional headers, e.g. auth",
+                "wait_seconds": "how long to wait for a callback (default 3, at most 10)",
+            },
+            False, rfi,
+        ),
+        ProbeSpec(
+            "clickjacking", "misconfiguration", "CWE-1021",
+            "Can any site load this page in a frame? One GET; framable when neither "
+            "X-Frame-Options DENY/SAMEORIGIN nor CSP frame-ancestors protects it. The result "
+            "carries a proof page that frames it.",
+            {
+                "url": "a page with an action or account data (GET)",
+                "headers": "optional headers, e.g. auth",
+            },
+            False, clickjacking,
+        ),
+        ProbeSpec(
+            "csrf", "csrf", "CWE-352",
+            "Can another site make a signed-in user's browser send this state-changing request? "
+            "Checks the anti-CSRF token and the session cookie's SameSite, then sends it "
+            "same-site, cross-site without the token, and cross-site without the session. At "
+            "most 3 requests; needs identity (a cookie session).",
+            {
+                "url": "the state-changing endpoint",
+                "method": "HTTP method (default POST)",
+                "location": "where the fields live: form | json | query (default form; query "
+                "for GET)",
+                "body": "a valid request body (object or string)",
+                "headers": "optional headers",
+                "token_fields": "optional names of anti-CSRF token fields (found by name "
+                "otherwise)",
+            },
+            True, csrf, requires_identity=True,
+        ),
     )
 }  # fmt: skip
 
@@ -237,6 +322,7 @@ def describe() -> list[dict[str, Any]]:
             "params": spec.params,
             "state_changing": spec.state_changing,
             "accepts_identity": spec.accepts_identity,
+            "requires_identity": spec.requires_identity,
         }
         for spec in REGISTRY.values()
     ]
@@ -303,6 +389,11 @@ def run_probe(
     try:
         identity, probe_params = split_identity(spec, params)
         named = {"identity": identity} if identity else {}
+        if spec.requires_identity and not identity:
+            raise ProbeInputError(
+                f"{spec.name} needs identity: the name of a declared test account whose session "
+                "is a cookie (identities_list)"
+            )
         if identity:
             # An unknown name is refused before an approval is filed or a byte is sent.
             gateway.check_identity(engagement, identity)
