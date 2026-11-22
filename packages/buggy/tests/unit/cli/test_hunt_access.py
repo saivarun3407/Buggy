@@ -184,3 +184,16 @@ class TestNotTested:
         (entry,) = [i for i in items if i["area"] == "everything behind the login"]
         assert entry["reason"] == "no test accounts are declared; add two"
         assert "identities.json" in entry["enable"]
+
+
+def test_objects_the_walk_compared_count_as_access_control_tested() -> None:
+    import argparse
+
+    args = argparse.Namespace(no_probes=False, non_interactive=False)
+    walked = {"inferred": {"objects": 12}}
+    missing = hunt.not_tested(
+        "acme", args, {"ran": 1}, {"ran": False, "reason": "none declared"}, signed_in=walked
+    )
+    assert not [m for m in missing if m["area"].startswith("access control")]
+    missing = hunt.not_tested("acme", args, {"ran": 1}, {"ran": False, "reason": "none declared"})
+    assert [m for m in missing if m["area"].startswith("access control")]

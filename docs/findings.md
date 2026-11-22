@@ -628,6 +628,18 @@ Approving still happens with `buggy-cli approvals allow` or in the dashboard.
   login form), reflected XSS and command injection. The same run without
   accounts found none of them. It has not been run on a real program, and a
   single-page application gives the crawl much less to read.
+- **The class-by-class hunt has been run on one practice app.** On
+  2026-11-22 `hunt --lab --create-accounts --no-agent` ran on the local Juice
+  Shop (no HTML sign-up form). Buggy created 3 accounts through the JSON
+  sign-up API and signed them in through the login API. As each account it
+  walked 234 URLs, filled 30 templates (`/rest/basket/{id}`, `/api/Users/{id}`)
+  with ids the account received and found 6 objects of its own. Access control
+  ran first: 12 objects asked for as the other accounts, 2 re-proven and graded
+  submit (another user's basket and another user's record). Then the classes,
+  one at a time: SQL injection in the product search and an open redirect
+  proven; XSS, LFI/RFI, clickjacking, CSRF and API checks ran with no hit. All
+  4 valid bugs got a video and logs. Before the template fix the same run found
+  no own objects, because the app builds those URLs in a template string.
 - **Web and API recon has been run on one practice app.** On 2026-11-22 the
   recon pipeline ran on the local Juice Shop and DVGA with the issue scan
   turned off: 84 seconds. The two new stages sent 6 known-file requests,

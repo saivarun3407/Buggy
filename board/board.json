@@ -1192,12 +1192,12 @@
    "lane": "E",
    "title": "Hunt runs class by class: accounts, user walk, BOLA/IDOR first, then SQLi, XSS and the rest",
    "depends": [],
-   "status": "in_progress",
+   "status": "done",
    "agent": "",
    "branch": "",
    "commit": "",
-   "tests": "",
-   "note": "new checks (stored/blind XSS, RFI, clickjacking, CSRF) and API sign-up + user walk merged; hunt order next",
+   "tests": "hunt, capture and recon tests pass",
+   "note": "live on Juice Shop: 3 accounts via the sign-up API, walk found 6 own objects, BOLA/IDOR first: 2 proven (basket, user record); then SQLi and open redirect proven, other classes ran clean",
    "order": 53
   }
  ]

@@ -1867,13 +1867,28 @@ def write_result(control: Path, slug: str, result: dict[str, Any]) -> Path:
 
 
 def _access_stage(
-    args: argparse.Namespace, slug: str, records: dict[str, list[dict[str, Any]]]
+    args: argparse.Namespace,
+    slug: str,
+    records: dict[str, list[dict[str, Any]]],
+    signed_in: dict[str, Any] | None = None,
 ) -> dict[str, Any] | None:
-    """Run the access-control sweep unless probes are off; print one summary."""
+    """Run the access-control sweep unless probes are off; print one summary.
+
+    This sweep asks for the objects the operator declared (``owner_of``). When
+    the user walk already compared the objects the accounts own, a missing
+    declaration is not a gap and is said so.
+    """
     if getattr(args, "no_probes", False):
         return None
     access = run_access_sweep(slug, records)
-    if not access["ran"]:
+    walked = int((((signed_in or {}).get("inferred")) or {}).get("objects") or 0)
+    if not access["ran"] and walked:
+        print(
+            f"  access control   {walked} objects the accounts own were compared above; "
+            "no objects declared in owner_of",
+            file=sys.stderr,
+        )
+    elif not access["ran"]:
         print(f"  access control   not run: {access['reason']}", file=sys.stderr)
     else:
         line = (
@@ -2398,7 +2413,8 @@ def not_tested(
                 "enable": "run the full stack without --no-probes",
             }
         )
-    if access is None or not access.get("ran"):
+    walked = int((((signed_in or {}).get("inferred")) or {}).get("objects") or 0)
+    if (access is None or not access.get("ran")) and not walked:
         missing.append(
             {
                 "area": "access control between users (IDOR)",
@@ -2529,7 +2545,7 @@ def run_stages(  # noqa: PLR0912, PLR0915
                     # one bug class at a time.
                     accounts = _accounts_stage(args, slug, scope, records)
                     signed_in = _signed_in_stage(args, slug, records, defer=True)
-                    access = _access_stage(args, slug, records)
+                    access = _access_stage(args, slug, records, signed_in)
                     probes, writes = _class_stage(args, slug, records, signed_in)
                 print(f"  knowledge graph  {project_graph(slug)}", file=sys.stderr)
                 if args.non_interactive:
