@@ -260,7 +260,6 @@ SLOTS_PER_ROLE: dict[str, frozenset[MiddlewareSlot]] = {
     "ad_operator": _BASH_AGENT_SLOTS | {MiddlewareSlot.KG},
     "phisher": _BASH_AGENT_SLOTS,
     "osint_operator": _BASH_AGENT_SLOTS,
-    "ics_operator": _BASH_AGENT_SLOTS,
     "forensicator": _BASH_AGENT_SLOTS,
     "supply_chain_operator": _BASH_AGENT_SLOTS,
     # ── Plugin orchestrator (no EngagementContext per the existing

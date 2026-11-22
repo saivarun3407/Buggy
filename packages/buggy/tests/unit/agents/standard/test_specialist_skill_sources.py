@@ -7,7 +7,6 @@ import pytest
 from buggy.agents.standard import (
     asvs_assessor,
     forensicator,
-    ics_operator,
     osint_operator,
     phisher,
     supply_chain_operator,
@@ -23,7 +22,6 @@ _EXPLICIT_SOURCE_AGENTS = [
     (asvs_assessor, "/skills/standard/analyst/"),
     (phisher, "/skills/standard/phisher/"),
     (osint_operator, "/skills/standard/osint/"),
-    (ics_operator, "/skills/standard/ics/"),
     (forensicator, "/skills/standard/dfir/"),
     (supply_chain_operator, "/skills/standard/supply-chain/"),
 ]
@@ -36,7 +34,6 @@ _EXPLICIT_SOURCE_AGENTS = [
 _ROLE_NE_DIR_AGENTS = [
     asvs_assessor,
     osint_operator,
-    ics_operator,
     forensicator,
     supply_chain_operator,
 ]

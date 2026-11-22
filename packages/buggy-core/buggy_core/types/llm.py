@@ -539,7 +539,6 @@ AGENT_TIERS: dict[str, Tier] = {
     "cloud_hunter": Tier.MID,
     "reverser": Tier.MID,
     "phisher": Tier.MID,
-    "ics_operator": Tier.MID,
     "forensicator": Tier.MID,
     "supply_chain_operator": Tier.MID,
     # Bounty bundle (fork-only). HIGH for the high-payout chained-logic
@@ -587,7 +586,6 @@ AGENT_TEMPERATURES: dict[str, float] = {
     "recon": 0.3,
     "phisher": 0.4,
     "osint_operator": 0.3,
-    "ics_operator": 0.1,
     "forensicator": 0.2,
     "supply_chain_operator": 0.2,
     # Bounty bundle (fork-only). Low temperatures for deterministic

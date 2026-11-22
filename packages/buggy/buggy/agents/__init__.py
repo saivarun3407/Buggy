@@ -16,7 +16,6 @@ from buggy.agents.standard.cloud_hunter import create_cloud_hunter_agent
 from buggy.agents.standard.contract_auditor import create_contract_auditor_agent
 from buggy.agents.standard.exploit import create_exploit_agent
 from buggy.agents.standard.forensicator import create_forensicator_agent
-from buggy.agents.standard.ics_operator import create_ics_operator_agent
 from buggy.agents.standard.osint_operator import create_osint_operator_agent
 from buggy.agents.standard.phisher import create_phisher_agent
 from buggy.agents.standard.postexploit import create_postexploit_agent
@@ -41,7 +40,6 @@ __all__ = [
     "create_blue_cell_agent",
     # WAVE-3 specialists — lit up over the pre-existing skill trees.
     "create_osint_operator_agent",
-    "create_ics_operator_agent",
     "create_forensicator_agent",
     "create_supply_chain_operator_agent",
     # Vulnresearch pipeline (five-stage modular)

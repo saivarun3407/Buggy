@@ -184,7 +184,6 @@ postexploit = "buggy.agents.standard.postexploit:SUBAGENT_SPEC"
 phisher = "buggy.agents.standard.phisher:SUBAGENT_SPEC"
 blue_cell = "buggy.agents.standard.blue_cell:SUBAGENT_SPEC"
 osint_operator = "buggy.agents.standard.osint_operator:SUBAGENT_SPEC"
-ics_operator = "buggy.agents.standard.ics_operator:SUBAGENT_SPEC"
 forensicator = "buggy.agents.standard.forensicator:SUBAGENT_SPEC"
 supply_chain_operator = "buggy.agents.standard.supply_chain_operator:SUBAGENT_SPEC"
 # Plugins bundle — vulnresearch family, attached to the ``vulnresearch`` main agent.

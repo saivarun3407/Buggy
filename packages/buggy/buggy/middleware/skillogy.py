@@ -139,7 +139,6 @@ _PHASE_FOR_ROLE: dict[str, str] = {
     "contract_auditor": "smart-contracts",
     "reverser": "reverse-engineering",
     "osint_operator": "osint",
-    "ics_operator": "ics-ot",
     "forensicator": "dfir",
     "supply_chain_operator": "supply-chain",
     # Blue Cell is the purple-team detection-validation agent (defensive sibling
