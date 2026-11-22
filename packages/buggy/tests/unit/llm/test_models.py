@@ -123,7 +123,6 @@ class TestAgentTiers:
         for role in (
             "detector",
             "verifier",
-            "ad_operator",
             "cloud_hunter",
             "reverser",
         ):

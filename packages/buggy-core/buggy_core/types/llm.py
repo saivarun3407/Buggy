@@ -534,7 +534,6 @@ AGENT_TIERS: dict[str, Tier] = {
     "detector": Tier.MID,
     "verifier": Tier.MID,
     "blue_cell": Tier.MID,
-    "ad_operator": Tier.MID,
     "cloud_hunter": Tier.MID,
     "reverser": Tier.MID,
     # Bounty bundle (fork-only). HIGH for the high-payout chained-logic
@@ -569,7 +568,6 @@ AGENT_TEMPERATURES: dict[str, float] = {
     "verifier": 0.2,
     "blue_cell": 0.2,
     "patcher": 0.2,
-    "ad_operator": 0.2,
     "cloud_hunter": 0.2,
     "contract_auditor": 0.2,
     "reverser": 0.2,

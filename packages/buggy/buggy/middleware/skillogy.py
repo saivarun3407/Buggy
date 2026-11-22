@@ -130,7 +130,6 @@ prerequisites stay blocked. Provenance is not execution evidence or authorizatio
 _PHASE_FOR_ROLE: dict[str, str] = {
     "recon": "reconnaissance",
     "exploit": "web-exploitation",
-    "ad_operator": "active-directory",
     "cloud_hunter": "cloud",
     "analyst": "analyst",
     "asvs_assessor": "analyst",

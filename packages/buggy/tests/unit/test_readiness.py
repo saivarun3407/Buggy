@@ -249,8 +249,12 @@ def test_generated_script_runs_for_real_with_sh(tmp_path, monkeypatch):
 # ── domain readiness ─────────────────────────────────────────────────
 
 
-AD_PROFILE = {"ad": ["bhce", "bhce-neo4j"], "reversing": ["ghidra-mcp"]}
-ALL_SERVICES = ["bhce", "bhce-neo4j", "ghidra-mcp", "sandbox"]
+# A domain behind a compose profile, so the profile rules are exercised on
+# their own rather than through whichever shipped role happens to use one.
+GATED = readiness.Domain("gated", ("runtime", "ad"), profiles=("gated",))
+DOMAINS = (*readiness.DOMAINS, GATED)
+AD_PROFILE = {"gated": ["svc-a", "svc-b"], "reversing": ["ghidra-mcp"]}
+ALL_SERVICES = ["svc-a", "svc-b", "ghidra-mcp", "sandbox"]
 
 
 def _statuses(missing: set[str] = frozenset()):
@@ -268,14 +272,16 @@ def _domain(rows, name):
 
 
 def test_all_tools_and_services_present_is_ready():
-    rows = readiness.domain_readiness(_statuses(), ALL_SERVICES, profile_services=AD_PROFILE)
+    rows = readiness.domain_readiness(
+        _statuses(), ALL_SERVICES, profile_services=AD_PROFILE, domains=DOMAINS
+    )
     assert all(r["ready"] for r in rows), [r for r in rows if not r["ready"]]
-    assert _domain(rows, "ad_operator")["status"] == "ready"
+    assert _domain(rows, "gated")["status"] == "ready"
 
 
 def test_missing_tool_is_degraded_and_named():
     rows = readiness.domain_readiness(
-        _statuses({"nmap"}), ALL_SERVICES, profile_services=AD_PROFILE
+        _statuses({"nmap"}), ALL_SERVICES, profile_services=AD_PROFILE, domains=DOMAINS
     )
     recon = _domain(rows, "recon")
     assert recon["ready"] is False
@@ -287,38 +293,45 @@ def test_missing_tool_is_degraded_and_named():
 
 def test_capability_with_one_of_its_binaries_present_is_not_missing():
     rows = readiness.domain_readiness(
-        _statuses({"python"}), ALL_SERVICES, profile_services=AD_PROFILE
+        _statuses({"python"}), ALL_SERVICES, profile_services=AD_PROFILE, domains=DOMAINS
     )
     assert _domain(rows, "buggy")["ready"] is True
 
 
 def test_missing_profile_service_is_not_available_with_profile_named():
-    services = [s for s in ALL_SERVICES if s != "bhce"]
-    rows = readiness.domain_readiness(_statuses(), services, profile_services=AD_PROFILE)
-    ad = _domain(rows, "ad_operator")
-    assert ad["ready"] is False
-    assert ad["missing_services"] == ["bhce"]
-    assert ad["status"] == "not available in this stack (needs profile ad)"
+    services = [s for s in ALL_SERVICES if s != "svc-a"]
+    rows = readiness.domain_readiness(
+        _statuses(), services, profile_services=AD_PROFILE, domains=DOMAINS
+    )
+    gated = _domain(rows, "gated")
+    assert gated["ready"] is False
+    assert gated["missing_services"] == ["svc-a"]
+    assert gated["status"] == "not available in this stack (needs profile gated)"
     assert _domain(rows, "recon")["ready"] is True
 
 
 def test_tool_service_down_degrades_with_profile_named():
     services = [s for s in ALL_SERVICES if s != "ghidra-mcp"]
-    rows = readiness.domain_readiness(_statuses(), services, profile_services=AD_PROFILE)
+    rows = readiness.domain_readiness(
+        _statuses(), services, profile_services=AD_PROFILE, domains=DOMAINS
+    )
     assert _domain(rows, "reverser")["status"] == (
         "degraded (missing: ghidra (needs profile reversing))"
     )
 
 
 def test_unknown_running_services_never_reports_ready_for_a_profile():
-    rows = readiness.domain_readiness(_statuses(), None, profile_services=AD_PROFILE)
-    ad = _domain(rows, "ad_operator")
-    assert ad["status"].startswith("not available") and "running services unknown" in ad["note"]
+    rows = readiness.domain_readiness(
+        _statuses(), None, profile_services=AD_PROFILE, domains=DOMAINS
+    )
+    gated = _domain(rows, "gated")
+    assert gated["status"].startswith("not available")
+    assert "running services unknown" in gated["note"]
 
 
 def test_compose_profiles_read_from_repo_compose():
     profiles = readiness.compose_profile_services(REPO / "docker-compose.yml")
-    assert "bhce" in profiles["ad"]
+    assert "web" in profiles["web"]
     assert "ghidra-mcp" in profiles["reversing"]
     assert "sandbox" not in {s for names in profiles.values() for s in names}
 
@@ -329,13 +342,7 @@ def test_compose_profiles_read_from_repo_compose():
 @pytest.fixture
 def compose_file(tmp_path):
     path = tmp_path / "compose.yml"
-    path.write_text(
-        "services:\n"
-        "  sandbox: {}\n"
-        "  bhce: {profiles: [ad]}\n"
-        "  bhce-neo4j: {profiles: [ad]}\n"
-        "  ghidra-mcp: {profiles: [reversing]}\n"
-    )
+    path.write_text("services:\n  sandbox: {}\n  ghidra-mcp: {profiles: [reversing]}\n")
     return path
 
 
@@ -373,11 +380,11 @@ def test_cli_json_shape(compose_file):
 
 def test_cli_domain_filter_and_table(compose_file):
     code, text, _ = _cli(
-        ["check", "--domain", "ad_operator", "--compose", str(compose_file)],
+        ["check", "--domain", "reverser", "--compose", str(compose_file)],
         services=["sandbox"],
     )
     assert code == 0
-    assert "ad_operator  not available in this stack (needs profile ad)" in text
+    assert "reverser  degraded (missing: ghidra (needs profile reversing))" in text
     assert "recon" not in text.split("\n\n")[0]
 
 
@@ -385,7 +392,7 @@ def test_cli_require_exit_codes(compose_file):
     base = ["check", "--compose", str(compose_file)]
     assert _cli([*base, "--require", "recon"], services=ALL_SERVICES)[0] == 0
     assert _cli([*base, "--require", "recon"], missing={"nmap"}, services=ALL_SERVICES)[0] == 4
-    assert _cli([*base, "--require", "ad_operator"], services=["sandbox"])[0] == 4
+    assert _cli([*base, "--require", "reverser"], services=["sandbox"])[0] == 4
     # Not ready but not required: still exit 0.
     assert _cli(base, missing={"nmap"}, services=["sandbox"])[0] == 0
     assert _cli([*base, "--require", "no-such-domain"], services=ALL_SERVICES)[0] == 2
@@ -396,16 +403,16 @@ def test_cli_reads_running_services_from_docker_compose(compose_file):
 
     def run(argv):
         calls.append(list(argv))
-        return 0, "sandbox\nbhce\nbhce-neo4j\n"
+        return 0, "sandbox\nghidra-mcp\n"
 
     code, text, _ = _cli(
-        ["check", "--json", "--compose", str(compose_file), "--require", "ad_operator"], run=run
+        ["check", "--json", "--compose", str(compose_file), "--require", "reverser"], run=run
     )
     assert calls == [["docker", "compose", "ps", "--services", "--status", "running"]]
-    assert code == 0 and json.loads(text)["running_services"] == ["bhce", "bhce-neo4j", "sandbox"]
+    assert code == 0 and json.loads(text)["running_services"] == ["ghidra-mcp", "sandbox"]
 
     code, text, _ = _cli(
-        ["check", "--json", "--compose", str(compose_file), "--require", "ad_operator"],
+        ["check", "--json", "--compose", str(compose_file), "--require", "reverser"],
         run=lambda argv: (1, "no docker"),
     )
     assert code == 4 and json.loads(text)["running_services"] is None
@@ -435,9 +442,12 @@ def test_planned_capability_is_probed_but_not_required():
     certipy = next(s for s in readiness.binaries() if s.binary == "certipy")
     assert certipy.lifecycle == Lifecycle.PLANNED.value
     rows = readiness.domain_readiness(
-        _statuses({"certipy", "certipy-ad"}), ALL_SERVICES, profile_services=AD_PROFILE
+        _statuses({"certipy", "certipy-ad"}),
+        ALL_SERVICES,
+        profile_services=AD_PROFILE,
+        domains=DOMAINS,
     )
-    assert _domain(rows, "ad_operator")["ready"] is True
+    assert _domain(rows, "gated")["ready"] is True
 
 
 def test_an_unreachable_sandbox_is_a_clear_error_not_a_traceback(capsys) -> None:

@@ -236,7 +236,6 @@ _OPERATIONAL_ROLES = {
     "reverser",
     "contract_auditor",
     "cloud_hunter",
-    "ad_operator",
     # NOTE: read-only roles are in _PASSIVE_ROLES (below),
     # not here. They get the 5 compatible cross-cutting prompts but NOT
     # _MISSION_DIRECTIVE or _KALI_ENVIRONMENT, which contradict their

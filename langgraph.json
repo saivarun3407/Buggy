@@ -10,7 +10,6 @@
     "reverser": "./packages/buggy/buggy/agents/standard/reverser.py:graph",
     "contract_auditor": "./packages/buggy/buggy/agents/standard/contract_auditor.py:graph",
     "cloud_hunter": "./packages/buggy/buggy/agents/standard/cloud_hunter.py:graph",
-    "ad_operator": "./packages/buggy/buggy/agents/standard/ad_operator.py:graph",
     "blue_cell": "./packages/buggy/buggy/agents/standard/blue_cell.py:graph"
   },
   "env": ".env",

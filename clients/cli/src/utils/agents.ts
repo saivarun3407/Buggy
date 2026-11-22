@@ -23,7 +23,6 @@ export const AGENT_LABELS: Record<string, string> = {
   reverser: "Reverser",
   contract_auditor: "Contract Auditor",
   cloud_hunter: "Cloud Hunter",
-  ad_operator: "AD Operator",
   vulnresearch: "VulnResearch",
   scanner: "Scanner",
   detector: "Detector",

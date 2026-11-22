@@ -3,14 +3,14 @@
 
 The old ``Neo4jStore`` class (``tools/research/neo4j_store.py``) is
 removed in this PR. Every caller that still imports from
-``buggy.tools.research._state`` — AD_TOOLS, CONTRACT_TOOLS,
+``buggy.tools.research._state`` — CONTRACT_TOOLS,
 RESEARCH_TOOLS, ``chain.py``, ``health.py``, ``dedupe.py`` — now sits
 on top of the new ``KGStore`` (``buggy.middleware.kg_internal.store``)
 through this shim. The agent-facing ``_load`` / ``_save`` /
 ``graph_transaction`` calling convention is preserved bit-for-bit, so
 the old tool surface keeps working while individual tools migrate to
 direct ``KGStore.record_observations`` calls in dedicated follow-up
-PRs (BloodHound and Slither in particular need schema research before
+PRs (Slither in particular needs schema research before
 their direct migration is safe — see
 ``docs/design/2026-06-03-kg-middleware-redesign.md``).
 
@@ -248,7 +248,7 @@ def close_store() -> None:
 # ── Compat wrappers ──────────────────────────────────────────────────
 #
 # ``_load`` / ``_save`` / ``graph_transaction`` preserve the old
-# call shape so tool code under ``tools/ad``, ``tools/contracts``,
+# call shape so tool code under ``tools/contracts``,
 # and ``tools/research/{tools,patch,scanner_tools,bounty,dedupe}.py``
 # does not need to change in this PR.
 

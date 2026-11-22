@@ -189,7 +189,7 @@ _BASE_SLOTS: frozenset[MiddlewareSlot] = _TAIL_SLOTS | {
 }
 
 # Standard bash-executing agents (recon/exploit/analyst/
-# reverser/contract_auditor/cloud_hunter/ad_operator + plugin
+# reverser/contract_auditor/cloud_hunter + plugin
 # specialists verifier/patcher/scanner/exploiter): base + engagement
 # context + sandbox notification.
 _BASH_AGENT_SLOTS: frozenset[MiddlewareSlot] = _BASE_SLOTS | {
@@ -241,14 +241,13 @@ SLOTS_PER_ROLE: dict[str, frozenset[MiddlewareSlot]] = {
     # results live. Scoped read: own engagement plus the shared
     # benchmark learning base when BENCHMARK_MODE is active.
     "exploit": _BASH_AGENT_SLOTS | {MiddlewareSlot.KG},
-    # Three OSS roles run the KG middleware — the persistent-graph use
+    # OSS roles that run the KG middleware — the persistent-graph use
     # cases the spec calls out
     # (docs/design/2026-06-03-kg-middleware-redesign.md § 4.10).
-    # ad_operator records BloodHound-derived principals / paths and
-    # confirmed AD findings; contract_auditor records Foundry-confirmed
+    # contract_auditor records Foundry-confirmed
     # smart-contract vulnerabilities and chain candidates. The opt-in
     # ``kg_record`` / ``kg_ingest`` tools complement (do not replace)
-    # the legacy AD_TOOLS / CONTRACT_TOOLS surfaces — the legacy
+    # the legacy CONTRACT_TOOLS surface — the legacy
     # ingest paths still route through the ``graph_transaction`` shim
     # and migrate to KGStore in a separate RFC.
     "analyst": _BASH_AGENT_SLOTS | {MiddlewareSlot.KG},
@@ -256,7 +255,6 @@ SLOTS_PER_ROLE: dict[str, frozenset[MiddlewareSlot]] = {
     "reverser": _BASH_AGENT_SLOTS,
     "contract_auditor": _BASH_AGENT_SLOTS | {MiddlewareSlot.KG},
     "cloud_hunter": _BASH_AGENT_SLOTS,
-    "ad_operator": _BASH_AGENT_SLOTS | {MiddlewareSlot.KG},
     # ── Plugin orchestrator (no EngagementContext per the existing
     # vulnresearch factory — it consumes its parent's context) ──
     "vulnresearch": _BASE_SLOTS

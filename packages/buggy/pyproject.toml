@@ -179,7 +179,6 @@ asvs_assessor = "buggy.agents.standard.asvs_assessor:SUBAGENT_SPEC"
 reverser = "buggy.agents.standard.reverser:SUBAGENT_SPEC"
 contract_auditor = "buggy.agents.standard.contract_auditor:SUBAGENT_SPEC"
 cloud_hunter = "buggy.agents.standard.cloud_hunter:SUBAGENT_SPEC"
-ad_operator = "buggy.agents.standard.ad_operator:SUBAGENT_SPEC"
 blue_cell = "buggy.agents.standard.blue_cell:SUBAGENT_SPEC"
 # Plugins bundle — vulnresearch family, attached to the ``vulnresearch`` main agent.
 scanner = "buggy.agents.plugins.scanner:SUBAGENT_SPEC"

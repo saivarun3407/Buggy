@@ -92,7 +92,7 @@ func TestDemo_HuntArgv(t *testing.T) {
 func TestDemo_DownArgv(t *testing.T) {
 	home := stackHome(t)
 	want := append(demoBase(home),
-		"--profile", "cli", "--profile", "ad",
+		"--profile", "cli",
 		"--profile", "reversing", "--profile", "operator", "down")
 	got := dockerShaped(demoCompose()).DownArgs()
 	if !reflect.DeepEqual(got, want) {

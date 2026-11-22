@@ -27,7 +27,7 @@ class KGState(AgentState):
     agent built without the KG slot retains its original state surface.
 
     Each channel carries ``reduce_converging_value``. The KG slot runs in
-    several subagent roles (analyst / contract_auditor / ad_operator), so an
+    several subagent roles (analyst / exploit / contract_auditor), so an
     orchestrator that dispatches two of them in parallel writes these channels
     from concurrent branches. All three derive from the single shared
     ``KGStore`` (same engagement scope, same revision token, same rendered

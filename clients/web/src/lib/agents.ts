@@ -107,12 +107,6 @@ export const AGENT_DISPLAY_CONFIG: Record<string, AgentDisplayMeta> = {
     role: "Analysis",
     color: "#f97316",
   },
-  ad_operator: {
-    name: "AD Operator",
-    description: "Active Directory — BloodHound, Kerberos, ADCS attacks",
-    role: "Domain Specialist",
-    color: "#7c3aed",
-  },
   cloud_hunter: {
     name: "Cloud Hunter",
     description: "Cloud security — AWS IAM, K8s, Terraform, metadata",

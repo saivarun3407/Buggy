@@ -7,7 +7,6 @@ from buggy.agents.plugins.patcher import create_patcher_agent
 from buggy.agents.plugins.scanner import create_scanner_agent
 from buggy.agents.plugins.verifier import create_verifier_agent
 from buggy.agents.plugins.vulnresearch import create_vulnresearch_agent
-from buggy.agents.standard.ad_operator import create_ad_operator_agent
 from buggy.agents.standard.analyst import create_analyst_agent
 from buggy.agents.standard.asvs_assessor import create_asvs_assessor_agent
 from buggy.agents.standard.blue_cell import create_blue_cell_agent
@@ -29,7 +28,6 @@ __all__ = [
     "create_reverser_agent",
     "create_contract_auditor_agent",
     "create_cloud_hunter_agent",
-    "create_ad_operator_agent",
     "create_blue_cell_agent",
     # WAVE-3 specialists — lit up over the pre-existing skill trees.
     # Vulnresearch pipeline (five-stage modular)
