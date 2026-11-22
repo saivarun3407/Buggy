@@ -25,6 +25,7 @@ import base64
 import binascii
 import hmac
 import json
+import logging
 import os
 import re
 import struct
@@ -41,6 +42,7 @@ if TYPE_CHECKING:
     from buggy.capture.store import Capture
 
 IDENTITIES_FILE = "identities.json"
+log = logging.getLogger("buggy.capture.identities")
 LOGIN_PROBE = "login"
 LOGIN_METHODS = frozenset({"GET", "POST", "PUT", "PATCH"})
 EXTRACT_SOURCES = ("json", "cookie", "header", "regex")
@@ -437,6 +439,14 @@ def parse_identities(document: Any) -> dict[str, Identity]:
     return out
 
 
+def _awaits_session(definition: dict[str, Any]) -> bool:
+    """Whether a created account's identity has no session yet (static, nothing to attach)."""
+    static = definition.get("static")
+    if not isinstance(static, dict) or definition.get("login"):
+        return False
+    return not static.get("headers") and not static.get("cookies")
+
+
 class IdentityStore:
     """The operator's identities, read from the secrets root on every use.
 
@@ -515,6 +525,10 @@ class IdentityStore:
         for index, entry in enumerate(document["accounts"]):
             if not isinstance(entry, dict) or not isinstance(entry.get("identity"), dict):
                 raise IdentityError(f"accounts[{index}]", "must carry an identity definition")
+            if _awaits_session(entry["identity"]):
+                # Prepared but not signed in yet (a person still has to finish the
+                # sign-up): it is on file, and it is not an identity anyone can use.
+                continue
             identity = _parse_identity(entry["identity"], f"accounts[{index}].identity")
             out[identity.name] = identity
         return out
@@ -527,7 +541,13 @@ class IdentityStore:
         """
         declared = self._declared(engagement)
         merged: dict[str, Identity] = dict(declared)
-        for name, identity in self._created(engagement).items():
+        try:
+            created = self._created(engagement)
+        except IdentityError as exc:
+            # The gateway's own file must never take the operator's accounts down with it.
+            log.warning("identities: the created-accounts file was ignored: %s", exc)
+            created = {}
+        for name, identity in created.items():
             if name not in merged:
                 merged[name] = identity
         return merged

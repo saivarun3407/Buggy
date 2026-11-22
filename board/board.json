@@ -1,5 +1,5 @@
 {
- "updated": "2026-11-22 17:05 UTC",
+ "updated": "2026-11-22 17:17 UTC",
  "columns": [
   "backlog",
   "ready",
@@ -990,12 +990,12 @@
    "lane": "C",
    "title": "The agent builds its own checks when no tool fits",
    "depends": [],
-   "status": "in_progress",
+   "status": "review",
    "agent": "",
    "branch": "",
-   "commit": "",
-   "tests": "",
-   "note": "",
+   "commit": "9fcd55a",
+   "tests": "10409 tests pass",
+   "note": "merged; a check is data run through the gateway, re-proven by running it again; live agent run pending",
    "order": 49
   },
   {
@@ -1004,12 +1004,12 @@
    "lane": "F",
    "title": "The agent can look things up on the public internet",
    "depends": [],
-   "status": "in_progress",
+   "status": "review",
    "agent": "",
    "branch": "",
-   "commit": "",
-   "tests": "",
-   "note": "",
+   "commit": "9fcd55a",
+   "tests": "10409 tests pass",
+   "note": "merged; web search plus a guarded page fetcher; search flag confirmed with the CLI; live agent run pending",
    "order": 50
   }
  ]

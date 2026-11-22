@@ -668,3 +668,34 @@ class TestOperatorFinishesTheSignUp:
         # The same prepared accounts were kept, not replaced by new ones.
         assert self.created(roots)[0]["email"] == prepared[0]["email"]
         assert gateway.send("acme", "GET", ACCOUNT_URL, identity="auto2").status == 200
+
+    def test_a_prepared_account_is_not_an_identity_and_does_not_hide_declared_ones(
+        self, env
+    ) -> None:
+        gateway, origin, roots, _target = env
+        del origin.routes[("GET", REGISTER_URL)]
+        del origin.routes[("POST", REGISTER_URL)]
+        origin.routes[("GET", SEED)] = (200, "text/html", '<a href="/login">Log in</a>')
+        declared = {"name": "carol", "static": {"headers": {"X-Session": "declared-" + "0a1b2c"}}}
+        folder = roots.secrets / "acme"
+        folder.mkdir(parents=True, exist_ok=True)
+        (folder / "identities.json").write_text(json.dumps({"identities": [declared]}))
+
+        first = provision(gateway, "acme", [SEED])
+        assert first["prepared"] == ["auto1", "auto2"]
+        # The operator's own account is still usable, and the prepared ones are not listed.
+        names = [row["name"] for row in gateway.identities.public("acme")]
+        assert names == ["carol"]
+        assert gateway.send("acme", "GET", SEED, identity="carol").status == 200
+
+    def test_a_damaged_created_file_never_takes_declared_accounts_down(self, env) -> None:
+        gateway, _origin, roots, _target = env
+        declared = {"name": "carol", "static": {"headers": {"X-Session": "declared-" + "0a1b2c"}}}
+        folder = roots.secrets / "acme"
+        folder.mkdir(parents=True, exist_ok=True)
+        (folder / "identities.json").write_text(json.dumps({"identities": [declared]}))
+        created = gateway.identities.created_path("acme")
+        assert created is not None
+        created.parent.mkdir(parents=True, exist_ok=True)
+        created.write_text("{ not json")
+        assert [row["name"] for row in gateway.identities.public("acme")] == ["carol"]
