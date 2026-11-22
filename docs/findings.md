@@ -268,6 +268,67 @@ login) stops it, with `truncated: true`.
 - `buggy-cli ci-gate --report report.json --hunt-result hunt-result.json
   --fail-on high --sarif out.sarif` exits 0 / 10 / 3 / 2. See [ci.md](ci.md).
 
+### Proof video and screenshot
+
+Each proven finding can get a short video and two screenshots, made from what
+the evidence gateway recorded when the finding was proved.
+
+- `buggy.findings.proof_page.proof_html(finding, engagement=..., generated_at=...)`
+  turns one finding of the report into a single HTML page. The page opens with a
+  title card that gives the ID, title, severity, class, endpoint and parameter,
+  and says that nothing is sent to the target while the page is recorded. One
+  section follows per proof step. Each section shows the request (method, URL,
+  headers with credentials already redacted, and body) with the payload
+  highlighted. It also shows the response status and body with the proving text
+  highlighted, plus the capture IDs and SHA-256 hashes. Everything that came
+  from the target is shown as escaped text. A stored XSS payload is displayed
+  and never runs. The page has no script and loads nothing from outside. When a
+  body is long, the page shows only the part around the proving text and marks
+  each cut as `[… N bytes not shown …]`.
+- The scoped browser's `proof_record(engagement, finding_id, html)` tool
+  records that page. It opens a fresh browser context with JavaScript off and
+  every network request blocked. It then shows the title card and scrolls
+  through up to 8 steps, which takes under 30 seconds. It writes these files
+  to `~/.buggy/audit/<engagement>/evidence/<finding-id>/`:
+  `proof.webm` (the video), `proof.png` (the first proof step) and
+  `proof-full.png` (the whole page). Running it again overwrites them.
+- The video is **not** a new attack. It shows the exchange the gateway
+  recorded during the re-proof. Re-running the attack live would hit the
+  target again, and a proof that changed state could not be shown that way.
+  Nothing reaches the target while the video is recorded.
+
+### Word report
+
+`buggy.findings.report.to_docx(report, images=..., videos=...)` (from
+`buggy.findings.docx`) turns the report dict into a `.docx` file. It has no
+dependencies outside the standard library, and the same input gives the same
+bytes. The report contains:
+
+- the title, the engagement, when the report was generated, the scope, and
+  whether testing is complete;
+- a summary with counts by severity and a table of the findings;
+- a bug-class coverage table, when the report includes `coverage`;
+- one section per proven finding, most severe first:
+  - the severity and why. The reason is built from a fixed rule for the
+    finding's class, the parameter, and whether the proof was sent without
+    credentials or as a test account;
+  - the CWE, the endpoint, the method, the parameter, and which account the
+    finding was proven as;
+  - each payload, with the request it was sent in;
+  - numbered steps to reproduce, with curl commands;
+  - what the target answered;
+  - the evidence: capture IDs with SHA-256, the evidence folder and
+    `reproduce.sh`;
+  - the screenshot, embedded when `images[finding_id]` (PNG bytes) is given;
+  - the name of the proof video, when `videos[finding_id]` is given;
+  - the remediation and the retest status;
+- a separate "Not proven" table for inconclusive, source-verified and
+  candidate items;
+- "Not tested, and why", when the report includes `not_tested`.
+
+Text from the target is XML-escaped. Characters that XML cannot hold, such as
+a NUL in a response, are removed, so they cannot corrupt the file.
+
 ## Retest
 
 ```bash

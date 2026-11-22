@@ -7,7 +7,11 @@ import base64
 import glob
 import json
 import os
+import re
+import shutil
+import tempfile
 import time
+from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
@@ -21,9 +25,33 @@ LOCAL_SCHEMES = frozenset({"data", "blob", "about", "chrome-error"})
 MAX_LOG = 500
 MAX_TEXT = 20000
 
+# ── proof recording ─────────────────────────────────────────────────
+PROOF_ID = re.compile(r"^F-[0-9a-f]{6,40}$")
+MAX_PROOF_HTML = 2 * 1024 * 1024
+PROOF_MAX_STEPS = 8
+PROOF_VIEWPORT = {"width": 1280, "height": 720}
+# The title card, then each step, then a short hold: at most 2.5 + 8 * 2.5 + 1 = 23.5 s.
+PROOF_TITLE_SECONDS = 2.5
+PROOF_STEP_SECONDS = 2.5
+PROOF_END_SECONDS = 1.0
+PROOF_VIDEO = "proof.webm"
+PROOF_SCREENSHOT = "proof.png"
+PROOF_FULL_SCREENSHOT = "proof-full.png"
+
 
 class BrowserError(RuntimeError):
     """Something the caller can act on (no page open, selector missing, no scope)."""
+
+
+class ProofError(BrowserError):
+    """A proof recording that was refused or failed, with a code for the caller."""
+
+    def __init__(self, code: str, detail: str) -> None:
+        super().__init__(detail)
+        self.code = code
+
+    def to_dict(self) -> dict[str, Any]:
+        return {"ok": False, "error": self.code, "detail": str(self)}
 
 
 @dataclass
@@ -66,12 +94,18 @@ class ScopedBrowser:
         self._logs: dict[str, RequestLog] = {}
         self._ledgers: dict[str, Ledger] = {}
         self._lock = asyncio.Lock()
+        # How a proof recording waits between steps (a test makes it instant).
+        self._pause: Callable[[float], Awaitable[Any]] = asyncio.sleep
 
     # ── scope ───────────────────────────────────────────────────────
 
-    def _scope(self, engagement: str) -> tuple[ScopeFilter, dict[str, Any]]:
+    @staticmethod
+    def _check_engagement(engagement: str) -> None:
         if not engagement or "/" in engagement or engagement.startswith("."):
             raise BrowserError("engagement name is required")
+
+    def _scope(self, engagement: str) -> tuple[ScopeFilter, dict[str, Any]]:
+        self._check_engagement(engagement)
         path = self._control / engagement / "roe.json"
         try:
             scope = ScopeFilter.from_file(path)
@@ -270,6 +304,114 @@ class ScopedBrowser:
             ]
         }
 
+    # ── proof recording (offline) ───────────────────────────────────
+
+    def _proof_folder(self, engagement: str, finding_id: str, html: Any) -> Path:
+        """The evidence folder a recording goes to, after every argument check."""
+        if not isinstance(finding_id, str) or not PROOF_ID.fullmatch(finding_id):
+            raise ProofError("BAD_FINDING_ID", "finding_id must look like F-<6 to 40 hex digits>")
+        if not isinstance(html, str) or not html.strip():
+            raise ProofError("BAD_HTML", "html is required: the proof page to record")
+        size = len(html.encode("utf-8", "replace"))
+        if size > MAX_PROOF_HTML:
+            raise ProofError(
+                "HTML_TOO_LARGE", f"the proof page is {size} bytes; at most {MAX_PROOF_HTML}"
+            )
+        try:
+            self._scope(engagement)  # the same engagement guard and binding as browsing
+        except BrowserError as exc:
+            raise ProofError("BAD_ENGAGEMENT", str(exc)) from exc
+        root = self._audit.resolve()
+        folder = (self._audit / engagement / "evidence" / finding_id).resolve()
+        if not folder.is_relative_to(root / engagement):
+            raise ProofError("BAD_ENGAGEMENT", "the evidence folder is outside the audit root")
+        return folder
+
+    async def proof_record(self, engagement: str, finding_id: str, html: str) -> dict[str, Any]:
+        """Record ``html`` (a proof page) as a video plus screenshots, with no network at all.
+
+        The page is shown in a fresh context: JavaScript off, offline, every
+        request aborted. Nothing is sent to the target; the page shows what the
+        evidence gateway recorded. Files land in
+        ``<audit>/<engagement>/evidence/<finding_id>/`` and replace earlier ones.
+        """
+        folder = self._proof_folder(engagement, finding_id, html)
+        async with self._lock:
+            await self._ensure_browser()
+            with tempfile.TemporaryDirectory(prefix="buggy-proof-") as scratch:
+                work = Path(scratch)
+                result = await self._record(work, html)
+                folder.mkdir(parents=True, exist_ok=True)
+                for name in (PROOF_VIDEO, PROOF_SCREENSHOT, PROOF_FULL_SCREENSHOT):
+                    staged = folder / f".{name}.part"
+                    shutil.copyfile(work / name, staged)
+                    staged.chmod(0o644)
+                    staged.replace(folder / name)
+        relative = f"evidence/{finding_id}"
+        return {
+            "ok": True,
+            "video": f"{relative}/{PROOF_VIDEO}",
+            "screenshot": f"{relative}/{PROOF_SCREENSHOT}",
+            "full_screenshot": f"{relative}/{PROOF_FULL_SCREENSHOT}",
+            "bytes": (folder / PROOF_VIDEO).stat().st_size,
+            **result,
+        }
+
+    async def _record(self, work: Path, html: str) -> dict[str, Any]:
+        blocked: list[str] = []
+        context = await self._browser.new_context(
+            viewport=dict(PROOF_VIEWPORT),
+            record_video_dir=str(work / "video"),
+            record_video_size=dict(PROOF_VIEWPORT),
+            java_script_enabled=False,
+            offline=True,
+            service_workers="block",
+            accept_downloads=False,
+        )
+
+        async def deny(route: Any, request: Any) -> None:
+            blocked.append(str(request.url)[:200])
+            await route.abort("blockedbyclient")
+
+        video: Any = None
+        started = time.monotonic()
+        shown = 0
+        try:
+            await context.route("**/*", deny)
+            if hasattr(context, "route_web_socket"):
+
+                async def no_socket(socket: Any) -> None:
+                    blocked.append(str(socket.url)[:200])
+                    await socket.close()
+
+                await context.route_web_socket("**/*", no_socket)
+            page = await context.new_page()
+            video = page.video
+            started = time.monotonic()
+            await page.set_content(html, wait_until="load", timeout=15000)
+            await self._pause(PROOF_TITLE_SECONDS)
+            for number in range(1, PROOF_MAX_STEPS + 1):
+                section = page.locator(f"#step-{number}")
+                if await section.count() == 0:
+                    break
+                await section.scroll_into_view_if_needed(timeout=5000)
+                shown += 1
+                await self._pause(PROOF_STEP_SECONDS)
+            await self._pause(PROOF_END_SECONDS)
+            first = page.locator("#step-1")
+            if await first.count():
+                await first.screenshot(path=str(work / PROOF_SCREENSHOT), timeout=10000)
+            else:
+                await page.screenshot(path=str(work / PROOF_SCREENSHOT), full_page=False)
+            await page.screenshot(path=str(work / PROOF_FULL_SCREENSHOT), full_page=True)
+        finally:
+            await context.close()  # finalises the video
+        seconds = round(time.monotonic() - started, 1)
+        if video is None:
+            raise ProofError("NO_VIDEO", "the browser did not record a video")
+        await video.save_as(str(work / PROOF_VIDEO))
+        return {"seconds": seconds, "steps_shown": shown, "blocked_requests": len(blocked)}
+
     def requests(self, engagement: str, limit: int = 50) -> list[dict[str, Any]]:
         return self._logs.get(engagement, RequestLog()).entries[-max(1, min(limit, MAX_LOG)) :]
 
@@ -279,4 +421,4 @@ class ScopedBrowser:
         ]
 
 
-__all__ = ["BrowserError", "ScopedBrowser", "find_chromium"]
+__all__ = ["BrowserError", "ProofError", "ScopedBrowser", "find_chromium"]

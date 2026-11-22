@@ -39,9 +39,11 @@ import string
 from collections.abc import Callable
 from datetime import UTC, datetime
 from typing import Any
+from urllib.parse import parse_qsl, urlsplit
 
 from buggy.capture.export import to_curl
 from buggy.capture.store import REDACTED, SENSITIVE_HEADERS, Capture
+from buggy.findings.docx import to_docx
 from buggy.findings.model import SEVERITIES, Status
 from buggy.findings.verifier import DIFFERS_BELOW, SAME_AS_MIN
 
@@ -51,6 +53,11 @@ CaptureLookup = Callable[[str], Any]
 REPORT_FORMAT = 1
 #: Characters of a replayed response shown as proof.
 EXCERPT_CHARS = 600
+#: Characters of a request or response body a proof step keeps around the payload
+#: or the proving text (``request.body`` / ``response.body`` of a step).
+WINDOW_CHARS = 1500
+#: Body characters a proof step reads from a capture before cutting its window.
+_STEP_BODY_CHARS = 64 * 1024
 
 LABELS: dict[str, str] = {
     Status.SOURCE_VERIFIED.value: "source-verified: reviewed by a person or source analysis, "
@@ -118,7 +125,9 @@ def _mask_headers(headers: Any) -> dict[str, str]:
     }
 
 
-def _lookup(captures: CaptureLookup, capture_id: str, engagement: str) -> tuple[dict, str] | None:
+def _lookup(
+    captures: CaptureLookup, capture_id: str, engagement: str, *, body_chars: int = 8000
+) -> tuple[dict, str] | None:
     """``(redacted view, curl text)`` of a capture, or ``None`` when it is not available."""
     if not capture_id:
         return None
@@ -126,7 +135,7 @@ def _lookup(captures: CaptureLookup, capture_id: str, engagement: str) -> tuple[
     if isinstance(found, Capture):
         if found.engagement != engagement:
             return None
-        return found.detail(), to_curl(found, redact=True)
+        return found.detail(body_chars=body_chars), to_curl(found, redact=True)
     if isinstance(found, dict):
         if found.get("engagement") not in (None, "", engagement):
             return None
@@ -160,6 +169,151 @@ def _expectation_words(expect: dict[str, Any]) -> list[str]:
     return words
 
 
+# ── the recorded exchange behind a proof step ───────────────────────
+
+_NOTE_ASSIGNMENT = re.compile(r"^\s*([A-Za-z0-9_.\-\[\]]{1,100})=(.+)$", re.DOTALL)
+
+
+def _utf8_len(text: str) -> int:
+    return len(text.encode("utf-8", "replace"))
+
+
+def _window(text: str, needles: list[str], *, total_bytes: int | None = None) -> dict[str, Any]:
+    """A window of ``text`` around the first needle it contains, and what was left out.
+
+    ``omitted_before`` / ``omitted_after`` are UTF-8 byte counts; ``total_bytes``
+    (the size the capture recorded) also counts what the store or the view never held.
+    """
+    match = next((needle for needle in needles if needle and needle in text), "")
+    start, end = 0, len(text)
+    if len(text) > WINDOW_CHARS:
+        if match:
+            start = max(0, min(text.index(match) - WINDOW_CHARS // 3, len(text) - WINDOW_CHARS))
+        end = start + WINDOW_CHARS
+    after = _utf8_len(text[end:])
+    if total_bytes is not None:
+        after = max(after, total_bytes - _utf8_len(text[:end]))
+    return {
+        "body": _printable(text[start:end]),
+        "omitted_before": _utf8_len(text[:start]),
+        "omitted_after": after,
+        "match": _printable(match),
+    }
+
+
+def _parameter_value(view: dict[str, Any], parameter: str) -> str:
+    """The value ``parameter`` had in the recorded request: query, JSON or form body."""
+    if not parameter:
+        return ""
+    for name, value in parse_qsl(urlsplit(_s(view.get("url"))).query, keep_blank_values=True):
+        if name == parameter:
+            return value
+    body = _s(view.get("request_body"))
+    if body.lstrip().startswith(("{", "[")):
+        try:
+            document = json.loads(body)
+        except ValueError:
+            document = None
+        if isinstance(document, dict) and parameter in document:
+            value = document[parameter]
+            return value if isinstance(value, str) else json.dumps(value, sort_keys=True)
+    for name, value in parse_qsl(body, keep_blank_values=True):
+        if name == parameter:
+            return value
+    return ""
+
+
+def _payload(view: dict[str, Any], parameter: str) -> tuple[str, str]:
+    """``(injected value, where it was read)`` for one recorded request.
+
+    The finding's parameter as the request carried it comes first: that is what
+    was sent. A probe that names its variation in the capture note as
+    ``name=value`` supplies the value when no parameter is named or found.
+    """
+    value = _parameter_value(view, parameter)
+    if value:
+        return _printable(value), "parameter"
+    assigned = _NOTE_ASSIGNMENT.match(_s(view.get("note")))
+    if assigned:
+        return _printable(assigned.group(2).strip()), "note"
+    return "", ""
+
+
+def _sorted_headers(headers: Any) -> dict[str, str]:
+    source = headers if isinstance(headers, dict) else {}
+    return {_s(k): _printable(_s(source[k])) for k in sorted(source, key=str)}
+
+
+def _int_or_none(value: Any) -> int | None:
+    return value if isinstance(value, int) and not isinstance(value, bool) else None
+
+
+def _request_part(view: dict[str, Any], payload: str) -> dict[str, Any]:
+    window = _window(_s(view.get("request_body")), [payload])
+    return {
+        "method": _s(view.get("method")),
+        "url": _printable(_s(view.get("url"))),
+        "headers": _sorted_headers(view.get("request_headers")),
+        "body": window["body"],
+        "omitted_before": window["omitted_before"],
+        "omitted_after": window["omitted_after"],
+        "sha256": _s(view.get("request_sha256")),
+    }
+
+
+def _response_part(view: dict[str, Any], needles: list[str]) -> dict[str, Any]:
+    total = _int_or_none(view.get("response_bytes"))
+    window = _window(_s(view.get("response_body")), needles, total_bytes=total)
+    return {
+        "capture_id": _s(view.get("capture_id")),
+        "status": _int_or_none(view.get("status")),
+        "error": _printable(_s(view.get("error"))),
+        "headers": _sorted_headers(view.get("response_headers")),
+        **window,
+        "bytes": total or 0,
+        "sha256": _s(view.get("response_sha256")),
+    }
+
+
+def _exchange(
+    request_view: dict[str, Any] | None,
+    response_view: dict[str, Any] | None,
+    *,
+    parameter: str,
+    needles: list[str],
+) -> dict[str, Any]:
+    """The step keys a proof page and the Word report read: request, response, payload."""
+    payload, payload_source = _payload(request_view, parameter) if request_view else ("", "")
+    response = _response_part(response_view, needles) if response_view else None
+    return {
+        "request": _request_part(request_view, payload) if request_view else None,
+        "response": response,
+        "payload": payload,
+        "payload_source": payload_source,
+        "highlight": [_printable(needle) for needle in needles if needle],
+        "note": _printable(_s((request_view or {}).get("note"))),
+        "sha256": response["sha256"] if response else "",
+    }
+
+
+def _replays(
+    finding: dict[str, Any], captures: CaptureLookup, engagement: str
+) -> tuple[list[dict[str, Any]], dict[str, dict[str, Any]]]:
+    """The verifier's replay views in order, and those keyed by the capture they replayed."""
+    ids = (finding.get("verification") or {}).get("replay_capture_ids") or []
+    ordered: list[dict[str, Any]] = []
+    by_original: dict[str, dict[str, Any]] = {}
+    for capture_id in dict.fromkeys(_s(value) for value in ids):
+        found = _lookup(captures, capture_id, engagement, body_chars=_STEP_BODY_CHARS)
+        if found is None:
+            continue
+        ordered.append(found[0])
+        original = _s(found[0].get("replay_of"))
+        if original and original not in by_original:
+            by_original[original] = found[0]
+    return ordered, by_original
+
+
 def _steps(
     finding: dict[str, Any], captures: CaptureLookup, engagement: str
 ) -> list[dict[str, Any]]:
@@ -169,12 +323,18 @@ def _steps(
         if isinstance(entry, dict) and isinstance(entry.get("index"), int):
             outcomes[entry["index"]] = _s(entry.get("outcome"))
     steps: list[dict[str, Any]] = []
-    for index, assertion in enumerate(finding.get("assertions") or []):
+    assertions = finding.get("assertions") or []
+    replays, replay_of = _replays(finding, captures, engagement)
+    # Replays that do not name what they replayed line up with the assertions
+    # only when there is exactly one replay per assertion.
+    positional = not replay_of and len(replays) == len(assertions)
+    parameter = _s(finding.get("parameter"))
+    for index, assertion in enumerate(assertions):
         if not isinstance(assertion, dict):
             continue
         capture_id = _s(assertion.get("capture_id"))
         identity = _s(assertion.get("identity"))
-        found = _lookup(captures, capture_id, engagement)
+        found = _lookup(captures, capture_id, engagement, body_chars=_STEP_BODY_CHARS)
         view, curl = found if found is not None else ({}, "")
         method = _s(view.get("method"))
         url = _s(view.get("url"))
@@ -186,6 +346,10 @@ def _steps(
         else:
             request = f"{method} {url} {who} (capture {capture_id})"
         text = f"{number}. Send {request}. Expect: " + ("; ".join(expect) or "nothing stated") + "."
+        raw_expect = assertion.get("expect") or {}
+        needles = [_s(n) for n in raw_expect.get("body_contains") or [] if _s(n)]
+        answer = replay_of.get(capture_id) or (replays[index] if positional else None)
+        recorded = view if found is not None else None
         steps.append(
             {
                 "number": number,
@@ -197,6 +361,14 @@ def _steps(
                 "outcome": outcomes.get(index, ""),
                 "text": text,
                 "curl": curl,
+                **_exchange(
+                    recorded,
+                    answer if answer is not None else recorded,
+                    parameter=parameter,
+                    needles=needles,
+                ),
+                "replayed": answer is not None,
+                "shows": "Expect: " + ("; ".join(expect) or "nothing stated") + ".",
             }
         )
     return steps
@@ -206,8 +378,18 @@ def _proof(finding: dict[str, Any], captures: CaptureLookup, engagement: str) ->
     """The verifier's replay captures: status line and the first characters of the response."""
     out: list[dict[str, Any]] = []
     ids = (finding.get("verification") or {}).get("replay_capture_ids") or []
+    parameter = _s(finding.get("parameter"))
+    needles = [
+        _s(needle)
+        for assertion in finding.get("assertions") or []
+        if isinstance(assertion, dict)
+        for needle in (assertion.get("expect") or {}).get("body_contains") or []
+        if _s(needle)
+    ]
     for capture_id in dict.fromkeys(_s(value) for value in ids):
-        found = _lookup(captures, capture_id, engagement)
+        # A longer view than the default changes nothing below but the exchange: the
+        # excerpt is its first characters and any body past them is marked truncated.
+        found = _lookup(captures, capture_id, engagement, body_chars=_STEP_BODY_CHARS)
         if found is None:
             out.append(
                 {
@@ -216,6 +398,7 @@ def _proof(finding: dict[str, Any], captures: CaptureLookup, engagement: str) ->
                     "response_headers": {},
                     "excerpt": "",
                     "truncated": False,
+                    **_exchange(None, None, parameter=parameter, needles=[]),
                 }
             )
             continue
@@ -237,6 +420,7 @@ def _proof(finding: dict[str, Any], captures: CaptureLookup, engagement: str) ->
                 "response_headers": {k: headers[k] for k in sorted(headers)},
                 "excerpt": _printable(body[:EXCERPT_CHARS]),
                 "truncated": len(body) > EXCERPT_CHARS or bool(view.get("response_truncated")),
+                **_exchange(view, view, parameter=parameter, needles=needles),
             }
         )
     return out
@@ -796,11 +980,13 @@ __all__ = [
     "LABELS",
     "METHOD",
     "REPORT_FORMAT",
+    "WINDOW_CHARS",
     "Report",
     "build",
     "md_code",
     "md_inline",
     "md_text",
+    "to_docx",
     "to_html",
     "to_json",
     "to_markdown",

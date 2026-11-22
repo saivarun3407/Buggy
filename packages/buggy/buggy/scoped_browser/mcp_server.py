@@ -9,7 +9,7 @@ import os
 from pathlib import Path
 from typing import Any
 
-from buggy.scoped_browser.session import BrowserError, ScopedBrowser
+from buggy.scoped_browser.session import BrowserError, ProofError, ScopedBrowser
 
 DEFAULT_PORT = 9463
 TOOL_NAMES = (
@@ -23,6 +23,7 @@ TOOL_NAMES = (
     "browser_cookies",
     "browser_requests",
     "browser_close",
+    "proof_record",
 )
 
 INSTRUCTIONS = (
@@ -30,7 +31,8 @@ INSTRUCTIONS = (
     "session: single-page apps, DOM XSS, client-side routing, auth flows. Every request the page "
     "makes is checked against the enforced scope; out-of-scope requests are blocked and listed by "
     "browser_requests. If the engagement requires approval for state-changing requests, the "
-    "browser is read-only: send that request with http_send instead."
+    "browser is read-only: send that request with http_send instead. proof_record renders a "
+    "proven finding's proof page offline (no network) and saves it as a video."
 )
 
 
@@ -41,6 +43,19 @@ async def _guard(coro: Any) -> dict[str, Any]:
         return {"error": str(exc)}
     except Exception as exc:  # noqa: BLE001 - Playwright errors go back to the agent as text
         return {"error": f"{type(exc).__name__}: {str(exc)[:400]}"}
+
+
+async def _record(coro: Any) -> dict[str, Any]:
+    try:
+        return await coro
+    except ProofError as exc:
+        return exc.to_dict()
+    except Exception as exc:  # noqa: BLE001 - Playwright errors go back to the caller as text
+        return {
+            "ok": False,
+            "error": "RECORDING_FAILED",
+            "detail": f"{type(exc).__name__}: {str(exc)[:400]}",
+        }
 
 
 def register_tools(mcp: Any, browser: ScopedBrowser) -> None:
@@ -94,6 +109,16 @@ def register_tools(mcp: Any, browser: ScopedBrowser) -> None:
         """Close the engagement's browser session."""
         await browser.close(engagement)
         return {"closed": True}
+
+    @mcp.tool()
+    async def proof_record(engagement: str, finding_id: str, html: str) -> dict[str, Any]:
+        """Record a proven finding's proof page (findings.proof_page) as a video and screenshots.
+
+        Offline: a fresh context with JavaScript off and every request aborted shows the
+        recorded exchange; nothing is sent to the target. Writes proof.webm, proof.png and
+        proof-full.png to the engagement's evidence/<finding_id>/ folder.
+        """
+        return await _record(browser.proof_record(engagement, finding_id, html))
 
 
 def build_server(
