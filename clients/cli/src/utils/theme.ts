@@ -56,6 +56,5 @@ export const AGENT_COLORS: Record<string, string> = {
   buggy: "blue",
   recon: "cyan",
   exploit: "red",
-  postexploit: "magenta",
   soundwave: "yellow",
 };

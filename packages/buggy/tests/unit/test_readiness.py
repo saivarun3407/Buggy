@@ -305,9 +305,6 @@ def test_missing_profile_service_is_not_available_with_profile_named():
 def test_tool_service_down_degrades_with_profile_named():
     services = [s for s in ALL_SERVICES if s not in {"c2-sliver", "ghidra-mcp"}]
     rows = readiness.domain_readiness(_statuses(), services, profile_services=AD_PROFILE)
-    assert _domain(rows, "postexploit")["status"] == (
-        "degraded (missing: sliver (needs profile c2-sliver))"
-    )
     assert _domain(rows, "reverser")["status"] == (
         "degraded (missing: ghidra (needs profile reversing))"
     )

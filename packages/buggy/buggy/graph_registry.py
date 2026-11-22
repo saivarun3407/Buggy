@@ -34,7 +34,6 @@ STANDARD_GRAPHS: dict[str, str] = {
     "recon": "./buggy/agents/standard/recon.py:graph",
     "soundwave": "./buggy/agents/standard/soundwave.py:graph",
     "exploit": "./buggy/agents/standard/exploit.py:graph",
-    "postexploit": "./buggy/agents/standard/postexploit.py:graph",
     "analyst": "./buggy/agents/standard/analyst.py:graph",
     "asvs_assessor": "./buggy/agents/standard/asvs_assessor.py:graph",
     "reverser": "./buggy/agents/standard/reverser.py:graph",

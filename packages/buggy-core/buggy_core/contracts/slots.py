@@ -188,7 +188,7 @@ _BASE_SLOTS: frozenset[MiddlewareSlot] = _TAIL_SLOTS | {
     MiddlewareSlot.LOOP_GUARD,
 }
 
-# Standard bash-executing agents (recon/exploit/postexploit/analyst/
+# Standard bash-executing agents (recon/exploit/analyst/
 # reverser/contract_auditor/cloud_hunter/ad_operator + plugin
 # specialists verifier/patcher/scanner/exploiter): base + engagement
 # context + sandbox notification.
@@ -241,7 +241,6 @@ SLOTS_PER_ROLE: dict[str, frozenset[MiddlewareSlot]] = {
     # results live. Scoped read: own engagement plus the shared
     # benchmark learning base when BENCHMARK_MODE is active.
     "exploit": _BASH_AGENT_SLOTS | {MiddlewareSlot.KG},
-    "postexploit": _BASH_AGENT_SLOTS,
     # Three OSS roles run the KG middleware — the persistent-graph use
     # cases the spec calls out
     # (docs/design/2026-06-03-kg-middleware-redesign.md § 4.10).

@@ -95,12 +95,6 @@ export const AGENT_DISPLAY_CONFIG: Record<string, AgentDisplayMeta> = {
     role: "Exploitation",
     color: "#d97706",
   },
-  postexploit: {
-    name: "Post-Exploit",
-    description: "Persistence, lateral movement, privilege escalation",
-    role: "Post-Exploitation",
-    color: "#10b981",
-  },
   vulnresearch: {
     name: "Vulnresearch",
     description: "Vulnerability research orchestrator — five-stage pipeline",

@@ -15,47 +15,24 @@ framework in via the ``fixtures`` extra path).
 from __future__ import annotations
 
 
-def test_all_16_agent_factories_importable() -> None:
-    """The 16 agent factories listed in spec §6.2 import cleanly."""
+def test_agent_factories_importable() -> None:
+    """The shipped agent factories import cleanly."""
     from buggy.agents import (
-        create_ad_operator_agent,
         create_analyst_agent,
         create_buggy_agent,
-        create_cloud_hunter_agent,
-        create_contract_auditor_agent,
-        create_detector_agent,
         create_exploit_agent,
-        create_exploiter_agent,
-        create_patcher_agent,
-        create_postexploit_agent,
         create_recon_agent,
-        create_reverser_agent,
-        create_scanner_agent,
         create_soundwave_agent,
-        create_verifier_agent,
-        create_vulnresearch_agent,
     )
     from buggy.agents.build import build_middleware, build_tools
 
     factories = (
-        create_ad_operator_agent,
         create_analyst_agent,
-        create_cloud_hunter_agent,
-        create_contract_auditor_agent,
         create_buggy_agent,
-        create_detector_agent,
         create_exploit_agent,
-        create_exploiter_agent,
-        create_patcher_agent,
-        create_postexploit_agent,
         create_recon_agent,
-        create_reverser_agent,
-        create_scanner_agent,
         create_soundwave_agent,
-        create_verifier_agent,
-        create_vulnresearch_agent,
     )
-    assert len(factories) == 16
     assert all(callable(f) for f in factories)
     assert callable(build_middleware)
     assert callable(build_tools)

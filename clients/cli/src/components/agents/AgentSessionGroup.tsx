@@ -18,7 +18,7 @@
  *     [full EventItem renders — bash output, AI messages, tool results]
  *     ⎿  Done (8 tool uses · 45s)
  *
- * Rationale: Buggy sub-agents (recon, exploit, postexploit) execute
+ * Rationale: Buggy sub-agents (recon, exploit, analyst) execute
  * the actual attack — their bash output and AI reasoning are core content,
  * not auxiliary detail. Compact summaries lose critical information.
  */

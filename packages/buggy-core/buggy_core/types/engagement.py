@@ -40,9 +40,9 @@ class ObjectivePhase(StrEnum):
     Practical 5-phase model aligned with sub-agent routing:
       recon          → recon agent       (TA0043 Reconnaissance)
       initial-access → exploit agent     (TA0001 Initial Access + TA0002 Execution)
-      post-exploit   → postexploit agent (TA0003-TA0009: Persistence thru Collection)
-      c2             → postexploit agent (TA0011 Command and Control)
-      exfiltration   → postexploit agent (TA0010 Exfiltration + Actions on Objectives)
+      post-exploit   → no agent (TA0003-TA0009: Persistence thru Collection)
+      c2             → no agent (TA0011 Command and Control)
+      exfiltration   → no agent (TA0010 Exfiltration + Actions on Objectives)
     """
 
     RECON = "recon"
@@ -189,7 +189,7 @@ class Finding(BaseModel):
     objective_id: str = Field(default="", description="OPPLAN objective that found this (OBJ-xxx)")
     phase: ObjectivePhase | None = None
     agent: str = Field(
-        default="", description="Agent that discovered this: recon/exploit/postexploit"
+        default="", description="Agent that discovered this: recon/exploit/analyst"
     )
     iteration: int = Field(default=0, description="Ralph loop iteration number")
     confidence: FindingConfidence = FindingConfidence.VERIFIED

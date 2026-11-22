@@ -103,7 +103,6 @@ class TestPhaseForRoleMapping:
         oss_roles = {
             "recon",
             "exploit",
-            "postexploit",
             "ad_operator",
             "cloud_hunter",
             "analyst",

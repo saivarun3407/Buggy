@@ -5,7 +5,6 @@
     "recon": "./packages/buggy/buggy/agents/standard/recon.py:graph",
     "soundwave": "./packages/buggy/buggy/agents/standard/soundwave.py:graph",
     "exploit": "./packages/buggy/buggy/agents/standard/exploit.py:graph",
-    "postexploit": "./packages/buggy/buggy/agents/standard/postexploit.py:graph",
     "analyst": "./packages/buggy/buggy/agents/standard/analyst.py:graph",
     "asvs_assessor": "./packages/buggy/buggy/agents/standard/asvs_assessor.py:graph",
     "reverser": "./packages/buggy/buggy/agents/standard/reverser.py:graph",

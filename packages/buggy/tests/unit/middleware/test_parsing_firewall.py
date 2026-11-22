@@ -349,7 +349,7 @@ class TestSlotRegistration:
     def test_targeted_roles_have_slot(self) -> None:
         from buggy_core.contracts.slots import SLOTS_PER_ROLE, MiddlewareSlot
 
-        for role in ("recon", "exploit", "analyst", "postexploit"):
+        for role in ("recon", "exploit", "analyst"):
             assert MiddlewareSlot.PARSING_FIREWALL in SLOTS_PER_ROLE[role], role
 
     def test_untargeted_roles_skip_slot(self) -> None:

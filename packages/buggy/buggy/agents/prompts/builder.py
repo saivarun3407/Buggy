@@ -232,7 +232,6 @@ _OPERATIONAL_ROLES = {
     # Standard agents — all bash-executing specialists that produce findings
     "recon",
     "exploit",
-    "postexploit",
     "analyst",
     "reverser",
     "contract_auditor",

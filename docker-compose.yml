@@ -437,7 +437,7 @@ services:
       - reversing
 
   # LangGraph Platform — Agent API Server
-  # Exposes all agents (buggy, soundwave, recon, exploit, postexploit)
+  # Exposes all agents (buggy, soundwave, recon, exploit, analyst)
   # as a streaming API on port 2024. Ink CLI connects here.
   langgraph:
     image: ${BUGGY_IMAGE_PREFIX:-}buggy-langgraph:${BUGGY_VERSION:-stable}

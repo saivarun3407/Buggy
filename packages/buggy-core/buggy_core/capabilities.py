@@ -1021,9 +1021,6 @@ class RoleCapabilityPolicy:
 ROLE_CAPABILITY_POLICY: dict[str, RoleCapabilityPolicy] = {
     "recon": RoleCapabilityPolicy(phases=("TA0043",), max_risk=RiskTier.BOUNDED_ACTIVE),
     "exploit": RoleCapabilityPolicy(phases=("TA0001", "TA0002"), max_risk=RiskTier.INTRUSIVE),
-    "postexploit": RoleCapabilityPolicy(
-        phases=("TA0004", "TA0006", "TA0008", "TA0011"), max_risk=RiskTier.HIGH_IMPACT
-    ),
     "ad_operator": RoleCapabilityPolicy(
         phases=("TA0004", "TA0006", "TA0008"), max_risk=RiskTier.HIGH_IMPACT
     ),

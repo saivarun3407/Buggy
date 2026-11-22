@@ -69,7 +69,6 @@ DOMAINS: tuple[Domain, ...] = (
     Domain("recon", ("runtime", "recon", "web", "tls")),
     Domain("soundwave", ("runtime",)),
     Domain("exploit", ("runtime", "web", "vuln", "exploit", "credentials")),
-    Domain("postexploit", ("runtime", "credentials", "smb", "tunneling", "c2", "network")),
     Domain("analyst", ("runtime",)),
     Domain("asvs_assessor", ("runtime", "web", "tls")),
     Domain("reverser", ("runtime", "reversing", "fuzzing")),

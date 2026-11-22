@@ -2,7 +2,7 @@
  * /agent — switch the active orchestrator for this CLI session.
  *
  * Only orchestration agents are surfaced here. Sub-agents (recon,
- * exploit, postexploit, …) are invoked via the orchestrator's task()
+ * exploit, analyst, …) are invoked via the orchestrator's task()
  * tool and shouldn't be selected directly. Available orchestrators are
  * discovered dynamically from the langgraph runtime via
  * POST /assistants/search.

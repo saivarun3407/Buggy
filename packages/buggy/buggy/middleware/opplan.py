@@ -167,7 +167,7 @@ blocked → in-progress                 (retry with different approach)
   artifact such as exploit/EXIT_REPORT.md or recon/SUMMARY.md, a differential
   matrix for reachability/WAF claims, a liveness verdict, or an operator/scope
   adjudication). Evidence-free blocks are rejected by the tool.
-- ALWAYS set owner to the sub-agent name before delegating (recon/exploit/postexploit)
+- ALWAYS set owner to the sub-agent name before delegating (recon/exploit/analyst)
 - ALWAYS respect blocked_by dependencies and kill chain phase order
 """
 

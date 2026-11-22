@@ -1,7 +1,7 @@
 /**
  * Display labels for agent names emitted by the backend.
  *
- * Backend emits snake_case names (e.g. "postexploit", "ad_operator").
+ * Backend emits snake_case names (e.g. "api_security", "authn_session").
  * Frontend converts via AGENT_LABELS for nice display.
  *
  * Unknown agents fall back to humanized (snake_case → Title Case).
@@ -17,7 +17,6 @@ export const AGENT_LABELS: Record<string, string> = {
   // Kill chain
   recon: "Recon",
   exploit: "Exploit",
-  postexploit: "PostExploit",
 
   // Specialist agents
   analyst: "Analyst",
