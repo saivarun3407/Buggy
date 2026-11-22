@@ -183,7 +183,6 @@ ad_operator = "buggy.agents.standard.ad_operator:SUBAGENT_SPEC"
 postexploit = "buggy.agents.standard.postexploit:SUBAGENT_SPEC"
 phisher = "buggy.agents.standard.phisher:SUBAGENT_SPEC"
 blue_cell = "buggy.agents.standard.blue_cell:SUBAGENT_SPEC"
-supply_chain_operator = "buggy.agents.standard.supply_chain_operator:SUBAGENT_SPEC"
 # Plugins bundle — vulnresearch family, attached to the ``vulnresearch`` main agent.
 scanner = "buggy.agents.plugins.scanner:SUBAGENT_SPEC"
 detector = "buggy.agents.plugins.detector:SUBAGENT_SPEC"

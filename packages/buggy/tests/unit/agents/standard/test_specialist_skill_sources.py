@@ -7,7 +7,6 @@ import pytest
 from buggy.agents.standard import (
     asvs_assessor,
     phisher,
-    supply_chain_operator,
 )
 from buggy.backends import SKILLS_LOCAL_PATH
 
@@ -19,7 +18,6 @@ _SKILLS_ROOT = Path(SKILLS_LOCAL_PATH)
 _EXPLICIT_SOURCE_AGENTS = [
     (asvs_assessor, "/skills/standard/analyst/"),
     (phisher, "/skills/standard/phisher/"),
-    (supply_chain_operator, "/skills/standard/supply-chain/"),
 ]
 
 # Agents whose role name does NOT match a /skills/standard/<role>/ dir, so
@@ -29,7 +27,6 @@ _EXPLICIT_SOURCE_AGENTS = [
 # its role name and skill dir intentionally coincide.
 _ROLE_NE_DIR_AGENTS = [
     asvs_assessor,
-    supply_chain_operator,
 ]
 
 

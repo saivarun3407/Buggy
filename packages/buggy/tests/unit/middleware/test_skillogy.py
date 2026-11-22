@@ -111,7 +111,6 @@ class TestPhaseForRoleMapping:
             "asvs_assessor",
             "contract_auditor",
             "reverser",
-            "supply_chain_operator",
             "blue_cell",
             "soundwave",
             "buggy",

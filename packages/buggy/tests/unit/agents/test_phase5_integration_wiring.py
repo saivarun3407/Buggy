@@ -110,11 +110,6 @@ _STANDARD_FACTORIES = [
     ("cloud_hunter", "buggy.agents.standard.cloud_hunter", "create_cloud_hunter_agent"),
     ("ad_operator", "buggy.agents.standard.ad_operator", "create_ad_operator_agent"),
     ("phisher", "buggy.agents.standard.phisher", "create_phisher_agent"),
-    (
-        "supply_chain_operator",
-        "buggy.agents.standard.supply_chain_operator",
-        "create_supply_chain_operator_agent",
-    ),
 ]
 
 

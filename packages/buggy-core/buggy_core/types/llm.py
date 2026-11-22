@@ -539,7 +539,6 @@ AGENT_TIERS: dict[str, Tier] = {
     "cloud_hunter": Tier.MID,
     "reverser": Tier.MID,
     "phisher": Tier.MID,
-    "supply_chain_operator": Tier.MID,
     # Bounty bundle (fork-only). HIGH for the high-payout chained-logic
     # specialists (account takeover, multi-step business-logic abuse,
     # SSRF → cloud pivot); MID for the structured-audit / enumeration
@@ -583,7 +582,6 @@ AGENT_TEMPERATURES: dict[str, float] = {
     "vulnresearch": 0.4,
     "recon": 0.3,
     "phisher": 0.4,
-    "supply_chain_operator": 0.2,
     # Bounty bundle (fork-only). Low temperatures for deterministic
     # audit / enumeration; slightly higher where creative chaining helps
     # (business-logic abuse, LLM prompt-injection). ``scout`` drives the

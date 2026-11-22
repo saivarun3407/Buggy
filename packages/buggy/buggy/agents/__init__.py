@@ -20,7 +20,6 @@ from buggy.agents.standard.postexploit import create_postexploit_agent
 from buggy.agents.standard.recon import create_recon_agent
 from buggy.agents.standard.reverser import create_reverser_agent
 from buggy.agents.standard.soundwave import create_soundwave_agent
-from buggy.agents.standard.supply_chain_operator import create_supply_chain_operator_agent
 
 __all__ = [
     "create_recon_agent",
@@ -37,7 +36,6 @@ __all__ = [
     "create_phisher_agent",
     "create_blue_cell_agent",
     # WAVE-3 specialists — lit up over the pre-existing skill trees.
-    "create_supply_chain_operator_agent",
     # Vulnresearch pipeline (five-stage modular)
     "create_scanner_agent",
     "create_detector_agent",
