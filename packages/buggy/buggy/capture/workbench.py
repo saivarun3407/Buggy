@@ -419,14 +419,17 @@ class Workbench:
             )
             manifest = json.loads(files["MANIFEST.json"])
             bundle_id = "ev-" + str(manifest.get("manifest_sha256") or "")[:16]
-            folder = self.roots.audit / name / "evidence" / bundle_id
+            # Everything about one finding sits in one folder: its logs here, its
+            # proof video and screenshots next to them. Loose captures get their own.
+            relative = f"{finding_id}/logs" if finding_id else bundle_id
+            folder = self.roots.audit / name / "evidence" / relative
             folder.mkdir(parents=True, exist_ok=True)
             for filename, content in files.items():
                 (folder / filename).write_bytes(content)
             return {
                 "ok": True,
                 "bundle_id": bundle_id,
-                "written_to": f"audit/{name}/evidence/{bundle_id}/",
+                "written_to": f"audit/{name}/evidence/{relative}/",
                 "capture_ids": ids,
                 "files": {
                     filename: files[filename].decode("utf-8", "replace")

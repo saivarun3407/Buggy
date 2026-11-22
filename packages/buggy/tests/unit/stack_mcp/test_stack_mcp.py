@@ -369,7 +369,9 @@ def test_a_claim_becomes_a_finding_only_through_the_verifier(stack) -> None:
     bundle = _call(stack_mcp.evidence_export, finding_id=finding_id)
     assert bundle["ok"] and "curl" in bundle["files"]["reproduce.sh"]
     assert "ledger-excerpt.jsonl" not in bundle["files"]  # audit data stays with the operator
-    written = stack["audit"] / "acme" / "evidence" / bundle["bundle_id"]
+    # A finding's logs sit in the finding's own folder, next to its proof video.
+    written = stack["audit"] / "acme" / "evidence" / finding_id / "logs"
+    assert bundle["written_to"] == f"audit/acme/evidence/{finding_id}/logs/"
     assert (written / "evidence.har").is_file() and (written / "ledger-excerpt.jsonl").is_file()
 
 

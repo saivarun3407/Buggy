@@ -1396,6 +1396,81 @@ def write_findings_reports(
     return {"written": written, "errors": errors} if errors else {"written": written}
 
 
+WORD_REPORT = "report.docx"
+MAX_PROOF_VIDEOS = 40
+
+
+def _browser(tool: str, engagement: str, **arguments: Any) -> dict[str, Any]:
+    from buggy.pipeline.mcp_client import call_mcp_sync, server_configured  # noqa: PLC0415
+
+    if not server_configured("browser"):
+        return {"ok": False, "error": "NO_BROWSER", "detail": "no browser server here"}
+    return call_mcp_sync("browser", tool, {"engagement": engagement, **arguments})
+
+
+def write_proof_and_word(
+    control: Path, audit: Path, engagement: str, result: dict[str, Any]
+) -> dict[str, Any]:
+    """For every proven finding: its logs, a video and screenshots; then the Word report.
+
+    Reads the ``report.json`` this run just wrote. Per finding the capture
+    server writes the log bundle (requests and responses, a curl script, the
+    ledger lines) and the browser records the recorded exchange as a video;
+    both land in ``audit/<engagement>/evidence/<finding-id>/``. The Word
+    report is built here from the same report, with the class table and the
+    not-tested list of this run, and the screenshots embedded. Nothing in this
+    step sends a request to the target.
+    """
+    from buggy.findings.docx import to_docx  # noqa: PLC0415
+    from buggy.findings.proof_page import proof_html  # noqa: PLC0415
+
+    out: dict[str, Any] = {"videos": 0, "logs": 0, "word": "", "errors": []}
+    directory = control / engagement
+    try:
+        report = json.loads((directory / "report.json").read_text(encoding="utf-8"))
+    except (OSError, ValueError) as exc:
+        out["errors"].append(f"report.json: {exc}")
+        return out
+    if not isinstance(report, dict):
+        out["errors"].append("report.json: not a report")
+        return out
+    report["coverage"] = list(result.get("coverage") or [])
+    report["not_tested"] = list(result.get("not_tested") or [])
+    images: dict[str, bytes] = {}
+    videos: dict[str, str] = {}
+    findings = [f for f in report.get("findings") or [] if isinstance(f, dict) and f.get("id")]
+    for finding in findings[:MAX_PROOF_VIDEOS]:
+        finding_id = str(finding["id"])
+        folder = f"audit/{engagement}/evidence/{finding_id}"
+        logs = _capture("evidence_export", engagement, finding_id=finding_id)
+        if logs.get("ok"):
+            out["logs"] += 1
+            finding["evidence_folder"] = f"~/.buggy/{folder}/"
+        else:
+            out["errors"].append(f"{finding_id} logs: {logs.get('detail') or logs.get('error')}")
+        html = proof_html(
+            finding, engagement=engagement, generated_at=str(report.get("generated_at") or "")
+        )
+        recorded = _browser("proof_record", engagement, finding_id=finding_id, html=html)
+        if not recorded.get("ok"):
+            out["errors"].append(
+                f"{finding_id} video: {recorded.get('detail') or recorded.get('error')}"
+            )
+            continue
+        out["videos"] += 1
+        videos[finding_id] = f"~/.buggy/audit/{engagement}/{recorded.get('video')}"
+        try:
+            images[finding_id] = (audit / engagement / str(recorded.get("screenshot"))).read_bytes()
+        except OSError:
+            pass  # the report names the video; a missing screenshot does not stop it
+    try:
+        (directory / WORD_REPORT).write_bytes(to_docx(report, images=images, videos=videos))
+        out["word"] = WORD_REPORT
+    except (OSError, ValueError) as exc:
+        out["errors"].append(f"{WORD_REPORT}: {exc}")
+    return out
+
+
 def _notify(event_builder: str, *args: Any) -> None:
     """Tell the operator (if a webhook is configured). Never raises, never blocks long."""
     try:
@@ -2475,6 +2550,23 @@ def main(argv: list[str] | None = None) -> int:  # noqa: PLR0911, PLR0912, PLR09
             )
         for problem in reports.get("errors", []):
             print(f"  findings report  not written: {problem}", file=sys.stderr)
+        if "report.json" in reports["written"]:
+            proof = write_proof_and_word(
+                control, _paths.audit_root(getattr(args, "audit_root", None)), slug, result
+            )
+            if proof["word"]:
+                print(
+                    f"  Word report      {_host_path(control / slug / WORD_REPORT)}",
+                    file=sys.stderr,
+                )
+            if proof["logs"] or proof["videos"]:
+                print(
+                    f"  proof            {proof['videos']} videos and {proof['logs']} log bundles "
+                    f"under ~/.buggy/audit/{slug}/evidence/<finding-id>/",
+                    file=sys.stderr,
+                )
+            for problem in proof["errors"][:10]:
+                print(f"  proof            {problem}", file=sys.stderr)
     if result.get("not_tested"):
         print("\n  not tested in this run", file=sys.stderr)
         for item in result["not_tested"]:
