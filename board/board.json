@@ -1,5 +1,5 @@
 {
- "updated": "2026-11-22 17:17 UTC",
+ "updated": "2026-11-22 18:01 UTC",
  "columns": [
   "backlog",
   "ready",
@@ -964,8 +964,8 @@
    "agent": "",
    "branch": "",
    "commit": "3942310",
-   "tests": "1814 tests in the affected suites",
-   "note": "tested at the gateway: email verification and a site with no sign-up; not yet run on a live site",
+   "tests": " the your-turn message printed on both practice apps (neither has a sign-up Buggy can use); creating accounts end to end is unit-tested only",
+   "note": "live",
    "order": 47
   },
   {
@@ -990,12 +990,12 @@
    "lane": "C",
    "title": "The agent builds its own checks when no tool fits",
    "depends": [],
-   "status": "review",
+   "status": "done",
    "agent": "",
    "branch": "",
    "commit": "9fcd55a",
-   "tests": "10409 tests pass",
-   "note": "merged; a check is data run through the gateway, re-proven by running it again; live agent run pending",
+   "tests": " 7 of 23 proven findings came from checks the agent built itself; all re-proven by running the check again",
+   "note": "live on the practice apps",
    "order": 49
   },
   {
@@ -1004,12 +1004,12 @@
    "lane": "F",
    "title": "The agent can look things up on the public internet",
    "depends": [],
-   "status": "review",
+   "status": "done",
    "agent": "",
    "branch": "",
    "commit": "9fcd55a",
    "tests": "10409 tests pass",
-   "note": "merged; web search plus a guarded page fetcher; search flag confirmed with the CLI; live agent run pending",
+   "note": "merged and unit-tested; the live agent run did not fetch a page, so the fetcher has no live measurement yet",
    "order": 50
   }
  ]

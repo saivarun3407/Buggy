@@ -157,8 +157,8 @@ docker compose --profile operator run --rm operator buggy-cli hunt --resume <eng
 ## Limits
 
 - Usage counts against your own Claude plan; Buggy does not measure it.
-- The agent's quality on real programs has not been measured here. One
-  bounded run against the local practice apps is recorded in
+- The agent's quality on real programs has not been measured here. Two
+  bounded runs against the local practice apps are recorded in
   [findings.md](findings.md).
 - Buggy's role-specific sub-agents and skills are not used in this mode: one
   Claude Code agent works the queue.

@@ -565,15 +565,32 @@ Approving still happens with `buggy-cli approvals allow` or in the dashboard.
   login form), reflected XSS and command injection. The same run without
   accounts found none of them. It has not been run on a real program, and a
   single-page application gives the crawl much less to read.
-- **One agent run has been measured, and it was small.** On 2026-11-21
-  Claude Code ran the agent stage on the two local practice apps through the
-  agent bridge ([claude-code-agent.md](claude-code-agent.md)), capped at 45
-  tool calls: 115 seconds, the two findings of the probe sweep confirmed, one
-  held request left for the operator, and eight further observations (exposed
-  password hashes, a readable admin configuration, a confidential file) that
-  it captured but did not submit before the cap. Nothing has been measured on
-  a real program, and Buggy's built-in agents (which need a model key) have
-  not been run; the benchmark contract in `benchmark/RESULTS_POLICY.md` is
-  ready, the results are not.
+- **Two agent runs have been measured, both on the practice apps.** Claude
+  Code ran the agent stage through the agent bridge
+  ([claude-code-agent.md](claude-code-agent.md)).
+  - 2026-11-21, capped at 45 tool calls: 115 seconds, the two findings of the
+    probe sweep confirmed, one held request left for the operator, and eight
+    further observations it captured but did not submit before the cap.
+  - 2026-11-22, capped at 120 tool calls (it stopped at 99): 255 seconds. With
+    the 8 findings of the code stages the run ended at 23 proven findings, 20
+    graded valid and 3 held by the grader as scanner duplicates. Seven of the
+    23 came from checks the agent built itself as recipes (among them a login
+    bypass, a forged-token login, reading another user's basket, a password
+    change without the current password, and an order with a negative
+    quantity). Finalizing took 233 seconds and wrote 20 videos, 20 log
+    bundles and the Word report; the 3 held findings got no evidence. No web
+    page fetch was recorded in this run, so `research_fetch` is covered by
+    unit tests only.
+  - Side effects of the second run, on the practice app: about 14 throwaway
+    accounts registered (two with an admin role) and two basket items with a
+    negative quantity. Lab mode has approvals off. On a real program each of
+    those requests is held for your approval first.
+  - Account creation printed the "your turn" message on these apps (one has
+    no sign-up, the other's sign-up is drawn by JavaScript); creating accounts
+    end to end is covered by unit tests only.
+
+  Nothing has been measured on a real program, and Buggy's built-in agents
+  (which need a model key) have not been run; the benchmark contract in
+  `benchmark/RESULTS_POLICY.md` is ready, the results are not.
 - Scanner hits with no recognisable class are not queued; `hunt` prints how
   many were left out.

@@ -16,6 +16,8 @@ from __future__ import annotations
 
 import pytest
 
+from buggy_core.utils.engagement_scope import reset_active_engagement, set_active_engagement
+
 
 @pytest.fixture(autouse=True)
 def _lab_scope_defaults(monkeypatch: pytest.MonkeyPatch, tmp_path_factory: pytest.TempPathFactory):
@@ -27,3 +29,16 @@ def _lab_scope_defaults(monkeypatch: pytest.MonkeyPatch, tmp_path_factory: pytes
     monkeypatch.delenv("BUGGY_EGRESS_GUARD_URL", raising=False)
     monkeypatch.delenv("EGRESS_GUARD_TOKEN", raising=False)
     yield
+
+
+@pytest.fixture(autouse=True)
+def _no_engagement_left_over():
+    """Each test starts with no active engagement and cannot leave one behind.
+
+    The label lives in a context variable; a test that sets it (the engagement
+    middleware does) would otherwise hand it to whichever test runs next on
+    the same worker.
+    """
+    token = set_active_engagement(None)
+    yield
+    reset_active_engagement(token)
