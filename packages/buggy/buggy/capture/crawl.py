@@ -342,6 +342,75 @@ def _json_strings(document: Any, depth: int = 0) -> list[str]:
     return out
 
 
+#: Most identifiers :func:`json_ids` returns for one JSON answer.
+MAX_JSON_IDS = 200
+_ID_VALUE = re.compile(
+    r"^(?:\d{1,19}|[0-9a-f]{24}|[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})$",
+    re.IGNORECASE,
+)
+
+
+def _id_key(key: str) -> bool:
+    """Whether a JSON key names an identifier: ``id``, ``uuid``, ``bid``, ``user_id``, ``UserId``."""
+    low = key.lower()
+    if low in ("id", "uuid", "guid") or (len(low) == 3 and low.endswith("id") and low.isalpha()):
+        return True
+    return low.endswith(("_id", "-id")) or (len(key) > 2 and key.endswith(("Id", "ID")))
+
+
+def _id_value(value: Any) -> str:
+    if isinstance(value, bool):
+        return ""
+    if isinstance(value, int):
+        return str(value) if value >= 0 else ""
+    if isinstance(value, str) and _ID_VALUE.match(value.strip()):
+        return value.strip()
+    return ""
+
+
+def json_ids(
+    document: Any, markers: Any = (), *, context: Any = (), limit: int = MAX_JSON_IDS
+) -> list[dict[str, Any]]:
+    """The identifiers in a JSON answer: ``[{"key", "value", "own", "context"}]``.
+
+    An identifier is a number, a UUID or a 24-hex value under an id-like key
+    (``id``, ``uuid``, ``bid``, ``user_id``, ``basketId``). It is ``own`` when
+    the JSON object that holds it also holds one of ``markers`` as a value
+    (the account's email or user name): that object is the account's own
+    record. ``context`` is the words around it: the keys it sits under and
+    the words the caller passes (the path of the URL that answered).
+    """
+    wanted = {str(m).strip().lower() for m in markers or () if str(m).strip()}
+    base = [str(word).lower() for word in context or () if str(word)]
+    out: list[dict[str, Any]] = []
+    seen: set[tuple[str, str, bool]] = set()
+
+    def visit(node: Any, parents: list[str], depth: int) -> None:
+        if depth > MAX_JSON_DEPTH or len(out) >= limit:
+            return
+        if isinstance(node, list):
+            for child in node[:500]:
+                visit(child, parents, depth + 1)
+            return
+        if not isinstance(node, dict):
+            return
+        own = bool(wanted) and any(
+            isinstance(v, str) and v.strip().lower() in wanted for v in node.values()
+        )
+        for key, value in node.items():
+            name = str(key)
+            found = _id_value(value) if _id_key(name) else ""
+            if found and (name, found, own) not in seen and len(out) < limit:
+                seen.add((name, found, own))
+                out.append({"key": name, "value": found, "own": own, "context": parents + base})
+        for key, value in node.items():
+            if isinstance(value, (dict, list)):
+                visit(value, [*parents, str(key).lower()][-4:], depth + 1)
+
+    visit(document, [], 0)
+    return out
+
+
 class _Crawl:
     def __init__(
         self,
@@ -561,6 +630,7 @@ __all__ = [
     "crawl",
     "form_changes_state",
     "form_destructive_reason",
+    "json_ids",
     "never_request_reason",
     "normalize",
     "template_of",

@@ -59,7 +59,7 @@ class TestSwitch:
         scope = hunt.build_scope(parsed)
         assert scope["enforcement_extra"]["account_creation"]["enabled"] is True
         shown = "\n".join(hunt._describe(scope, "enforce"))  # noqa: SLF001
-        assert "Register up to 2 test accounts (emails like me+{tag}@corp.example)." in shown
+        assert "Register up to 3 test accounts (emails like me+{tag}@corp.example)." in shown
         plain = hunt.build_scope(hunt._build_parser().parse_args(["https://app.acme.test"]))  # noqa: SLF001
         assert "account_creation" not in plain["enforcement_extra"]
         without = "\n".join(hunt._describe(plain, "enforce"))  # noqa: SLF001
@@ -142,6 +142,30 @@ class TestStage:
             }
         ]
         assert "test accounts    created auto1; reused auto2" in capsys.readouterr().err
+        # No API sign-in surface in these records: an empty one is passed along.
+        assert json.loads(asked[0]["api_surface_json"])["login"] == []
+
+    def test_a_single_page_app_gets_its_api_sign_in_endpoints(self, monkeypatch) -> None:
+        asked: list[dict] = []
+
+        def capture(_tool: str, _engagement: str, **arguments) -> dict:
+            asked.append(arguments)
+            return {"created": ["auto1"], "reused": [], "failed": []}
+
+        records = {
+            **RECORDS,
+            "auth_surface": [
+                {"value": "https://app.acme.test/rest/user/login", "attrs": {"kind": "login"}}
+            ],
+            "endpoint": [{"value": "https://app.acme.test/api/Users"}],
+            "api_base": [{"value": "https://app.acme.test/api"}],
+        }
+        monkeypatch.setattr(hunt, "_capture", capture)
+        assert hunt.run_account_creation("acme", records)["ok"] is True
+        surface = json.loads(asked[0]["api_surface_json"])
+        assert surface["signup"] == ["https://app.acme.test/api/Users"]
+        assert surface["login"] == ["https://app.acme.test/rest/user/login"]
+        assert surface["api_bases"] == ["https://app.acme.test/api"]
 
     def test_a_refusal_says_why_and_what_to_do(self, monkeypatch, capsys) -> None:
         answer = {

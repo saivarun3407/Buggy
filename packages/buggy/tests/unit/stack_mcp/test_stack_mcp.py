@@ -304,11 +304,13 @@ def test_every_capture_server_tool_has_an_agent_wrapper_and_no_actor_argument() 
     wrapped = {t.name: t for t in stack_mcp.ALL_STACK_MCP_TOOLS}
     # candidates_add is used by the recon stage, owners_infer and accounts_provision by
     # the hunt command (operator side), not by agents. accounts_provision creates accounts
-    # on the target, which an agent must never do.
+    # on the target, which an agent must never do. user_walk is the hunt command's walk as
+    # each test account; an agent crawls with surface_crawl.
     for name in set(capture_server.TOOL_NAMES) - {
         "candidates_add",
         "owners_infer",
         "accounts_provision",
+        "user_walk",
     }:
         assert name in wrapped, f"{name} has no agent wrapper"
     for name, tool in wrapped.items():

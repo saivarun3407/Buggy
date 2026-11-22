@@ -235,9 +235,9 @@ class TestFraming:
         assert [s["params"] for s in framed] == [
             {"url": "https://a.test/account/settings"},
             {"url": "https://a.test/admin"},
-            {"url": "https://a.test/comments"},
             {"url": "https://a.test/profile"},
         ]
+        # /comments is only where a form is sent: an action URL is never framed.
         assert framed[0]["why"] == "account page"
 
     def test_pages_are_capped(self) -> None:

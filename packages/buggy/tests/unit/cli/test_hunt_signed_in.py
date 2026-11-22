@@ -60,13 +60,13 @@ class Server:
         self.calls.append((tool, a))
         if tool == "identities_list":
             return {"ok": True, "identities": self.identities}
-        if tool == "surface_crawl":
+        if tool in ("surface_crawl", "user_walk"):
             return CRAWLS.get(a["identity"], {"error": "LOGIN_FAILED", "detail": "login failed"})
         if tool == "probe_run":
             params = json.loads(a["params_json"])
             if params.get("method", "GET") != "GET":
                 return {"status": "refused", "code": "APPROVAL_REQUIRED", "request_id": "apr-1"}
-            hit = (a["probe"], params["parameter"]) in self.positive
+            hit = (a["probe"], params.get("parameter")) in self.positive
             out = {"status": "completed", "vulnerable": hit}
             return {**out, "finding_id": f"F-{a['probe']}-{params['parameter']}"} if hit else out
         if tool == "owners_infer":
@@ -108,12 +108,16 @@ def test_each_account_is_crawled_and_only_new_inputs_are_probed_as_that_account(
 ) -> None:
     server = use(monkeypatch, Server())
     out = hunt.run_signed_in("acme", RECORDS)
-    crawls = [a for tool, a in server.calls if tool == "surface_crawl"]
+    crawls = [a for tool, a in server.calls if tool == "user_walk"]
     assert [c["identity"] for c in crawls] == ["alice", "bob"]
     assert json.loads(crawls[0]["seeds_json"]) == [APP]
     runs = server.probe_runs()
     assert runs and all(params["identity"] == "alice" for _probe, params in runs)
-    probed = {(params["url"].partition("?")[0], params["parameter"]) for _p, params in runs}
+    probed = {
+        (params["url"].partition("?")[0], params["parameter"])
+        for _p, params in runs
+        if "parameter" in params  # a page-level check (clickjacking) has no parameter
+    }
     # Recon already knew ?q= on /search; bob's crawl added nothing alice's had not.
     assert (f"{APP}/search", "q") not in probed
     assert {(f"{APP}/invoice", "id"), (f"{APP}/lookup", "host"), (f"{APP}/lookup", "go")} <= probed
@@ -193,7 +197,7 @@ def test_an_account_that_cannot_sign_in_is_named_and_the_rest_continue(monkeypat
 def test_at_most_three_accounts_are_used(monkeypatch) -> None:
     server = use(monkeypatch, Server(identities=("alice", "bob", "alice", "bob", "alice")))
     hunt.run_signed_in("acme", RECORDS)
-    assert len([1 for tool, _a in server.calls if tool == "surface_crawl"]) == hunt.MAX_ACCOUNTS
+    assert len([1 for tool, _a in server.calls if tool == "user_walk"]) == hunt.MAX_ACCOUNTS
 
 
 def test_the_stage_prints_what_it_did_and_the_result_has_counts_only(monkeypatch, capsys) -> None:
@@ -211,3 +215,54 @@ def test_the_stage_prints_what_it_did_and_the_result_has_counts_only(monkeypatch
     assert section["ran"] is True and section["probes"]["verified"] == 1
     assert "findings" not in section["inferred"] and "findings" not in section["probes"]
     assert hunt._signed_in_stage(argparse.Namespace(no_probes=True), "acme", RECORDS) is None  # noqa: SLF001
+
+
+def test_the_walk_gets_the_api_from_recon_and_owned_objects_need_no_marker(monkeypatch) -> None:
+    """A single-page app: API endpoints and templates go to the walk; what an account
+    reached with its own id is compared by content, even for an account without markers."""
+    basket = f"{APP}/rest/basket/7"
+    records = {
+        **RECORDS,
+        "endpoint": [{"value": f"{APP}/api/Products"}, {"value": f"{APP}/rest/basket/{{id}}"}],
+    }
+    walks = {
+        "alice": {**CRAWLS["alice"], "owned": [], "filled": []},
+        "bob": {
+            **CRAWLS["bob"],
+            "urls": [*CRAWLS["bob"]["urls"], basket],
+            "owned": [basket],
+            "filled": [{"template": f"{APP}/rest/basket/{{id}}", "url": basket, "status": 200}],
+        },
+    }
+    calls: list[tuple[str, dict]] = []
+
+    def server(tool: str, _engagement: str, **a) -> dict:
+        calls.append((tool, a))
+        if tool == "identities_list":
+            return {"ok": True, "identities": [{"name": "alice"}, {"name": "bob"}]}
+        if tool == "user_walk":
+            return walks[a["identity"]]
+        if tool == "owners_infer":
+            assert json.loads(a["owned_json"]) == {"alice": [], "bob": [basket]}
+            owners = {f"{APP}/orders/2002": "bob", basket: "bob"}
+            return {"owners": owners, "owned": {basket: "bob"},
+                    "identities_without_markers": ["bob"]}  # fmt: skip
+        if tool == "authz_matrix_run":
+            return {"verdicts": {basket: {"verdict": "broken_access"}}, "queue": {"ids": []}}
+        if tool == "probe_run":
+            return {"status": "completed", "vulnerable": False}
+        raise AssertionError(tool)
+
+    monkeypatch.setattr(hunt, "_capture", server)
+    out = hunt.run_signed_in("acme", records)
+    first = next(a for tool, a in calls if tool == "user_walk")
+    assert json.loads(first["seeds_json"]) == [APP, f"{APP}/api/Products"]
+    assert json.loads(first["templates_json"]) == [f"{APP}/rest/basket/{{id}}"]
+    assert out["api_endpoints"] == 1 and out["templates"] == 1
+    (matrix,) = [a for tool, a in calls if tool == "authz_matrix_run"]
+    # Bob has no markers: his inferred order is not asked for, his own basket is,
+    # and it is not judged as an inferred object.
+    assert json.loads(matrix["urls_json"]) == [basket]
+    assert json.loads(matrix["inferred_json"]) == []
+    assert out["inferred"]["owned"] == 1 and out["inferred"]["broken_access"] == 1
+    assert out["accounts"][1]["owned"] == 1 and out["accounts"][1]["filled_answered"] == 1

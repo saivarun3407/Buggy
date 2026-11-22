@@ -749,7 +749,14 @@ class TestInferOwners:
         assert list(first["owners"]) == sorted(first["owners"])
 
     def test_empty_and_odd_input(self) -> None:
-        empty = {"owners": {}, "shared": [], "per_identity": {}, "considered": 0, "shared_total": 0}
+        empty = {
+            "owners": {},
+            "owned": {},
+            "shared": [],
+            "per_identity": {},
+            "considered": 0,
+            "shared_total": 0,
+        }
         assert infer_owners({}) == empty
         assert infer_owners({"alice": []}) == {**empty, "per_identity": {"alice": 0}}
         odd: dict[str, Any] = {

@@ -102,15 +102,15 @@ these steps after the probe sweep. None of them uses a model.
 
 | Step | What happens |
 |---|---|
-| Signed-in crawl | For each account (three at most) the gateway signs in and walks the application with up to 120 GET requests. Links that could sign out or change something are never followed; forms are recorded, never submitted. |
+| Signed-in walk | For each account (three at most) the gateway signs in and the account uses the application like a person would, with up to 150 GET requests (the user walk, below). Links that could sign out or change something are never followed; forms are recorded, never submitted. |
 | Signed-in probes | The inputs found there that recon had not seen are probed as that account with the read-only probes. Positives are re-proven as the same account and graded. |
 | Write operations | Forms that post, and the write operations of the API description, become state-changing probe runs: a negative or zero business quantity, a privileged field the client should not set, injection in a body or form field, a shell probe on a field that names a host or command, stored and blind XSS in text fields, and one CSRF check per operation as that account. Each run is handed to the gateway and **waits for your approval**; `hunt --resume` sends the ones you allowed. 15 runs at most per run (`--state-probe-budget`). |
-| Owned objects | An object URL only one account reached is asked for as the other accounts. It is reported only when the owner's `markers` come back to a non-owner, so declare markers. |
+| Owned objects | An object URL only one account reached is asked for as the other accounts. It is reported only when the owner's `markers` come back to a non-owner, so declare markers. An object the account reached with its own id (below) needs no marker: the answers are compared by content. |
 
 `hunt` prints one block per step and lists, at the end, what was not tested
-and why. Limits: the crawl reads HTML links, forms and URLs inside JSON, so a
-single-page application that builds its requests in script shows it little;
-there, declare `owner_of` objects and let the agent stage do the rest. Field
+and why. Limits: the walk only knows the API endpoints recon found (in
+scripts, API descriptions and profiles); a request a script builds in a way
+recon cannot read is not made. Field
 values for write operations come from the API description or the form, so an
 operation that needs a specific valid body may be refused by the target
 before the check means anything.
@@ -344,6 +344,28 @@ one URL (out of scope, internal address) is listed and the crawl goes on; a
 refusal that would repeat for every request (no enforced scope, a failed
 login) stops it, with `truncated: true`.
 
+**User walk.** A single-page application builds its pages in the browser from
+JSON, so the HTML crawl sees little of it. The `hunt` command therefore uses
+the user walk (`user_walk`, `buggy/capture/journey.py`), once per account:
+
+1. It walks like the crawl, starting from the live services and from every
+   concrete API `GET` endpoint recon found (`endpoint`, `api_profile`,
+   `api_operation`). Endpoints recon saw asking for credentials come first.
+2. Then it fills the endpoints recon knows only as templates
+   (`/rest/basket/{id}`, `/api/Users/{id}`) with ids the account itself
+   received: its own user id and basket id (from its sign-in answer, or from
+   an answer that holds its email), then ids listed in answers it got. Two
+   ids per template at most.
+
+Same rules as the crawl: `GET` only, never a URL the crawl must not request,
+same hosts, the gateway's scope check and rate limit, 150 requests per
+account (40 of them kept for the templates). The result is the crawl's, plus
+`filled` (the templated URLs and their status), `own_data` (answers that held
+the account's marker) and `owned` (objects reached with the account's own id
+for that kind of object, answered 2xx). `owners_infer` takes `owned` as
+evidence of ownership: those objects are swapped between accounts in the
+access-control matrix and judged by content, without a marker.
+
 ## Accounts Buggy creates itself
 
 **When Buggy needs you.** Buggy registers and signs in by itself wherever it
@@ -374,14 +396,15 @@ with a block under `machine_enforcement`:
 "account_creation": {
   "enabled": true,
   "email_template": "qa+{tag}@yourcompany.example",
-  "max_accounts": 2
+  "max_accounts": 3
 }
 ```
 
 The `hunt` command will write this block from a flag; it can also be added to
 `control/<engagement>/roe.json` by hand. `email_template` must contain `{tag}`
 and look like an email address; Buggy replaces `{tag}` with a random string so
-each account gets its own address. `max_accounts` is 1 to 3 (default 2). The
+each account gets its own address. `max_accounts` is 1 to 3 (default 2; `hunt
+--create-accounts` writes 3). The
 written switch is the approval: it covers only the registration and login
 requests of the accounts Buggy creates, and each such request is recorded as an
 account-creation request (`approval_id = "account_creation"`), with its body and
@@ -403,6 +426,24 @@ cookie, or a bearer token from the login response). The accounts are named
 email and username become the account's markers automatically, so the
 access-control matrix can tell their data apart. No password, email, cookie or
 token is ever returned to an agent or written to the ledger.
+
+**Applications without a sign-up form.** A single-page application (OWASP
+Juice Shop, for example) has no HTML form to find. Then Buggy uses what recon
+found. Sign-up: a documented API operation first; else an endpoint under an
+API root whose path ends in `/register` or `/signup`, then `/users` or
+`/accounts`; then a sign-up page recon named. Login: an API endpoint ending in
+`/login`, `/signin`, `/authenticate` or `/session` (`/rest/user/login`,
+`/api/login`, `/auth/login`). The sign-up body is JSON: the email, a strong
+password, the usual confirmation fields (`passwordRepeat`,
+`password_confirmation`, `confirmPassword`, `repeatPassword`), a user name and
+a name. A role, admin or permission field is never sent. A sign-up counts only
+when it answers 2xx and not with an HTML page. The login body is the email and
+the password; the token is taken from the JSON answer (`token`,
+`access_token`, `authentication.token`, `jwt`, `id_token`, also nested) and
+becomes `Authorization: Bearer <token>`, or a session cookie is used. At most
+three endpoints of each kind are tried, one request each; once one works, the
+next accounts use it. The ids the answers give the account as its own (its
+user id, its basket id) are kept in the accounts file for the user walk.
 
 **What stops it, with a named reason, rather than guessing:** a CAPTCHA on the
 sign-up page (`CAPTCHA`), a page offering only single sign-on with no password

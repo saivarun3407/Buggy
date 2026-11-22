@@ -195,9 +195,8 @@ def _form_writes(form: Any) -> bool:
 def _frame_steps(records: dict[str, list[dict[str, Any]]]) -> list[dict[str, Any]]:
     """One ``clickjacking`` run per page worth framing: account and admin pages first.
 
-    Pages come from ``auth_surface`` records (kind account or admin), from
-    crawled ``url`` records that carry a form that posts, and from the action
-    URL of a state-changing form's fields (often the same page).
+    Pages come from ``auth_surface`` records (kind account or admin) and from
+    crawled ``url`` records that carry a form that posts.
     """
     pages: dict[str, str] = {}
 
@@ -219,9 +218,8 @@ def _frame_steps(records: dict[str, list[dict[str, Any]]]) -> list[dict[str, Any
         listed = raw if isinstance(raw, list) else []
         if any(_form_writes(form) for form in listed):
             forms.append((str(record.get("value") or ""), "page with a form that posts"))
-    for (method, url, kind), _fields in _body_operations(records.get("parameter", [])).items():
-        if kind == "form":
-            forms.append((url, f"action of a form sent with {method}"))
+    # A form's action URL is never framed: it is where the form is sent, and a
+    # GET to it can act. Only the page that shows the form is requested.
     for url, why in sorted(surfaces) + sorted(forms):
         add(url, why)
     return [

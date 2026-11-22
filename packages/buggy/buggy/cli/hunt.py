@@ -391,7 +391,8 @@ _PATTERN_RE = re.compile(
 _EMAIL_TEMPLATE = re.compile(r"^[^@\s{}]*\{tag\}[^@\s{}]*@[A-Za-z0-9.-]+\.[A-Za-z]{2,}$")
 #: The reserved test domain used for accounts on a training target (``--lab``).
 LAB_ACCOUNT_EMAIL = "buggy+{tag}@example.test"
-MAX_CREATED_ACCOUNTS = 2
+#: How many accounts Buggy creates when allowed (the most the scope accepts).
+MAX_CREATED_ACCOUNTS = 3
 
 
 def _account_creation(args: argparse.Namespace) -> dict[str, Any] | None:
@@ -971,10 +972,10 @@ def _prove(engagement: str, finding_id: str, known: str) -> tuple[str, str]:
     return status, str(grade.get("decision") or "")
 
 
-#: Signed-in testing: how many declared accounts are used, and each one's crawl budget.
+#: Signed-in testing: how many declared accounts are used, and each one's walk budget.
 MAX_ACCOUNTS = 3
 MAX_SEEDS = 10
-CRAWL_REQUESTS = 120
+CRAWL_REQUESTS = 150
 SOURCE_CRAWL = "surface_crawl"
 
 
@@ -1096,16 +1097,20 @@ def run_signed_in(
 ) -> dict[str, Any]:
     """Test what is behind the login, as the operator's declared test accounts. No LLM.
 
-    For each account (three at most) the gateway signs in and the crawler
-    walks the application with GET requests, never following a link that
-    could sign out or change something. The inputs found there that recon did
-    not know are probed as that account (read-only probes), and the write
-    operations found there are handed to the gateway as state-changing runs,
-    which wait for approval. What each account could reach is then compared:
-    an object only one account reached is asked for as the others, and counts
-    as broken access only when the owner's own marker comes back to a
-    non-owner. Without declared accounts nothing is sent.
+    For each account (three at most) the gateway signs in and the account
+    uses the application like a person would (the user walk, GET only): the
+    pages, the API endpoints recon found, and the templated endpoints filled
+    with ids the account itself received (its user id, its basket id). It
+    never follows a link that could sign out or change something. The inputs
+    found there that recon did not know are probed as that account (read-only
+    probes), and the write operations found there are handed to the gateway as
+    state-changing runs, which wait for approval. What each account could
+    reach is then compared: an object only one account reached is asked for as
+    the others, and counts as broken access only when the owner's own marker
+    comes back to a non-owner; an object the account reached with its own id
+    is compared by content. Without declared accounts nothing is sent.
     """
+    from buggy.capture.journey import walk_plan  # noqa: PLC0415
     from buggy.pipeline import sweep  # noqa: PLC0415
 
     out: dict[str, Any] = {
@@ -1114,10 +1119,13 @@ def run_signed_in(
         "accounts": [],
         "urls_reached": 0,
         "new_inputs": 0,
+        "api_endpoints": 0,
+        "templates": 0,
         "probes": _empty_counts(),
         "state": _empty_counts(),
-        "inferred": {"objects": 0, "broken_access": 0, "enforced": 0, "inconclusive": 0,
-                     "verified": 0, "submit": 0, "findings": [], "without_markers": []},
+        "inferred": {"objects": 0, "owned": 0, "broken_access": 0, "enforced": 0,
+                     "inconclusive": 0, "verified": 0, "submit": 0, "findings": [],
+                     "without_markers": []},
     }  # fmt: skip
     listed = _capture("identities_list", engagement)
     identities = [row for row in listed.get("identities") or [] if isinstance(row, dict)]
@@ -1132,17 +1140,22 @@ def run_signed_in(
         out["reason"] = "recon found no live service to start from"
         return out
 
+    plan = walk_plan(records, seeds)
+    out["api_endpoints"] = max(0, len(plan["seeds"]) - len(seeds))
+    out["templates"] = len(plan["templates"])
     known = {str(r.get("value")) for r in records.get("parameter", []) if r.get("value")}
     known_issues = _known_issues(records)
     reached: dict[str, list[str]] = {}
+    owned: dict[str, list[str]] = {}
     probe_budget = sweep.DEFAULT_BUDGET if budget is None else max(0, budget)
     write_budget = sweep.DEFAULT_STATE_BUDGET if state_budget is None else max(0, state_budget)
     for name in names:
         crawl = _capture(
-            "surface_crawl",
+            "user_walk",
             engagement,
-            seeds_json=json.dumps(seeds),
+            seeds_json=json.dumps(plan["seeds"] or seeds),
             identity=name,
+            templates_json=json.dumps(plan["templates"]),
             max_requests=CRAWL_REQUESTS,
         )
         urls = crawl.get("urls")
@@ -1156,6 +1169,8 @@ def run_signed_in(
             continue
         out["ran"] = True
         reached[name] = [u for u in urls if isinstance(u, str)]
+        owned[name] = [u for u in crawl.get("owned") or [] if isinstance(u, str)]
+        filled = [f for f in crawl.get("filled") or [] if isinstance(f, dict)]
         found, dropped = crawl_records(crawl)
         fresh = _new_parameters(found, known)
         out["accounts"].append(
@@ -1167,6 +1182,14 @@ def run_signed_in(
                 "new_inputs": len(fresh),
                 "forms_never_planned": dropped,
                 "truncated": bool(crawl.get("truncated")),
+                "filled": len(filled),
+                "filled_answered": sum(
+                    1
+                    for f in filled
+                    if isinstance(f.get("status"), int) and 200 <= f["status"] < 300
+                ),
+                "own_data": len(crawl.get("own_data") or []),
+                "owned": len(owned[name]),
             }
         )
         out["urls_reached"] += len(reached[name])
@@ -1185,35 +1208,55 @@ def run_signed_in(
         _add_counts(out["state"], done)
 
     if len(reached) >= 2:
-        _inferred_access(engagement, reached, known_issues, out["inferred"])
+        _inferred_access(engagement, reached, known_issues, out["inferred"], owned)
     if not out["ran"]:
         out["reason"] = "no declared account could be used (see the accounts list)"
     return out
 
 
 def _inferred_access(
-    engagement: str, reached: dict[str, list[str]], known: str, out: dict[str, Any]
+    engagement: str,
+    reached: dict[str, list[str]],
+    known: str,
+    out: dict[str, Any],
+    owned: dict[str, list[str]] | None = None,
 ) -> None:
-    """Compare what the accounts reached: objects only one of them saw, asked for as the others."""
-    inferred = _capture("owners_infer", engagement, reached_json=json.dumps(reached))
+    """Compare what the accounts reached: objects only one of them saw, asked for as the others.
+
+    ``owned`` lists, per account, the objects it reached with an id the target
+    gave it as its own (the user walk's ``owned``). Those are its own for sure:
+    they need no marker and are compared by content.
+    """
+    arguments: dict[str, Any] = {"reached_json": json.dumps(reached)}
+    if any(owned.values() if owned else ()):
+        arguments["owned_json"] = json.dumps(owned)
+    inferred = _capture("owners_infer", engagement, **arguments)
     owners = inferred.get("owners")
     out["without_markers"] = [str(n) for n in inferred.get("identities_without_markers") or []]
     if not isinstance(owners, dict) or not owners:
         return
+    raw_evidenced = inferred.get("owned")
+    evidenced = {str(u) for u in raw_evidenced} if isinstance(raw_evidenced, dict) else set()
     # An inferred object is only ever reported when its owner's marker leaks, so
     # objects of an account without markers would spend requests for nothing.
     unmarked = set(out["without_markers"])
-    urls = sorted(str(url) for url, owner in owners.items() if str(owner) not in unmarked)
-    urls = urls[:MAX_ACCESS_URLS]
+    first = sorted(str(url) for url in owners if str(url) in evidenced)
+    rest = sorted(
+        str(url)
+        for url, owner in owners.items()
+        if str(url) not in evidenced and str(owner) not in unmarked
+    )
+    urls = [*first, *rest][:MAX_ACCESS_URLS]
     if not urls:
         return
     owners = {url: str(owners[url]) for url in urls}
+    out["owned"] = len([url for url in urls if url in evidenced])
     result = _capture(
         "authz_matrix_run",
         engagement,
         urls_json=json.dumps(urls),
         owners_json=json.dumps(owners),
-        inferred_json=json.dumps(urls),
+        inferred_json=json.dumps([url for url in urls if url not in evidenced]),
         max_requests=ACCESS_MAX_REQUESTS,
     )
     verdicts = result.get("verdicts")
@@ -1920,11 +1963,15 @@ def run_account_creation(
     if not seeds:
         return {"ok": False, "enabled": True, "created": [], "reused": [], "failed": [],
                 "reason": "recon found no live service to look for a sign-up on"}  # fmt: skip
+    from buggy.capture.accounts import api_surface  # noqa: PLC0415
+
     result = _capture(
         "accounts_provision",
         engagement,
         seeds_json=json.dumps(seeds),
         api_operations_json=json.dumps(_write_operations(records)),
+        # A single-page application has no sign-up form: the JSON endpoints recon found.
+        api_surface_json=json.dumps(api_surface(records)),
     )
     if "created" not in result:
         return {"ok": False, "enabled": True, "created": [], "reused": [], "failed": [],
@@ -2055,6 +2102,16 @@ def _signed_in_stage(
             f"reached, {result['new_inputs']} inputs recon had not seen",
             file=sys.stderr,
         )
+        if result.get("api_endpoints") or result.get("templates"):
+            filled = sum(int(a.get("filled") or 0) for a in used)
+            answered = sum(int(a.get("filled_answered") or 0) for a in used)
+            owned = sum(int(a.get("owned") or 0) for a in used)
+            print(
+                f"    used like a user  {result.get('api_endpoints', 0)} API endpoints and "
+                f"{result.get('templates', 0)} templated ones from recon; {filled} filled with "
+                f"ids the account received, {answered} answered, {owned} of its own objects",
+                file=sys.stderr,
+            )
         for account in result["accounts"]:
             if "error" in account:
                 print(f"    {account['name']}: not usable ({account['error']})", file=sys.stderr)

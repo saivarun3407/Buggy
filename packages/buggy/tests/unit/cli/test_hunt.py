@@ -819,7 +819,7 @@ class TestExitCodesAndTheResultFile:
         assert started <= result.pop("finished_at") <= hunt.time.time()
         # The run says what it did not test: no sweep here, no accounts, no agents.
         coverage = result.pop("coverage")
-        assert [row["class"] for row in coverage][:3] == ["injection", "xss", "file_handling"]
+        assert [row["class"] for row in coverage][:3] == ["access_control", "injection", "xss"]
         assert not any(row["tested"] for row in coverage)
         areas = [item["area"] for item in result.pop("not_tested")]
         assert len(areas) == 4 and "access control between users (IDOR)" in areas

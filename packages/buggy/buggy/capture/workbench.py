@@ -30,7 +30,7 @@ from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
-from buggy.capture import accounts, authz_matrix, crawl, recipes
+from buggy.capture import accounts, authz_matrix, crawl, journey, recipes
 from buggy.capture import export as evidence
 from buggy.capture.canary import Canary
 from buggy.capture.gateway import CaptureGateway, GatewayRefusal
@@ -76,6 +76,7 @@ WORKBENCH_TOOL_NAMES = (
     "authz_matrix_run",
     "owners_infer",
     "surface_crawl",
+    "user_walk",
     "memory_search",
     "memory_save",
     "fact_add",
@@ -680,13 +681,16 @@ class Workbench:
         seeds_json: str,
         api_operations_json: str = "",
         count: int = 0,
+        api_surface_json: str = "",
     ) -> dict[str, Any]:
         """Register and sign in test accounts, when the operator turned creation on.
 
         For the hunt command, not for an agent. Discovers the sign-up from an
         anonymous crawl of ``seeds_json`` (and optional recon API operations),
-        then registers up to the scope's ``max_accounts`` accounts through the
-        gateway's account-creation exemption. No credential is returned.
+        or else from the JSON sign-up and login endpoints in ``api_surface_json``
+        (:func:`buggy.capture.accounts.api_surface`), then registers up to the
+        scope's ``max_accounts`` accounts through the gateway's account-creation
+        exemption. No credential is returned.
         """
 
         def run() -> dict[str, Any]:
@@ -695,11 +699,13 @@ class Workbench:
             if not seeds:
                 raise _refuse("BAD_ARGUMENT", "seeds_json must list at least one URL")
             api_operations = _json(api_operations_json, "api_operations_json", list, [])
+            surface = _json(api_surface_json, "api_surface_json", dict, {})
             return accounts.provision(
                 self.gateway,
                 name,
                 [str(seed) for seed in seeds],
                 api_operations=api_operations,
+                api_surface=surface,
                 count=int(count) or None,
             )
 
@@ -742,15 +748,23 @@ class Workbench:
 
         return self._guard(run)
 
-    def owners_infer(self, engagement: str, reached_json: str) -> dict[str, Any]:
+    def owners_infer(
+        self, engagement: str, reached_json: str, owned_json: str = ""
+    ) -> dict[str, Any]:
         """Owners inferred from signed-in crawls. ``reached_json`` is ``{identity: [url]}``
-        or the crawler's list of ``{"identity", "urls", "pages"}``. No request is sent."""
+        or the crawler's list of ``{"identity", "urls", "pages", "owned"}``. ``owned_json``
+        is ``{identity: [url]}`` of objects each reached with its own identifier (the user
+        walk's ``owned``). No request is sent."""
 
         def run() -> dict[str, Any]:
             name = self._engagement(engagement)
             raw = _json(reached_json, "reached_json", object, {})
             if not isinstance(raw, (dict, list)):
                 raise _refuse("BAD_ARGUMENT", "reached_json must be a JSON object or list")
+            claimed = _json(owned_json, "owned_json", dict, {})
+            owned: dict[str, list[Any]] = {
+                str(who): urls for who, urls in claimed.items() if isinstance(urls, list)
+            }
             reached: dict[str, list[Any]] = {}
             if isinstance(raw, dict):
                 for who, urls in raw.items():
@@ -766,8 +780,10 @@ class Workbench:
                     for key in ("urls", "pages"):
                         if isinstance(entry.get(key), list):
                             found.extend(entry[key])
+                    if isinstance(entry.get("owned"), list):
+                        owned.setdefault(entry["identity"], []).extend(entry["owned"])
             markers = self.gateway.identities.markers(name)
-            result = authz_matrix.infer_owners(reached, markers)
+            result = authz_matrix.infer_owners(reached, markers, owned)
             return {
                 "ok": True,
                 **result,
@@ -800,6 +816,44 @@ class Workbench:
                     [str(seed) for seed in seeds],
                     identity=identity,
                     max_requests=max(1, min(int(max_requests), crawl.MAX_REQUESTS)),
+                ),
+            }
+
+        return self._guard(run)
+
+    def user_walk(
+        self,
+        engagement: str,
+        seeds_json: str,
+        identity: str,
+        templates_json: str = "",
+        max_requests: int = journey.DEFAULT_MAX_REQUESTS,
+    ) -> dict[str, Any]:
+        """Use the application as one test account, GET only (:func:`journey.walk`).
+
+        For the hunt command: walks the pages and API endpoints in ``seeds_json``,
+        then fills the templated endpoints in ``templates_json`` with identifiers
+        the account received. Returns the crawl's fields plus ``filled``,
+        ``own_data`` and ``owned``; never a response body or a credential.
+        """
+
+        def run() -> dict[str, Any]:
+            name = self._engagement(engagement)
+            seeds = _json(seeds_json, "seeds_json", list, [])
+            if not seeds:
+                raise _refuse("BAD_ARGUMENT", "seeds_json must list at least one URL")
+            if not isinstance(identity, str) or not identity.strip():
+                raise _refuse("BAD_ARGUMENT", "identity must be the name of a test account")
+            templates = _json(templates_json, "templates_json", list, [])
+            return {
+                "ok": True,
+                **journey.walk(
+                    self.gateway,
+                    name,
+                    [str(seed) for seed in seeds],
+                    identity=identity,
+                    templates=[str(t) for t in templates if isinstance(t, str)],
+                    max_requests=max(1, min(int(max_requests), journey.MAX_REQUESTS)),
                 ),
             }
 
@@ -1026,14 +1080,21 @@ def register_workbench(mcp: Any, bench: Workbench) -> None:
 
     @mcp.tool()
     def accounts_provision(
-        engagement: str, seeds_json: str, api_operations_json: str = "", count: int = 0
+        engagement: str,
+        seeds_json: str,
+        api_operations_json: str = "",
+        count: int = 0,
+        api_surface_json: str = "",
     ) -> dict[str, Any]:
         """Register and sign in test accounts when the operator turned account creation on
         in the scope document. Discovers the sign-up from an anonymous crawl of seeds_json
-        (and optional recon API operations), registers up to max_accounts accounts, and
-        returns names and reasons only — never an email, password, cookie or token. For the
-        hunt command, not for agents."""
-        return bench.accounts_provision(engagement, seeds_json, api_operations_json, count)
+        (and optional recon API operations), or from the JSON sign-up and login endpoints in
+        api_surface_json, registers up to max_accounts accounts, and returns names and
+        reasons only — never an email, password, cookie or token. For the hunt command, not
+        for agents."""
+        return bench.accounts_provision(
+            engagement, seeds_json, api_operations_json, count, api_surface_json
+        )
 
     @mcp.tool()
     def authz_matrix_run(
@@ -1052,11 +1113,13 @@ def register_workbench(mcp: Any, bench: Workbench) -> None:
         )
 
     @mcp.tool()
-    def owners_infer(engagement: str, reached_json: str) -> dict[str, Any]:
+    def owners_infer(engagement: str, reached_json: str, owned_json: str = "") -> dict[str, Any]:
         """Owners of object URLs inferred from signed-in crawls: {identity: [url]} or the
         crawler's [{identity, urls, pages}]. A URL only one identity reached is a hint of
-        ownership; pass those URLs as inferred_json to authz_matrix_run. Sends nothing."""
-        return bench.owners_infer(engagement, reached_json)
+        ownership; pass those URLs as inferred_json to authz_matrix_run. owned_json is
+        {identity: [url]} of objects each reached with its own id (returned under owned:
+        those need no marker). Sends nothing."""
+        return bench.owners_infer(engagement, reached_json, owned_json)
 
     @mcp.tool()
     def surface_crawl(
@@ -1066,6 +1129,20 @@ def register_workbench(mcp: Any, bench: Workbench) -> None:
         as a declared identity. Never requests logout/delete-style URLs; records forms
         without submitting them. Returns pages (capture ids), URLs, forms and what it skipped."""
         return bench.surface_crawl(engagement, seeds_json, identity, max_requests)
+
+    @mcp.tool()
+    def user_walk(
+        engagement: str,
+        seeds_json: str,
+        identity: str,
+        templates_json: str = "",
+        max_requests: int = journey.DEFAULT_MAX_REQUESTS,
+    ) -> dict[str, Any]:
+        """Use the application as one test account, GET only: walk the pages and API
+        endpoints in seeds_json, then fill templated endpoints (/api/Users/{id}) with ids the
+        account itself received. Returns the crawl's fields plus filled, own_data and owned.
+        For the hunt command, not for agents."""
+        return bench.user_walk(engagement, seeds_json, identity, templates_json, max_requests)
 
     @mcp.tool()
     def memory_search(

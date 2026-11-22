@@ -549,6 +549,7 @@ def _reached_urls(entries: Any) -> list[str]:
 def infer_owners(
     reached: Mapping[str, Iterable[str]],
     markers_by_identity: Mapping[str, Iterable[str]] | None = None,
+    owned: Mapping[str, Iterable[str]] | None = None,
 ) -> dict[str, Any]:
     """Which object URL belongs to which identity, judged from what each reached.
 
@@ -564,9 +565,23 @@ def infer_owners(
     identity and every path template has one URL before any template gets a
     second; the order is deterministic.
 
-    Returns ``{"owners": {url: identity}, "shared": [url], "per_identity":
-    {name: objects only it reached}, "considered": number of object URLs}``.
+    ``owned`` maps an identity to object URLs it reached with an identifier
+    the target gave it as its own (the user walk's ``owned``: its own basket id
+    from its sign-in answer). Such a URL, claimed by one identity only, is that
+    identity's whatever else reached it, comes first, and is listed under
+    ``owned`` too: it is evidence, not a hint, so it needs no marker.
+
+    Returns ``{"owners": {url: identity}, "owned": {url: identity}, "shared":
+    [url], "per_identity": {name: objects only it reached}, "considered":
+    number of object URLs}``.
     """
+    claims: dict[str, set[str]] = {}
+    for name, urls in owned.items() if isinstance(owned, Mapping) else ():
+        if isinstance(name, str) and name:
+            for url in _reached_urls(urls):
+                if _object_template(url):
+                    claims.setdefault(url, set()).add(name)
+    evidenced = {url: next(iter(who)) for url, who in sorted(claims.items()) if len(who) == 1}
     holders: dict[str, set[str]] = {}
     names: list[str] = []
     if isinstance(reached, Mapping):
@@ -591,7 +606,9 @@ def infer_owners(
         per_identity[name] += 1
 
     # (template, url, identity), sorted; identities with markers first where it matters.
-    pool = sorted((_object_template(url), url, name) for url, name in unique.items())
+    pool = sorted(
+        (_object_template(url), url, name) for url, name in unique.items() if url not in evidenced
+    )
     chosen: dict[str, str] = {}
     used_templates: dict[str, int] = {}
 
@@ -599,6 +616,10 @@ def infer_owners(
         template, url, name = item
         chosen[url] = name
         used_templates[template] = used_templates.get(template, 0) + 1
+
+    # 0. Objects an identity is known to own come first.
+    for url, name in list(evidenced.items())[:MAX_INFERRED]:
+        take((_object_template(url), url, name))
 
     def rank(name: str) -> tuple[int, str]:
         return (0 if name in with_markers else 1, name)
@@ -639,6 +660,7 @@ def infer_owners(
             take(best)
     return {
         "owners": dict(sorted(chosen.items())),
+        "owned": {url: name for url, name in sorted(chosen.items()) if url in evidenced},
         "shared": shared[:MAX_SHARED],
         "shared_total": len(shared),
         "per_identity": per_identity,

@@ -15,6 +15,11 @@ Everything here is deterministic; no model is used.
   recon-shaped JSON API operations. They never guess: a thing that makes
   automation impossible (a CAPTCHA, SSO only, an unknown required field, an
   email-verification wall) stops the run with a named reason.
+* :func:`api_signup_candidates` / :func:`api_login_candidates` cover single-page
+  applications that have no HTML form: a few JSON endpoints recon found
+  (``/api/Users``, ``/rest/user/login``), each tried once. The account's own
+  identifiers in the answers (its user id, its basket id) are kept for the
+  user walk (:mod:`buggy.capture.journey`).
 * :func:`provision` registers up to ``max_accounts`` accounts through the
   gateway's account-creation exemption, logs each in, builds a working
   ``static`` identity from the session, and stores the accounts in a
@@ -39,6 +44,7 @@ from urllib.parse import urlencode, urlsplit
 from buggy.capture import crawl
 from buggy.capture.gateway import AccountGrant, CaptureGateway, GatewayRefusal
 from buggy.capture.store import Capture
+from buggy.pipeline.tools import apirecon
 
 if TYPE_CHECKING:
     from collections.abc import Iterable, Sequence
@@ -159,6 +165,32 @@ _TOKEN_KEYS = (
 )
 
 
+#: Fields never sent at sign-up, whatever the form or the API description says:
+#: setting one's own role or privileges is not what a normal user does.
+_FORBIDDEN_FIELD = re.compile(
+    r"(?<![a-z0-9])(?:roles?|admin|is[-_ ]?admin|super[-_ ]?user|is[-_ ]?staff|staff|"
+    r"permissions?|privileges?|access[-_ ]?level|user[-_ ]?type)(?![a-z0-9])",
+    re.IGNORECASE,
+)
+#: Confirmation fields sent at an API sign-up that no API description documents.
+_API_CONFIRM_FIELDS = (
+    "passwordRepeat",
+    "password_confirmation",
+    "confirmPassword",
+    "repeatPassword",
+)
+#: Last path segments of an API sign-up and of an API login.
+_SIGNUP_WORDS = frozenset({"register", "registration", "signup", "sign-up", "sign_up"})
+_SIGNUP_COLLECTIONS = frozenset({"users", "accounts"})
+_LOGIN_SEGMENTS = frozenset(
+    {"login", "log-in", "signin", "sign-in", "sign_in", "authenticate", "session", "sessions"}
+)
+#: Path segments that make a URL an API URL even without an ``/api`` root.
+_API_SEGMENTS = frozenset({"api", "apis", "rest", "auth", "graphql", "rpc"})
+#: How many API sign-up and login endpoints are tried, one request each.
+MAX_API_CANDIDATES = 3
+
+
 def _word(words: tuple[str, ...]) -> re.Pattern[str]:
     return re.compile(r"(?<![a-z0-9])(?:" + "|".join(words) + r")(?![a-z0-9])", re.IGNORECASE)
 
@@ -209,6 +241,34 @@ class Signup:
 
     def summary(self) -> dict[str, str]:
         return {"kind": self.kind, "url": self.url}
+
+
+_GUESSED_SIGNUP_FIELDS: tuple[Field, ...] = (
+    Field("email", EMAIL),
+    Field("password", PASSWORD),
+    *(Field(name, PASSWORD_CONFIRM) for name in _API_CONFIRM_FIELDS),
+    Field("username", USERNAME),
+    Field("name", NAME),
+)
+_GUESSED_LOGIN_FIELDS: tuple[Field, ...] = (Field("email", EMAIL), Field("password", PASSWORD))
+
+
+@dataclass(slots=True)
+class _Choice:
+    """Endpoints to try in order; the first that works is kept for the next accounts."""
+
+    candidates: list[Signup]
+    exhausted: tuple[str, str] | None = None
+
+    @property
+    def first(self) -> Signup | None:
+        return self.candidates[0] if self.candidates else None
+
+    def pin(self, chosen: Signup) -> None:
+        self.candidates = [chosen]
+
+    def urls(self) -> list[str]:
+        return [candidate.url for candidate in self.candidates]
 
 
 # ── the switch ──────────────────────────────────────────────────────
@@ -468,6 +528,158 @@ def find_login(crawl_result: Any, api_operations: Iterable[Any] = ()) -> Signup 
     return None
 
 
+# ── sign-up and login of an API (single-page applications) ─────────
+
+
+def _last_segment(url: str) -> str:
+    try:
+        path = urlsplit(url).path
+    except ValueError:
+        return ""
+    return path.rstrip("/").rsplit("/", 1)[-1].lower()
+
+
+def _api_like(url: str, bases: Sequence[str] = ()) -> bool:
+    """Whether a URL is an API URL: under an API root recon found, or with an api/rest/auth segment."""
+    if apirecon.api_root(url) or any(
+        base and url.startswith(base.rstrip("/") + "/") for base in bases
+    ):
+        return True
+    try:
+        segments = urlsplit(url).path.lower().split("/")
+    except ValueError:
+        return False
+    return any(segment in _API_SEGMENTS for segment in segments)
+
+
+def _requestable(url: str) -> bool:
+    return (
+        isinstance(url, str)
+        and url.startswith(("http://", "https://"))
+        and not apirecon.is_template(url)
+        and not crawl.never_request_reason(url)
+    )
+
+
+def _record_attrs(record: Any) -> dict[str, Any]:
+    raw = record.get("attrs") if isinstance(record, dict) else None
+    return raw if isinstance(raw, dict) else {}
+
+
+def api_surface(records: Any) -> dict[str, list[Any]]:
+    """What recon knows about sign-up and login of an API, small enough to pass to the gateway.
+
+    ``records`` maps a record type to the recon records (``auth_surface``,
+    ``api_base``, ``endpoint``, ``api_profile``, ``api_operation``). Returns
+    ``{"signup": [url], "login": [url], "api_bases": [url], "operations":
+    [{"method", "url", "body_fields"}]}``: the sign-in pages recon named, the
+    endpoints whose last path segment names a sign-up or a login, and the
+    write operations an API description documents.
+    """
+    records = records if isinstance(records, dict) else {}
+    signup: dict[str, None] = {}
+    login: dict[str, None] = {}
+    for record in records.get("auth_surface") or []:
+        url = str(record.get("value") or "") if isinstance(record, dict) else ""
+        kind = _record_attrs(record).get("kind")
+        if kind == "signup" and _requestable(url):
+            signup.setdefault(url.split("#", 1)[0])
+        elif kind == "login" and _requestable(url):
+            login.setdefault(url.split("#", 1)[0])
+    endpoints: list[str] = []
+    for kind in ("endpoint", "url"):
+        for record in records.get(kind) or []:
+            if isinstance(record, dict) and isinstance(record.get("value"), str):
+                endpoints.append(record["value"])
+    for record in records.get("api_profile") or []:
+        url = _record_attrs(record).get("url")
+        if isinstance(url, str) and _record_attrs(record).get("status") not in (404, 410):
+            endpoints.append(url)
+    for raw in endpoints:
+        url = raw.split("#", 1)[0].split("?", 1)[0]
+        if not _requestable(url):
+            continue
+        last = _last_segment(url)
+        if last in _SIGNUP_WORDS or last in _SIGNUP_COLLECTIONS:
+            signup.setdefault(url)
+        elif last in _LOGIN_SEGMENTS:
+            login.setdefault(url)
+    bases = [
+        str(r.get("value"))
+        for r in records.get("api_base") or []
+        if isinstance(r, dict) and isinstance(r.get("value"), str)
+    ]
+    operations: list[dict[str, Any]] = []
+    for record in records.get("api_operation") or []:
+        attrs = _record_attrs(record)
+        method, url = str(attrs.get("method") or "").upper(), str(attrs.get("url") or "")
+        fields = attrs.get("request_body_properties")
+        if method in ("POST", "PUT") and url and isinstance(fields, list) and fields:
+            operations.append(
+                {"method": method, "url": url, "body_fields": [str(f) for f in fields][:50]}
+            )
+    return {
+        "signup": list(signup)[:50],
+        "login": list(login)[:50],
+        "api_bases": bases[:50],
+        "operations": operations[:200],
+    }
+
+
+def _surface_urls(surface: Any, key: str) -> list[str]:
+    values = surface.get(key) if isinstance(surface, dict) else None
+    return [v for v in values or [] if isinstance(v, str) and _requestable(v)]
+
+
+def _json_endpoint(url: str, fields: tuple[Field, ...]) -> Signup:
+    return Signup(kind="json", method="POST", url=url, page=url, fields=fields)
+
+
+def api_signup_candidates(surface: Any) -> list[Signup]:
+    """JSON sign-up endpoints to try, best first, at most :data:`MAX_API_CANDIDATES`.
+
+    An endpoint under an API root whose path ends in a sign-up word
+    (``/register``, ``/signup``) comes first, then one that ends in a
+    collection of users (``/users``, ``/accounts``), then a sign-up page recon
+    named that is not an API URL. The body sent is the account's email, a
+    password and its usual confirmation fields, a user name and a name.
+    """
+    bases = _surface_urls(surface, "api_bases")
+    ranked: list[tuple[int, int, str]] = []
+    for index, url in enumerate(dict.fromkeys(_surface_urls(surface, "signup"))):
+        last = _last_segment(url)
+        if _api_like(url, bases):
+            rank = 0 if last in _SIGNUP_WORDS else 1 if last in _SIGNUP_COLLECTIONS else 2
+        elif last in _SIGNUP_COLLECTIONS:
+            continue  # a page named /users that is not an API is a listing, not a sign-up
+        else:
+            rank = 3
+        ranked.append((rank, index, url))
+    ranked.sort()
+    return [_json_endpoint(url, _GUESSED_SIGNUP_FIELDS) for _r, _i, url in ranked][
+        :MAX_API_CANDIDATES
+    ]
+
+
+def api_login_candidates(surface: Any) -> list[Signup]:
+    """JSON login endpoints to try (``/rest/user/login``, ``/api/login``, ``/auth/login``).
+
+    Only API URLs: an HTML login page answers a JSON body with the page.
+    At most :data:`MAX_API_CANDIDATES`; the body is the email and the password.
+    """
+    bases = _surface_urls(surface, "api_bases")
+    ranked: list[tuple[int, int, str]] = []
+    for index, url in enumerate(dict.fromkeys(_surface_urls(surface, "login"))):
+        if not _api_like(url, bases):
+            continue
+        last = _last_segment(url)
+        ranked.append((0 if last in ("login", "signin", "sign-in", "log-in") else 1, index, url))
+    ranked.sort()
+    return [_json_endpoint(url, _GUESSED_LOGIN_FIELDS) for _r, _i, url in ranked][
+        :MAX_API_CANDIDATES
+    ]
+
+
 # ── generated credentials ───────────────────────────────────────────
 
 
@@ -491,6 +703,33 @@ class _Account:
     password: str
     headers: dict[str, str] = field(default_factory=dict)
     cookies: dict[str, str] = field(default_factory=dict)
+    #: Identifiers the target handed to this account as its own (``crawl.json_ids``).
+    own_ids: list[dict[str, Any]] = field(default_factory=list)
+
+    @classmethod
+    def stored(cls, name: str, entry: dict[str, Any]) -> _Account:
+        ids = entry.get("own_ids")
+        return cls(
+            name=name,
+            email=str(entry.get("email") or ""),
+            username=str(entry.get("username") or ""),
+            password=str(entry.get("password") or ""),
+            own_ids=[i for i in ids if isinstance(i, dict)] if isinstance(ids, list) else [],
+        )
+
+    def learn_ids(self, capture: Capture, url: str) -> None:
+        """Keep the identifiers an answer gives as the account's own (its user id, its basket id)."""
+        try:
+            document = json.loads(capture.response_body.decode("utf-8", "replace"))
+        except ValueError:
+            return
+        words = [w.lower() for w in urlsplit(url).path.split("/") if w]
+        known = {(i.get("key"), i.get("value")) for i in self.own_ids}
+        for found in crawl.json_ids(document, [self.email, self.username], context=words):
+            if found["own"] and (found["key"], found["value"]) not in known:
+                known.add((found["key"], found["value"]))
+                self.own_ids.append(found)
+        del self.own_ids[50:]
 
     def identity_def(self) -> dict[str, Any]:
         static: dict[str, Any] = {}
@@ -512,6 +751,7 @@ class _Account:
             "username": self.username,
             "password": self.password,
             "identity": self.identity_def(),
+            "own_ids": list(self.own_ids),
         }
 
     def has_session(self) -> bool:
@@ -587,6 +827,10 @@ def _signup_blocker(signup: Signup, page_body: str) -> tuple[str, str]:
         if _CAPTCHA_NAME.search(field_.name):
             return CAPTCHA, f"the sign-up has a CAPTCHA field {field_.name!r}"
     for field_ in signup.fields:
+        if _forbidden(field_.name) or signup.kind == "json":
+            # Never sent; and a JSON API's description lists optional
+            # properties too, so an unknown one there is left out, not a stop.
+            continue
         if field_.role == OTHER and not field_.value.strip():
             return (
                 UNKNOWN_REQUIRED_FIELD,
@@ -604,6 +848,25 @@ def _sso_only(page_body: str) -> bool:
 def _email_verification(capture: Capture) -> bool:
     text = _response_text(capture).lower()
     return any(marker in text for marker in _VERIFY_MARKERS)
+
+
+def _forbidden(name: str) -> bool:
+    """Whether a field sets a role or a privilege: it is never sent."""
+    return bool(_FORBIDDEN_FIELD.search(_CAMEL.sub(r"\1 \2", name).replace("_", " ")))
+
+
+def _is_html(capture: Capture) -> bool:
+    kind = _content_type(capture)
+    return "html" in kind or _response_text(capture)[:200].lstrip().lower().startswith("<!doctype")
+
+
+def _api_ok(capture: Capture) -> bool:
+    """A JSON endpoint accepted the request: 2xx, and not an HTML page (a single-page
+    application answers every path with its page)."""
+    status = capture.status
+    return (
+        not capture.error and status is not None and 200 <= status < 300 and not _is_html(capture)
+    )
 
 
 # ── gateway-owned storage (agents cannot read it) ───────────────────
@@ -655,6 +918,8 @@ def _store_accounts(
 def _value_for(field_: Field, account: _Account) -> str | None:
     """What to send for one field, or ``None`` to omit it."""
     role, tag = field_.role, account.username
+    if _forbidden(field_.name):
+        return None
     if role == EMAIL:
         return account.email
     if role == USERNAME:
@@ -687,7 +952,8 @@ def _build_body(
         return json.dumps(payload), {"Content-Type": "application/json"}
     pairs: list[tuple[str, str]] = []
     for name, value in hidden.items():
-        pairs.append((name, value))
+        if not _forbidden(name):
+            pairs.append((name, value))
     for field_ in signup.fields:
         value = _value_for(field_, account)
         if value is not None:
@@ -797,9 +1063,15 @@ def provision(
     seeds: Sequence[str],
     *,
     api_operations: Iterable[Any] = (),
+    api_surface: Any = None,
     count: int | None = None,
 ) -> dict[str, Any]:
     """Register and sign in up to ``max_accounts`` test accounts, when enabled.
+
+    The sign-up is an HTML form found by an anonymous crawl of ``seeds``, or an
+    API operation in ``api_operations``; failing both, the JSON endpoints in
+    ``api_surface`` (:func:`api_surface`) are tried, a few, once each. The
+    login is found the same way.
 
     Returns ``{"ok", "enabled", "created": [names], "reused": [names],
     "failed": [{"name", "reason", "detail"}], "signup": {"kind","url"} | None,
@@ -808,7 +1080,8 @@ def provision(
     already exists and still signs in is reused; only the missing ones are
     created.
     """
-    api_ops = list(api_operations or [])
+    surface = api_surface if isinstance(api_surface, dict) else {}
+    api_ops = [*(api_operations or []), *(surface.get("operations") or [])]
     seed_list = [str(s) for s in (seeds or []) if isinstance(s, str) and s]
     failed: list[dict[str, str]] = []
     result: dict[str, Any] = {
@@ -847,39 +1120,35 @@ def provision(
     crawl_result = crawl.crawl(gateway, engagement, seed_list)
     signup = find_signup(crawl_result, api_ops)
     login = find_login(crawl_result, api_ops)
+    signups = _Choice([signup] if signup is not None else api_signup_candidates(surface))
+    logins = _Choice([login] if login is not None else api_login_candidates(surface))
 
     target = policy.max_accounts if count is None else max(0, min(int(count), policy.max_accounts))
     result["credentials_file"] = f"audit/{engagement}/accounts-created.json"
-    if login is not None:
-        result["login"] = login.summary()
-    if signup is None:
+    if logins.first is not None:
+        result["login"] = logins.first.summary()
+    if signups.first is None:
         reason, detail = _no_signup_reason(gateway, engagement, crawl_result)
         failed.append({"name": "", "reason": reason, "detail": detail})
         # Buggy cannot register here, but a person can. Prepare the accounts (an
         # address, a user name and a strong password each) so that the operator
         # registers exactly those, and sign in with the ones already registered.
-        _prepared_accounts(gateway, engagement, policy, login, target, seed_list[0], result)
+        _prepared_accounts(gateway, engagement, policy, logins, target, seed_list[0], result)
         result["requests"] = len(gateway.store.list(engagement, limit=500)) - before
         return result
-    result["signup"] = signup.summary()
+    result["signup"] = signups.first.summary()
 
-    grant = gateway.account_creation_grant(engagement, [signup.url, login.url if login else ""])
+    grant = gateway.account_creation_grant(engagement, [*signups.urls(), *logins.urls()])
 
     existing = _load_existing(gateway, engagement)
     accounts: list[_Account] = []
     created: list[str] = []
     reused: list[str] = []
-    stored: list[dict[str, Any]] = []
 
     # Reuse accounts that already exist and still sign in.
     for name, entry in list(existing.items())[:target]:
-        account = _Account(
-            name=name,
-            email=str(entry.get("email") or ""),
-            username=str(entry.get("username") or ""),
-            password=str(entry.get("password") or ""),
-        )
-        if login is not None and _signin(gateway, engagement, grant, login, account):
+        account = _Account.stored(name, entry)
+        if logins.candidates and _signin(gateway, engagement, grant, logins, account):
             reused.append(name)
         else:
             failed.append(
@@ -891,7 +1160,6 @@ def provision(
                 }
             )
         accounts.append(account)
-        stored.append(account.record())
 
     index = 0
     while len(accounts) < target:
@@ -906,15 +1174,18 @@ def provision(
             username=f"auto{tag}",
             password=_strong_password(),
         )
-        outcome = _create_one(gateway, engagement, grant, signup, login, account)
+        outcome = _create_one(gateway, engagement, grant, signups, logins, account)
         accounts.append(account)
-        stored.append(account.record())
         if outcome == "":
             created.append(name)
         else:
             failed.append({"name": name, "reason": outcome[0], "detail": outcome[1]})
 
-    _store_accounts(gateway, engagement, stored)
+    _store_accounts(gateway, engagement, [a.record() for a in accounts])
+    if signups.first is not None:
+        result["signup"] = signups.first.summary()
+    if logins.first is not None:
+        result["login"] = logins.first.summary()
 
     # Verify every account's session as the stored identity, one GET each.
     verify_seed = seed_list[0]
@@ -956,7 +1227,7 @@ def _prepared_accounts(
     gateway: CaptureGateway,
     engagement: str,
     policy: AccountPolicy,
-    login: Signup | None,
+    logins: _Choice,
     target: int,
     seed: str,
     result: dict[str, Any],
@@ -968,13 +1239,7 @@ def _prepared_accounts(
     """
     existing = _load_existing(gateway, engagement)
     accounts: list[_Account] = [
-        _Account(
-            name=name,
-            email=str(entry.get("email") or ""),
-            username=str(entry.get("username") or ""),
-            password=str(entry.get("password") or ""),
-        )
-        for name, entry in list(existing.items())[:target]
+        _Account.stored(name, entry) for name, entry in list(existing.items())[:target]
     ]
     index = 0
     while len(accounts) < target:
@@ -991,15 +1256,17 @@ def _prepared_accounts(
                 password=_strong_password(),
             )
         )
-    grant = gateway.account_creation_grant(engagement, [login.url]) if login is not None else None
     working: list[str] = []
-    for account in accounts:
-        if login is not None and grant is not None:
-            _signin(gateway, engagement, grant, login, account)
+    if logins.candidates:
+        grant = gateway.account_creation_grant(engagement, logins.urls())
+        for account in accounts:
+            _signin(gateway, engagement, grant, logins, account)
     _store_accounts(gateway, engagement, [a.record() for a in accounts])
     for account in accounts:
         if account.has_session() and _verify(gateway, engagement, seed, account.name):
             working.append(account.name)
+    if logins.first is not None:
+        result["login"] = logins.first.summary()
     result["reused"] = working
     result["prepared"] = [a.name for a in accounts if a.name not in working]
     result["ok"] = bool(working)
@@ -1027,56 +1294,117 @@ def _signin(
     gateway: CaptureGateway,
     engagement: str,
     grant: AccountGrant,
-    login: Signup,
+    logins: _Choice,
     account: _Account,
 ) -> bool:
-    """Log the account in and record its session on ``account``. True on success."""
-    capture = _login(gateway, engagement, grant, login, account)
-    if not _ok(capture):
-        return False
-    headers, cookies = _session_from(capture)
-    if not headers and not cookies:
-        return False
-    account.headers, account.cookies = headers, cookies
-    return True
+    """Log the account in and record its session on ``account``. True on success.
+
+    The login endpoints are tried in order, one request each; the first that
+    hands out a session is kept for the next accounts. A JSON login must
+    answer 2xx with a token in the JSON (an ``Authorization: Bearer`` header
+    for the identity) or a session cookie, and not with an HTML page.
+    """
+    for login in list(logins.candidates):
+        try:
+            capture = _login(gateway, engagement, grant, login, account)
+        except GatewayRefusal:
+            continue
+        if not (_api_ok(capture) if login.kind == "json" else _ok(capture)):
+            continue
+        headers, cookies = _session_from(capture)
+        if not headers and not cookies:
+            continue
+        account.headers, account.cookies = headers, cookies
+        account.learn_ids(capture, login.url)
+        logins.pin(login)
+        return True
+    return False
+
+
+def _refusal(capture: Capture, signup: Signup) -> tuple[str, str]:
+    """The named reason a registration was not accepted."""
+    if _email_verification(capture):
+        return EMAIL_VERIFICATION, "registration asks for email verification"
+    if capture.status is None:
+        return REGISTRATION_REFUSED, f"registration at {signup.url} got no response"
+    if signup.kind == "json" and "captcha" in _response_text(capture)[:5000].lower():
+        return CAPTCHA, f"registration at {signup.url} asks for a CAPTCHA"
+    if signup.kind == "json" and _is_html(capture):
+        return (
+            REGISTRATION_REFUSED,
+            f"{signup.url} answered with an HTML page (status {capture.status}), not an API",
+        )
+    return REGISTRATION_REFUSED, f"registration at {signup.url} returned status {capture.status}"
+
+
+def _register_any(
+    gateway: CaptureGateway,
+    engagement: str,
+    grant: AccountGrant,
+    signups: _Choice,
+    account: _Account,
+) -> tuple[Capture | None, tuple[str, str]]:
+    """Register ``account`` at the first sign-up that accepts it, one request per endpoint.
+
+    Returns the accepted registration's capture and ``("", "")``, or ``None``
+    and the reason of the most telling refusal. When no endpoint accepted
+    anything, the next accounts are not sent at all (``signups.exhausted``).
+    """
+    if signups.exhausted is not None:
+        return None, signups.exhausted
+    last: tuple[str, str] = (REGISTRATION_REFUSED, "no sign-up endpoint accepted the account")
+    telling: tuple[str, str] | None = None
+    for signup in list(signups.candidates):
+        page_body = (
+            _fresh_form_page(gateway, engagement, signup.page)[0] if signup.kind == "form" else ""
+        )
+        blocker = _signup_blocker(signup, page_body)
+        if blocker[0]:
+            return None, blocker
+        try:
+            capture, _carry = _register(gateway, engagement, grant, signup, account)
+        except GatewayRefusal as refusal:
+            last = (REGISTRATION_REFUSED, f"{signup.url} was not sent ({refusal.code})")
+            continue
+        if _api_ok(capture) if signup.kind == "json" else _ok(capture):
+            signups.pin(signup)
+            return capture, ("", "")
+        last = _refusal(capture, signup)
+        if last[0] in (CAPTCHA, EMAIL_VERIFICATION):
+            return None, last
+        # A 404, a 405 or an HTML page only says "not here"; any other answer says more.
+        if telling is None and capture.status not in (404, 405) and not _is_html(capture):
+            telling = last
+    reason = telling or last
+    if all(signup.kind == "json" for signup in signups.candidates):
+        signups.exhausted = reason  # the next accounts would be refused the same way
+    return None, reason
 
 
 def _create_one(
     gateway: CaptureGateway,
     engagement: str,
     grant: AccountGrant,
-    signup: Signup,
-    login: Signup | None,
+    signups: _Choice,
+    logins: _Choice,
     account: _Account,
 ) -> str | tuple[str, str]:
     """Register and sign in one account. ``""`` on success, else ``(reason, detail)``."""
-    _body, hidden, cookies = (
-        _fresh_form_page(gateway, engagement, signup.page)
-        if signup.kind == "form"
-        else ("", dict(signup.hidden), {})
-    )
-    blocker = _signup_blocker(signup, _body)
-    if blocker[0]:
-        return blocker
-    register_capture, carry = _register(gateway, engagement, grant, signup, account)
-    session_headers, session_cookies = _session_from(register_capture)
-    if not _ok(register_capture):
-        if _email_verification(register_capture):
-            return EMAIL_VERIFICATION, "registration asks for email verification"
-        detail = (
-            f"registration returned status {register_capture.status}"
-            if register_capture.status is not None
-            else "registration got no response"
-        )
-        return REGISTRATION_REFUSED, detail
+    register_capture, reason = _register_any(gateway, engagement, grant, signups, account)
+    if register_capture is None:
+        return reason
+    signup = signups.first
+    if signup is not None and signup.kind == "json":
+        account.learn_ids(register_capture, signup.url)
     # A registration may hand out the session directly.
-    if session_headers or session_cookies:
+    session_headers, session_cookies = _session_from(register_capture)
+    if (session_headers or session_cookies) and not _is_html(register_capture):
         account.headers, account.cookies = session_headers, session_cookies
-    if login is None:
+    if not logins.candidates:
         if account.has_session():
             return ""
         return LOGIN_FAILED, "no login form or API was found to obtain a session"
-    if not _signin(gateway, engagement, grant, login, account):
+    if not _signin(gateway, engagement, grant, logins, account):
         if _email_verification(register_capture):
             return (
                 EMAIL_VERIFICATION,
@@ -1085,6 +1413,13 @@ def _create_one(
         if not account.has_session():
             return LOGIN_FAILED, "the account could not sign in after registration"
     return ""
+
+
+def stored_own_ids(gateway: CaptureGateway, engagement: str, name: str) -> list[dict[str, Any]]:
+    """The identifiers the target handed to a created account as its own (``[]`` for others)."""
+    entry = _load_existing(gateway, engagement).get(name)
+    ids = entry.get("own_ids") if isinstance(entry, dict) else None
+    return [i for i in ids if isinstance(i, dict)] if isinstance(ids, list) else []
 
 
 __all__ = [
@@ -1100,8 +1435,13 @@ __all__ = [
     "AccountPolicyError",
     "Field",
     "Signup",
+    "WAITING_FOR_OPERATOR",
     "account_creation_policy",
+    "api_login_candidates",
+    "api_signup_candidates",
+    "api_surface",
     "find_login",
     "find_signup",
     "provision",
+    "stored_own_ids",
 ]
