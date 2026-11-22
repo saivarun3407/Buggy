@@ -188,9 +188,7 @@ class Finding(BaseModel):
     # AI Agent metadata
     objective_id: str = Field(default="", description="OPPLAN objective that found this (OBJ-xxx)")
     phase: ObjectivePhase | None = None
-    agent: str = Field(
-        default="", description="Agent that discovered this: recon/exploit/analyst"
-    )
+    agent: str = Field(default="", description="Agent that discovered this: recon/exploit/analyst")
     iteration: int = Field(default=0, description="Ralph loop iteration number")
     confidence: FindingConfidence = FindingConfidence.VERIFIED
     discovered_at: str = Field(default="", description="ISO 8601 discovery timestamp")
