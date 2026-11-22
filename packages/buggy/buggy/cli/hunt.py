@@ -857,23 +857,20 @@ def run_state_sweep(
 
 
 def _run_steps(engagement: str, planned: dict[str, Any], known: str) -> dict[str, Any]:
-    """Send each planned probe run; re-prove and grade the positives. Returns the counts."""
-    out: dict[str, Any] = {
-        "planned": len(planned["steps"]),
-        "left_out": planned["left_out"],
-        "ran": 0,
-        "vulnerable": 0,
-        "not_vulnerable": 0,
-        "undecided": 0,
-        "refused": 0,
-        "held_for_approval": 0,
-        "verified": 0,
-        "submit": 0,
-        "findings": [],
-        "error": None,
-    }
+    """Send the planned probe runs one bug class after another; re-prove and grade positives.
+
+    Returns the counts, in total and per class (``by_class``).
+    """
+    from buggy.pipeline import sweep  # noqa: PLC0415
+
+    out = _empty_counts()
+    out["planned"] = len(planned["steps"])
+    out["left_out"] = planned["left_out"]
     failures = 0
-    for step in planned["steps"]:
+    for step in sweep.by_class(planned["steps"]):
+        cls = out["by_class"].setdefault(
+            sweep.class_of(step["probe"]) or "other", dict.fromkeys(_CLASS_COUNTS, 0)
+        )
         result = _capture(
             "probe_run", engagement, probe=step["probe"], params_json=json.dumps(step["params"])
         )
@@ -885,12 +882,14 @@ def _run_steps(engagement: str, planned: dict[str, Any], known: str) -> dict[str
             continue
         failures = 0
         out["ran"] += 1
+        cls["checks"] += 1
         if result.get("status") == "refused":
             out["refused"] += 1
             if result.get("code") == "APPROVAL_REQUIRED":
                 # Held by the gateway: a state-changing run, or a read-only check that is
                 # sent with POST (a GraphQL query). It waits for the operator.
                 out["held_for_approval"] += 1
+                cls["held"] += 1
             continue
         if result.get("vulnerable") is False:
             out["not_vulnerable"] += 1
@@ -899,6 +898,7 @@ def _run_steps(engagement: str, planned: dict[str, Any], known: str) -> dict[str
             out["undecided"] += 1
             continue
         out["vulnerable"] += 1
+        cls["positive"] += 1
         finding_id = str(result.get("finding_id") or "")
         if not finding_id:
             continue
@@ -910,7 +910,9 @@ def _run_steps(engagement: str, planned: dict[str, Any], known: str) -> dict[str
             "grade": "",
         }
         entry["status"], entry["grade"] = _prove(engagement, finding_id, known)
-        out["verified"] += entry["status"] == "exploit_verified"
+        proven = entry["status"] == "exploit_verified"
+        out["verified"] += proven
+        cls["proven"] += proven
         out["submit"] += entry["grade"] == "submit"
         out["findings"].append(entry)
     return out
@@ -1025,14 +1027,24 @@ def _add_counts(total: dict[str, Any], part: dict[str, Any]) -> None:
             total[name] = int(total.get(name) or 0) + value
         elif isinstance(value, list):
             total.setdefault(name, []).extend(value)
+        elif name == "by_class" and isinstance(value, dict):
+            merged = total.setdefault("by_class", {})
+            for cls, counts in value.items():
+                into = merged.setdefault(cls, dict.fromkeys(_CLASS_COUNTS, 0))
+                for key in _CLASS_COUNTS:
+                    into[key] += int(counts.get(key) or 0)
     total["error"] = total.get("error") or part.get("error")
+
+
+#: What is counted per bug class.
+_CLASS_COUNTS = ("checks", "held", "positive", "proven")
 
 
 def _empty_counts() -> dict[str, Any]:
     return {
         "planned": 0, "left_out": 0, "ran": 0, "vulnerable": 0, "not_vulnerable": 0,
         "undecided": 0, "refused": 0, "held_for_approval": 0, "verified": 0, "submit": 0,
-        "findings": [], "error": None,
+        "findings": [], "error": None, "by_class": {},
     }  # fmt: skip
 
 
@@ -1609,6 +1621,7 @@ def build_result(
         "signed_in": _signed_in_result(outcome.get("signed_in")),
         "state": _probes_result(outcome.get("state")),
         "not_tested": list(outcome.get("not_tested") or []),
+        "coverage": list(outcome.get("coverage") or []),
         "complete": recon_is_complete(recon["state"]) and not agent["error"],
     }
 
@@ -1824,6 +1837,89 @@ def _state_stage(
     return state
 
 
+def class_coverage(outcome: dict[str, Any], slug: str) -> list[dict[str, Any]]:
+    """One row per bug class: was it tested, how many checks, how many proven, and why not.
+
+    A class counts as tested when at least one of its checks was sent. A check
+    that waits for approval was not sent. The reason of an untested class is
+    the plain cause: held for approval, no test accounts, no input of that
+    kind found, or no automatic check exists for the class.
+    """
+    from buggy.pipeline import sweep  # noqa: PLC0415
+
+    totals: dict[str, dict[str, int]] = {}
+    signed_in = outcome.get("signed_in") if isinstance(outcome.get("signed_in"), dict) else {}
+    sections = [outcome.get("probes"), outcome.get("state")]
+    sections += [signed_in.get("probes"), signed_in.get("state")]
+    for section in sections:
+        counted = section.get("by_class") if isinstance(section, dict) else None
+        for cls, counts in (counted or {}).items():
+            into = totals.setdefault(cls, dict.fromkeys(_CLASS_COUNTS, 0))
+            for key in _CLASS_COUNTS:
+                into[key] += int(counts.get(key) or 0)
+
+    access = outcome.get("access") if isinstance(outcome.get("access"), dict) else {}
+    inferred = signed_in.get("inferred") if isinstance(signed_in.get("inferred"), dict) else {}
+    objects = int(access.get("objects") or 0) + int(inferred.get("objects") or 0)
+    if objects:
+        into = totals.setdefault("access_control", dict.fromkeys(_CLASS_COUNTS, 0))
+        into["checks"] += objects
+        into["positive"] += int(access.get("broken_access") or 0)
+        into["positive"] += int(inferred.get("broken_access") or 0)
+        into["proven"] += int(access.get("verified") or 0) + int(inferred.get("verified") or 0)
+
+    accounts = bool(signed_in.get("ran"))
+    rows: list[dict[str, Any]] = []
+    for cls in sweep.CLASS_ORDER:
+        counts = totals.get(cls) or dict.fromkeys(_CLASS_COUNTS, 0)
+        sent = counts["checks"] - counts["held"]
+        reason = ""
+        if sent <= 0:
+            if counts["held"]:
+                reason = (
+                    f"{counts['held']} checks wait for your approval "
+                    f"(buggy-cli approvals list {slug})"
+                )
+            elif cls == "access_control":
+                reason = str(
+                    access.get("reason")
+                    or signed_in.get("reason")
+                    or "no object was found that only one test account owns"
+                )
+            elif cls in sweep.NO_AUTOMATIC_CHECK:
+                reason = sweep.NO_AUTOMATIC_CHECK[cls]
+            elif outcome.get("probes") is None:
+                reason = "the probe stages did not run"
+            elif not accounts:
+                reason = "recon found no input of this kind; nothing behind the login was reached"
+            else:
+                reason = "no input of this kind was found, signed in or not"
+        rows.append(
+            {
+                "class": cls,
+                "tested": sent > 0,
+                "checks": max(sent, 0),
+                "waiting_for_approval": counts["held"],
+                "findings": counts["proven"],
+                "reason": reason,
+            }
+        )
+    return rows
+
+
+def print_coverage(rows: list[dict[str, Any]]) -> None:
+    """The class table, one line per class, in testing order."""
+    print("\n  bug classes, in the order they were tested", file=sys.stderr)
+    for row in rows:
+        if row["tested"]:
+            line = f"{row['checks']} checks, {row['findings']} proven"
+            if row["waiting_for_approval"]:
+                line += f", {row['waiting_for_approval']} waiting for approval"
+        else:
+            line = f"not tested: {row['reason']}"
+        print(f"    {row['class']:<17}{line}", file=sys.stderr)
+
+
 def not_tested(
     slug: str,
     args: argparse.Namespace,
@@ -1986,6 +2082,9 @@ def run_stages(  # noqa: PLR0912, PLR0915
         "state": writes,
     }
     outcome["not_tested"] = not_tested(slug, args, probes, access, signed_in=signed_in)
+    outcome["coverage"] = class_coverage(outcome, slug)
+    if probes is not None:
+        print_coverage(outcome["coverage"])
 
     if args.no_agent:
         print("\n[4/4] agents skipped (--no-agent)", file=sys.stderr)

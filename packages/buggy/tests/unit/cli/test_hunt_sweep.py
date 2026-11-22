@@ -107,6 +107,10 @@ def test_a_positive_probe_is_verified_and_graded(server: Server) -> None:
             }
         ],
         "error": None,
+        "by_class": {
+            "injection": {"checks": 1, "held": 0, "positive": 1, "proven": 1},
+            "misconfiguration": {"checks": 1, "held": 0, "positive": 0, "proven": 0},
+        },
     }
 
 

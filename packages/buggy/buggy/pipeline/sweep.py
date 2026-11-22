@@ -395,7 +395,72 @@ def plan_state_changing(
     return {"steps": chosen, "considered": len(steps), "left_out": len(steps) - len(chosen)}
 
 
+# ── bug classes: the order they are tested in, and what tests each ──────
+
+#: The class every planned probe tests (the probe registry's own classes).
+PROBE_CLASS: dict[str, str] = {
+    "sqli": "injection",
+    "ssti": "injection",
+    "command_injection": "injection",
+    "xss_reflected": "xss",
+    "path_traversal": "file_handling",
+    "open_redirect": "open_redirect",
+    "numeric_boundary": "business_logic",
+    "mass_assignment": "api",
+    "graphql_checks": "graphql",
+    "cors": "misconfiguration",
+    "idor": "access_control",
+    "jwt_alg_none": "auth_session",
+    "ssrf_canary": "ssrf",
+}
+#: One class after another, in this order. Every class of the findings model is here.
+CLASS_ORDER: tuple[str, ...] = (
+    "injection",
+    "xss",
+    "file_handling",
+    "open_redirect",
+    "access_control",
+    "business_logic",
+    "api",
+    "graphql",
+    "misconfiguration",
+    "auth_session",
+    "ssrf",
+    "csrf",
+    "crypto",
+    "info_exposure",
+)
+#: Why a class has no automatic check at all (it is left to the scanner or the agent stage).
+NO_AUTOMATIC_CHECK: dict[str, str] = {
+    "auth_session": "needs a session token to tamper with, which only the agent stage handles",
+    "ssrf": "needs an input that makes the server fetch a URL, chosen by the agent stage",
+    "csrf": "no automatic check exists; the agent stage tests it",
+    "crypto": "no automatic check exists; scanner results and the agent stage cover it",
+    "info_exposure": "covered by the scanner's known issues, not by a probe",
+}
+
+
+def class_of(probe: str) -> str:
+    """The bug class a probe tests; ``""`` for a name that is not a planned probe."""
+    return PROBE_CLASS.get(probe, "")
+
+
+def by_class(steps: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """``steps`` in testing order: one class after another, order kept within a class."""
+
+    def rank(step: dict[str, Any]) -> int:
+        cls = class_of(str(step.get("probe")))
+        return CLASS_ORDER.index(cls) if cls in CLASS_ORDER else len(CLASS_ORDER)
+
+    return sorted(steps, key=rank)
+
+
 __all__ = [
+    "CLASS_ORDER",
+    "NO_AUTOMATIC_CHECK",
+    "PROBE_CLASS",
+    "by_class",
+    "class_of",
     "DEFAULT_BUDGET",
     "DEFAULT_STATE_BUDGET",
     "MAX_BUDGET",
