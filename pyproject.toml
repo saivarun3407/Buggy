@@ -86,8 +86,6 @@ lint = [
 line-length = 100
 target-version = "py313"
 extend-exclude = [
-    "benchmark/xbow-validation-benchmarks",
-    "benchmark/MHBench",
     "benchmark/results",
     "integrations/reverse-skill",
 ]
@@ -199,8 +197,6 @@ exclude = [
     "**/node_modules",
     "reference",
     "packages/buggy/buggy/auth/providers",
-    "benchmark/xbow-validation-benchmarks",
-    "benchmark/MHBench",
     "benchmark/results",
 ]
 # Use pyright "standard" semantics rather than the basedpyright "all" default —
@@ -249,8 +245,6 @@ reportPrivateImportUsage = "warning"
 [tool.bandit]
 exclude_dirs = [
     "tests",
-    "benchmark/xbow-validation-benchmarks",
-    "benchmark/MHBench",
     "node_modules",
     ".venv",
 ]
@@ -265,8 +259,6 @@ files = [
 ]
 exclude = [
     "tests/",
-    "benchmark/xbow-validation-benchmarks",
-    "benchmark/MHBench",
     "node_modules",
     ".venv",
 ]
@@ -330,8 +322,6 @@ paths = [
 ]
 exclude = [
     "tests/",
-    "benchmark/xbow-validation-benchmarks",
-    "benchmark/MHBench",
     ".venv/",
     "node_modules/",
 ]
@@ -359,8 +349,6 @@ ignore_names = [
 [tool.deptry]
 extend_exclude = [
     "tests",
-    "benchmark/xbow-validation-benchmarks",
-    "benchmark/MHBench",
     "scripts",
     ".venv",
     "node_modules",

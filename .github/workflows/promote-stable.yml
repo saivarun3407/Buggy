@@ -108,7 +108,6 @@ jobs:
             buggy-pipeline
             buggy-browser
             buggy-web
-            buggy-solver
           )
           for img in "${images[@]}"; do
             src="${registry}/${img}:${VERSION}"

@@ -61,7 +61,7 @@ export CODEX_AUTH_VOLUME ?= $(shell test -f $(HOME)/.codex/auth.json && echo $(H
         web-build web-hotswap web-lint web-migrate \
         status logs health clean \
         node-install web-db-ensure \
-        benchmark recreate-litellm
+        recreate-litellm
 
 # ── Help (default target) ────────────────────────────────────────
 
@@ -101,9 +101,6 @@ help:
 	@echo "  make logs [SVC=]  Follow logs (default: langgraph)"
 	@echo "  make health       KG + Neo4j; Web when running"
 	@echo "  make clean        Full teardown (compose volumes + .dogfood/)"
-	@echo ""
-	@echo "Other:"
-	@echo "  make benchmark [ARGS=\"--level 1\"]"
 
 # ── Pre-release Verification (PRIMARY) ───────────────────────────
 
@@ -380,23 +377,13 @@ web-db-ensure:
 ## mount time; Claude Code CLI rotates credentials via atomic-rename which
 ## allocates a new inode that the container never sees. Force-recreate
 ## remounts and picks up the freshly written file. Intended to run as a
-## per-cycle preamble in the benchmark loop so each cycle starts with a
+## per-cycle preamble in a long run so each cycle starts with a
 ## valid OAuth access token (token TTL ~8h ≫ cycle duration ~30m).
 recreate-litellm:
 	@$(COMPOSE) up -d --no-build --force-recreate litellm
 	@docker exec buggy$${BUGGY_STACK_NAME:+-$${BUGGY_STACK_NAME}}-litellm sh -c 'test -s /root/.claude/.credentials.json' \
 		&& echo "recreate-litellm: creds mount OK" \
 		|| (echo "recreate-litellm: creds mount EMPTY — onboard first" && exit 1)
-
-## Run benchmark suite (usage: make benchmark ARGS="--level 1")
-benchmark:
-	uv run python -m benchmark.runner $(ARGS)
-
-## CVE-Bench offline dry run (mocked LLM + sandbox, 3 fixtures, seed=0).
-## Output: benchmark/results/cve-bench/dry-run-<YYYY-MM-DD>.jsonl
-cve-bench-dry:
-	CVE_BENCH_DRY_RUN_SEED=0 PYTHONHASHSEED=0 \
-		uv run python -m benchmark.cve_bench.dry_run $(ARGS)
 
 ## Build all stack images locally from containers/*.Dockerfile, tagged
 ## buggy-*:stable — the names docker-compose.yml references. Build once per
@@ -410,7 +397,6 @@ build-images:
 	docker build -f containers/egress-guard.Dockerfile -t buggy-egress-guard:stable .
 	docker build -f containers/pipeline.Dockerfile -t buggy-pipeline:stable .
 	docker build -f containers/browser.Dockerfile -t buggy-browser:stable .
-	docker build -f containers/solver.Dockerfile -t buggy-solver:stable .
 
 ## Scope-enforcement end-to-end test on the real compose topology: starts the
 ## egress guard, the sandbox and two local targets, then proves an

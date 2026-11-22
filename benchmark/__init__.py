@@ -1,19 +1,2 @@
-from __future__ import annotations
-
-from benchmark.config import BenchmarkConfig
-from benchmark.schemas import (
-    BenchmarkReport,
-    Challenge,
-    ChallengeResult,
-    FilterConfig,
-    SetupResult,
-)
-
-__all__ = [
-    "BenchmarkConfig",
-    "BenchmarkReport",
-    "Challenge",
-    "ChallengeResult",
-    "FilterConfig",
-    "SetupResult",
-]
+"""Benchmark tooling: the local lab (``benchmark.lab``) and the evidence-record
+contract (``benchmark.evidence``, ``benchmark.scorecard``)."""

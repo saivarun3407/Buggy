@@ -684,128 +684,11 @@ jobs:
   # tag. Otherwise identical to the docker matrix: same platforms, context,
   # cache, signing, SBOM and attestation.
   #
-  # buggy-solver: the web-blind devin solver (FROM buggy-langgraph). The
-  # compose `solver` service has no `profiles:`, so `buggy start` starts it
-  # and `up --no-build` fails on an install without it.
-  docker-derived:
-    name: Build & push ${{ matrix.image }}
-    needs: docker
-    runs-on: ubuntu-latest
-    environment: pypi-release
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - image: buggy-solver
-            dockerfile: containers/solver.Dockerfile
-            platforms: linux/amd64,linux/arm64
-            base-arg: LANGGRAPH_IMAGE
-            base-image: buggy-langgraph
-    steps:
-      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
-
-      - uses: docker/setup-qemu-action@06116385d9baf250c9f4dcb4858b16962ea869c3 # v4.1.0
-
-      - uses: docker/setup-buildx-action@d7f5e7f509e45cec5c76c4d5afdd7de93d0b3df5 # v4.1.0
-
-      - uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9 # v3.7.0
-        with:
-          registry: ghcr.io
-          username: ${{ github.actor }}
-          password: ${{ secrets.GITHUB_TOKEN }}
-
-      - name: Extract version from tag
-        id: version
-        run: |
-          echo "version=${GITHUB_REF_NAME#v}" >> "$GITHUB_OUTPUT"
-          # This repository's registry namespace, lower-cased for ghcr.io.
-          echo "registry=ghcr.io/${GITHUB_REPOSITORY_OWNER,,}" >> "$GITHUB_OUTPUT"
-
-      - name: Install cosign
-        uses: sigstore/cosign-installer@398d4b0eeef1380460a10c8013a76f728fb906ac # v3.9.1
-
-      - name: Build & push image
-        id: build
-        uses: docker/build-push-action@f9f3042f7e2789586610d6e8b85c8f03e5195baf # v7.2.0
-        with:
-          context: .
-          file: ${{ matrix.dockerfile }}
-          platforms: ${{ matrix.platforms }}
-          push: true
-          provenance: mode=max
-          sbom: true
-          build-args: |
-            VERSION=${{ steps.version.outputs.version }}
-            ${{ matrix.base-arg }}=${{ steps.version.outputs.registry }}/${{ matrix.base-image }}:${{ steps.version.outputs.version }}
-          tags: |
-            ${{ steps.version.outputs.registry }}/${{ matrix.image }}:${{ steps.version.outputs.version }}
-          cache-from: type=gha,scope=${{ matrix.image }}
-          cache-to: type=gha,mode=max,scope=${{ matrix.image }}
-
-      - name: Cosign sign image (keyless)
-        env:
-          COSIGN_EXPERIMENTAL: "true"
-          DIGEST: ${{ steps.build.outputs.digest }}
-          IMAGE: ${{ steps.version.outputs.registry }}/${{ matrix.image }}
-        run: |
-          cosign sign --yes \
-            "${IMAGE}@${DIGEST}"
-
-      - name: Generate CycloneDX SBOM
-        uses: anchore/sbom-action@e22c389904149dbc22b58101806040fa8d37a610 # v0.24.0
-        with:
-          image: ${{ steps.version.outputs.registry }}/${{ matrix.image }}:${{ steps.version.outputs.version }}
-          format: cyclonedx-json
-          output-file: sbom-${{ matrix.image }}.cdx.json
-
-      # Same retry+warning policy as the docker matrix attest step.
-      - name: Attest SBOM with cosign
-        env:
-          COSIGN_EXPERIMENTAL: "true"
-          DIGEST: ${{ steps.build.outputs.digest }}
-          REGISTRY: ${{ steps.version.outputs.registry }}
-          IMAGE_NAME: ${{ matrix.image }}
-        run: |
-          set -uo pipefail
-          target="${REGISTRY}/${IMAGE_NAME}@${DIGEST}"
-          predicate="sbom-${IMAGE_NAME}.cdx.json"
-          for attempt in 1 2 3 4 5; do
-            echo "Attestation attempt ${attempt}/5 for ${target}"
-            if cosign attest --yes \
-                --predicate "${predicate}" \
-                --type cyclonedx \
-                "${target}"; then
-              echo "Attestation succeeded on attempt ${attempt}."
-              exit 0
-            fi
-            if [ "${attempt}" -lt 5 ]; then
-              delay=$((30 * attempt))
-              echo "Attestation attempt ${attempt} failed; sleeping ${delay}s..."
-              sleep "${delay}"
-            fi
-          done
-          echo "::warning title=SBOM attestation skipped::cosign attest failed after 5 retries (Sigstore Rekor unavailable). Image is signed and SBOM artifact uploaded; transparency-log entry for the SBOM is missing and can be re-attested manually."
-
-      - name: Upload SBOM artifact
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
-        with:
-          name: sbom-${{ matrix.image }}
-          path: sbom-${{ matrix.image }}.cdx.json
-
-  # Atomic release gate. Waits until every Docker image AND the launcher
-  # binaries are pushed, verifies each :<version> manifest exists on GHCR,
-  # then promotes :<version> → channel tags (:stable for finals, :latest
-  # for all) and flips the GitHub release from draft → published. Until
-  # this job succeeds:
-  #   - GitHub `releases/latest` keeps returning the previous version, so
-  #     the launcher's stable channel never points at images mid-push.
-  #   - The channel tags are not moved, so a `${BUGGY_VERSION:-stable}`
-  #     fallback keeps resolving to the previous (working) release.
   publish-release:
     name: Verify images & publish release
     # publish-pypi is deliberately absent: PyPI is opt-in (vars.PUBLISH_PYPI)
     # and a skipped or failed wheel upload must not hold back the release.
-    needs: [launcher, docker, docker-heavy-merge, docker-web-merge, docker-derived]
+    needs: [launcher, docker, docker-heavy-merge, docker-web-merge]
     runs-on: ubuntu-latest
     environment: pypi-release
     steps:
@@ -848,7 +731,6 @@ jobs:
             buggy-pipeline
             buggy-browser
             buggy-web
-            buggy-solver
           )
           for img in "${images[@]}"; do
             ref="${REGISTRY}/${img}:${VERSION}"
@@ -881,7 +763,6 @@ jobs:
             buggy-pipeline
             buggy-browser
             buggy-web
-            buggy-solver
           )
           for img in "${images[@]}"; do
             src="${REGISTRY}/${img}:${VERSION}"
