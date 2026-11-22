@@ -239,8 +239,8 @@ _OPERATIONAL_ROLES = {
     "cloud_hunter",
     "ad_operator",
     "phisher",
-    # NOTE: forensicator is in _PASSIVE_ROLES (below),
-    # not here. It gets the 5 compatible cross-cutting prompts but NOT
+    # NOTE: read-only roles are in _PASSIVE_ROLES (below),
+    # not here. They get the 5 compatible cross-cutting prompts but NOT
     # _MISSION_DIRECTIVE or _KALI_ENVIRONMENT, which contradict their
     # agent-specific read-only rules.
     "supply_chain_operator",
@@ -268,7 +268,6 @@ _OPERATIONAL_ROLES = {
 # NOT the attack-oriented cross-cutting prompts (_MISSION_DIRECTIVE,
 # _KALI_ENVIRONMENT) which contradict their agent-specific rules.
 _PASSIVE_ROLES = {
-    "forensicator",  # "NEVER attack, modify a live host, or alter evidence"
     "retrospective",  # read-only post-engagement analysis, no bash
 }
 

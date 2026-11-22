@@ -138,7 +138,6 @@ _PHASE_FOR_ROLE: dict[str, str] = {
     "asvs_assessor": "analyst",
     "contract_auditor": "smart-contracts",
     "reverser": "reverse-engineering",
-    "forensicator": "dfir",
     "supply_chain_operator": "supply-chain",
     # Blue Cell is the purple-team detection-validation agent (defensive sibling
     # of the Red Cell); adversary-emulation is the seeded meta phase for the

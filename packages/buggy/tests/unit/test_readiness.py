@@ -282,7 +282,7 @@ def test_missing_tool_is_degraded_and_named():
     assert recon["missing_tools"] == ["nmap"]
     assert recon["status"] == "degraded (missing: nmap)"
     # A domain that does not use nmap stays ready.
-    assert _domain(rows, "forensicator")["ready"] is True
+    assert _domain(rows, "analyst")["ready"] is True
 
 
 def test_capability_with_one_of_its_binaries_present_is_not_missing():
