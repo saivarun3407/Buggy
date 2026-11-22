@@ -14,7 +14,6 @@
     "ad_operator": "./packages/buggy/buggy/agents/standard/ad_operator.py:graph",
     "blue_cell": "./packages/buggy/buggy/agents/standard/blue_cell.py:graph",
     "phisher": "./packages/buggy/buggy/agents/standard/phisher.py:graph",
-    "wireless_operator": "./packages/buggy/buggy/agents/standard/wireless_operator.py:graph",
     "osint_operator": "./packages/buggy/buggy/agents/standard/osint_operator.py:graph",
     "iot_operator": "./packages/buggy/buggy/agents/standard/iot_operator.py:graph",
     "ics_operator": "./packages/buggy/buggy/agents/standard/ics_operator.py:graph",

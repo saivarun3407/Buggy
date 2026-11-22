@@ -564,7 +564,6 @@ AGENT_TIERS: dict[str, Tier] = {
     "soundwave": Tier.LOW,
     "recon": Tier.LOW,
     "scanner": Tier.LOW,
-    "wireless_operator": Tier.LOW,
     "osint_operator": Tier.LOW,
 }
 
@@ -588,7 +587,6 @@ AGENT_TEMPERATURES: dict[str, float] = {
     "vulnresearch": 0.4,
     "recon": 0.3,
     "phisher": 0.4,
-    "wireless_operator": 0.2,
     "osint_operator": 0.3,
     "iot_operator": 0.2,
     "ics_operator": 0.1,

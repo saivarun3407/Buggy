@@ -133,7 +133,6 @@ _PHASE_FOR_ROLE: dict[str, str] = {
     "postexploit": "post-exploit",
     "ad_operator": "active-directory",
     "cloud_hunter": "cloud",
-    "wireless_operator": "wireless",
     "phisher": "phishing",
     "analyst": "analyst",
     "asvs_assessor": "analyst",

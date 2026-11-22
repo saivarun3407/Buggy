@@ -1032,7 +1032,6 @@ ROLE_CAPABILITY_POLICY: dict[str, RoleCapabilityPolicy] = {
     "reverser": RoleCapabilityPolicy(phases=("TA0002",), max_risk=RiskTier.INTRUSIVE),
     "iot_operator": RoleCapabilityPolicy(phases=("TA0002",), max_risk=RiskTier.INTRUSIVE),
     "ics_operator": RoleCapabilityPolicy(phases=("TA0043",), max_risk=RiskTier.BOUNDED_ACTIVE),
-    "wireless_operator": RoleCapabilityPolicy(max_risk=RiskTier.INTRUSIVE),
     "phisher": RoleCapabilityPolicy(phases=("TA0001", "TA0006"), max_risk=RiskTier.INTRUSIVE),
     "supply_chain_operator": RoleCapabilityPolicy(
         phases=("TA0043",), max_risk=RiskTier.BOUNDED_ACTIVE

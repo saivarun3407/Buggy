@@ -245,7 +245,6 @@ _OPERATIONAL_ROLES = {
     # agent-specific read-only / passive-only rules.
     "iot_operator",
     "ics_operator",
-    "wireless_operator",
     "supply_chain_operator",
     # Bounty bundle (fork-only) — every appsec / bug-bounty specialist is
     # an operational hunter that produces findings, so each gets the

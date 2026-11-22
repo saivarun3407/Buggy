@@ -12,7 +12,6 @@ from buggy.agents.standard import (
     osint_operator,
     phisher,
     supply_chain_operator,
-    wireless_operator,
 )
 from buggy.backends import SKILLS_LOCAL_PATH
 
@@ -23,7 +22,6 @@ _SKILLS_ROOT = Path(SKILLS_LOCAL_PATH)
 # Mapping: module -> the /skills/standard/ dir its primary content lives in.
 _EXPLICIT_SOURCE_AGENTS = [
     (asvs_assessor, "/skills/standard/analyst/"),
-    (wireless_operator, "/skills/standard/wireless/"),
     (phisher, "/skills/standard/phisher/"),
     (osint_operator, "/skills/standard/osint/"),
     (iot_operator, "/skills/standard/iot/"),
@@ -39,7 +37,6 @@ _EXPLICIT_SOURCE_AGENTS = [
 # its role name and skill dir intentionally coincide.
 _ROLE_NE_DIR_AGENTS = [
     asvs_assessor,
-    wireless_operator,
     osint_operator,
     iot_operator,
     ics_operator,

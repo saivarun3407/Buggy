@@ -78,7 +78,6 @@ DOMAINS: tuple[Domain, ...] = (
     Domain("ad_operator", ("runtime", "ad", "smb", "credentials"), profiles=("ad",)),
     Domain("blue_cell", ("runtime", "network", "dfir")),
     Domain("phisher", ("runtime", "recon")),
-    Domain("wireless_operator", ("runtime", "network")),
     Domain("osint_operator", ("runtime", "recon")),
     Domain("iot_operator", ("runtime", "reversing", "network")),
     Domain("ics_operator", ("runtime", "recon", "network")),
