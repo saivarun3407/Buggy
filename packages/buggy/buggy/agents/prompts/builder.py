@@ -53,7 +53,6 @@ _PROMPTS_DIR = Path(__file__).parent
 _PROMPT_SEARCH_PATHS: tuple[Path, ...] = (
     _PROMPTS_DIR,
     _PROMPTS_DIR / "standard",
-    _PROMPTS_DIR / "plugins",
     _PROMPTS_DIR / "bounty",
 )
 

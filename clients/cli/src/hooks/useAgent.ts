@@ -335,7 +335,7 @@ export function useAgent({
             // via config.configurable from the launcher's env.
             //
             // When the operator has explicitly picked another orchestrator
-            // via /agent (e.g. "vulnresearch"), skip this auto-handoff —
+            // via /agent, skip this auto-handoff —
             // their explicit choice beats the soundwave→buggy default.
             if (getAssistantOverride()) {
               addEvent({

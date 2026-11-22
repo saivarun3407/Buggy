@@ -53,7 +53,7 @@ buggy-sdk = { workspace = true }
 # cleanly. Override at runtime with ``BUGGY_PLUGINS``.
 
 [tool.buggy.plugins]
-enabled = ["standard", "plugins", "bounty"]
+enabled = ["standard", "bounty"]
 
 [dependency-groups]
 dev = [

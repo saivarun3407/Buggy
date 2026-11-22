@@ -200,7 +200,7 @@ _BASH_AGENT_SLOTS: frozenset[MiddlewareSlot] = _BASE_SLOTS | {
     # dumps, HTTP bodies, file reads, scanner output). They get the
     # parsing firewall so oversized output is compressed to the
     # security-relevant essentials before it floods the planner context.
-    # Planning-only (soundwave), read-only (detector), and the
+    # Planning-only (soundwave) and the
     # orchestrator (buggy, which consumes sub-agent transcripts, not
     # raw tool bytes) deliberately skip it.
     MiddlewareSlot.PARSING_FIREWALL,
@@ -231,7 +231,6 @@ SLOTS_PER_ROLE: dict[str, frozenset[MiddlewareSlot]] = {
     },
     # ── Standard non-bash agent (planning + interview) ──
     "soundwave": _BASE_SLOTS | {MiddlewareSlot.ENGAGEMENT_CONTEXT},
-    # ── Standard read-only agent (Blue Cell — detection coverage, no bash) ──
     # ── Standard bash-executing specialists ──
     "recon": _BASH_AGENT_SLOTS,
     # The exploit agent additionally carries the KG middleware: before
@@ -244,17 +243,6 @@ SLOTS_PER_ROLE: dict[str, frozenset[MiddlewareSlot]] = {
     # cases the spec calls out
     # (docs/design/2026-06-03-kg-middleware-redesign.md § 4.10).
     "analyst": _BASH_AGENT_SLOTS | {MiddlewareSlot.KG},
-    # ── Plugin orchestrator (no EngagementContext per the existing
-    # vulnresearch factory — it consumes its parent's context) ──
-    "vulnresearch": _BASE_SLOTS
-    | {MiddlewareSlot.SUBAGENT, MiddlewareSlot.COORDINATOR, MiddlewareSlot.OPPLAN},
-    # ── Plugin read-only specialist (no bash, no SandboxNotification) ──
-    "detector": _BASE_SLOTS,
-    # ── Plugin bash-executing specialists ──
-    "verifier": _BASH_AGENT_SLOTS,
-    "patcher": _BASH_AGENT_SLOTS,
-    "scanner": _BASH_AGENT_SLOTS,
-    "exploiter": _BASH_AGENT_SLOTS,
     # ── Bounty bundle bash-executing specialists (fork-only appsec /
     # bug-bounty slate). All are bash-driven, RoE-scoped, and HITL-gated
     # — identical slot stack to the standard bash agents so they inherit

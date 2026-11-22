@@ -86,8 +86,8 @@ def _install_graph_module(graphs: dict[str, Any], register_calls: list[Any]) -> 
 
 
 def test_path_to_module_happy_path() -> None:
-    module, variable = _path_to_module("./buggy/agents/plugins/vulnresearch.py:graph")
-    assert module == "buggy.agents.plugins.vulnresearch"
+    module, variable = _path_to_module("./buggy/agents/bounty/scout.py:graph")
+    assert module == "buggy.agents.bounty.scout"
     assert variable == "graph"
 
 
@@ -99,15 +99,15 @@ def test_path_to_module_strips_leading_dot_slash_and_py_suffix() -> None:
 
 def test_path_to_module_missing_variable_suffix_raises_value_error() -> None:
     with pytest.raises(ValueError, match="missing ':variable' suffix"):
-        _path_to_module("./buggy/agents/plugins/vulnresearch.py")
+        _path_to_module("./buggy/agents/bounty/scout.py")
 
 
 # ── _resolve_bundle ──────────────────────────────────────────────────────
 
 
 def test_resolve_bundle_known_returns_graph_map() -> None:
-    resolved = _resolve_bundle("plugins")
-    assert resolved is _BUNDLE_TO_GRAPHS["plugins"]
+    resolved = _resolve_bundle("bounty")
+    assert resolved is _BUNDLE_TO_GRAPHS["bounty"]
 
 
 def test_resolve_bundle_unknown_raises_404() -> None:
@@ -133,14 +133,14 @@ def test_list_bundles_all_registered_reports_enabled_true() -> None:
 
 
 def test_list_bundles_partial_registration_reports_enabled_false() -> None:
-    # Register only the first graph of the 'plugins' bundle — partial state
+    # Register only the first graph of the 'bounty' bundle — partial state
     # must report enabled=False.
-    plugin_graphs = list(_BUNDLE_TO_GRAPHS["plugins"])
+    plugin_graphs = list(_BUNDLE_TO_GRAPHS["bounty"])
     with patch.object(plugins_api, "_registered_graph_ids", return_value={plugin_graphs[0]}):
         resp = client.get("/_buggy/bundles")
     assert resp.status_code == 200
     bundles = {b["name"]: b for b in resp.json()["bundles"]}
-    assert bundles["plugins"]["enabled"] is False
+    assert bundles["bounty"]["enabled"] is False
 
 
 def test_list_bundles_nothing_registered_reports_enabled_false() -> None:
@@ -159,11 +159,11 @@ def test_enable_bundle_registers_every_graph(_clean_lg_modules: None) -> None:
     _install_graph_module({}, register_calls)
     sentinel = object()
     with patch.object(plugins_api, "_load_graph", return_value=sentinel):
-        resp = client.post("/_buggy/bundles/plugins/enable")
+        resp = client.post("/_buggy/bundles/bounty/enable")
     assert resp.status_code == 200
     body = resp.json()
-    expected = list(_BUNDLE_TO_GRAPHS["plugins"])
-    assert body["bundle"] == "plugins"
+    expected = list(_BUNDLE_TO_GRAPHS["bounty"])
+    assert body["bundle"] == "bounty"
     assert body["enabled"] is True
     assert body["graphs"] == expected
     assert body["skipped"] == []
@@ -174,14 +174,14 @@ def test_enable_bundle_registers_every_graph(_clean_lg_modules: None) -> None:
 def test_enable_bundle_skips_already_registered_graphs(
     _clean_lg_modules: None,
 ) -> None:
-    plugin_graphs = list(_BUNDLE_TO_GRAPHS["plugins"])
+    plugin_graphs = list(_BUNDLE_TO_GRAPHS["bounty"])
     already = plugin_graphs[0]
     register_calls: list[Any] = []
     # The first graph is already present in GRAPHS -> it must be skipped,
     # not re-registered.
     _install_graph_module({already: object()}, register_calls)
     with patch.object(plugins_api, "_load_graph", return_value=object()):
-        resp = client.post("/_buggy/bundles/plugins/enable")
+        resp = client.post("/_buggy/bundles/bounty/enable")
     assert resp.status_code == 200
     body = resp.json()
     assert body["skipped"] == [already]
@@ -208,7 +208,7 @@ def test_enable_bundle_register_graph_failure_is_500(
     sys.modules["langgraph_api.graph"] = mod
 
     with patch.object(plugins_api, "_load_graph", return_value=object()):
-        resp = client.post("/_buggy/bundles/plugins/enable")
+        resp = client.post("/_buggy/bundles/bounty/enable")
     assert resp.status_code == 500
     detail = resp.json()["detail"]
     assert "register_graph" in detail
@@ -309,15 +309,15 @@ def _install_disable_stubs(
 def test_disable_bundle_happy_path_removes_graphs(
     _clean_lg_modules: None,
 ) -> None:
-    plugin_graphs = list(_BUNDLE_TO_GRAPHS["plugins"])
+    plugin_graphs = list(_BUNDLE_TO_GRAPHS["bounty"])
     live_graphs = {gid: object() for gid in plugin_graphs}
     deleted: list[Any] = []
     _install_disable_stubs(graphs=live_graphs, deleted=deleted)
 
-    resp = client.post("/_buggy/bundles/plugins/disable")
+    resp = client.post("/_buggy/bundles/bounty/disable")
     assert resp.status_code == 200
     body = resp.json()
-    assert body["bundle"] == "plugins"
+    assert body["bundle"] == "bounty"
     assert body["enabled"] is False
     assert body["graphs"] == plugin_graphs
     assert body["skipped"] == []
@@ -329,13 +329,13 @@ def test_disable_bundle_happy_path_removes_graphs(
 def test_disable_bundle_skips_graphs_not_registered(
     _clean_lg_modules: None,
 ) -> None:
-    plugin_graphs = list(_BUNDLE_TO_GRAPHS["plugins"])
+    plugin_graphs = list(_BUNDLE_TO_GRAPHS["bounty"])
     # Only the first graph is live; the rest must be reported as skipped.
     live_graphs = {plugin_graphs[0]: object()}
     deleted: list[Any] = []
     _install_disable_stubs(graphs=live_graphs, deleted=deleted)
 
-    resp = client.post("/_buggy/bundles/plugins/disable")
+    resp = client.post("/_buggy/bundles/bounty/disable")
     assert resp.status_code == 200
     body = resp.json()
     assert body["graphs"] == [plugin_graphs[0]]
@@ -347,12 +347,12 @@ def test_disable_bundle_uses_grpc_assistants_when_postgres(
     _clean_lg_modules: None,
 ) -> None:
     # postgres backend -> route imports Assistants from langgraph_api.grpc.ops.
-    plugin_graphs = list(_BUNDLE_TO_GRAPHS["plugins"])
+    plugin_graphs = list(_BUNDLE_TO_GRAPHS["bounty"])
     live_graphs = {gid: object() for gid in plugin_graphs}
     deleted: list[Any] = []
     _install_disable_stubs(graphs=live_graphs, deleted=deleted, postgres=True)
 
-    resp = client.post("/_buggy/bundles/plugins/disable")
+    resp = client.post("/_buggy/bundles/bounty/disable")
     assert resp.status_code == 200
     assert resp.json()["graphs"] == plugin_graphs
     assert len(deleted) == len(plugin_graphs)
@@ -365,12 +365,12 @@ def test_disable_bundle_swallows_assistants_delete_failure(
     # A failing Assistants.delete must not abort the disable — the
     # in-memory GRAPHS removal still gates usage, DB cleanup is
     # best-effort.
-    plugin_graphs = list(_BUNDLE_TO_GRAPHS["plugins"])
+    plugin_graphs = list(_BUNDLE_TO_GRAPHS["bounty"])
     live_graphs = {gid: object() for gid in plugin_graphs}
     deleted: list[Any] = []
     _install_disable_stubs(graphs=live_graphs, deleted=deleted, delete_raises=True)
 
-    resp = client.post("/_buggy/bundles/plugins/disable")
+    resp = client.post("/_buggy/bundles/bounty/disable")
     assert resp.status_code == 200
     body = resp.json()
     # Graphs still reported removed despite the delete failure.

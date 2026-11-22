@@ -111,22 +111,19 @@ class TestAgentTiers:
         for role in (
             "buggy",
             "exploit",
-            "exploiter",
-            "patcher",
             "analyst",
-            "vulnresearch",
         ):
             assert AGENT_TIERS[role] == Tier.HIGH
 
     def test_mid_tier_agents(self):
         for role in (
-            "detector",
-            "verifier",
+            "scout",
+            "api_security",
         ):
             assert AGENT_TIERS[role] == Tier.MID
 
     def test_low_tier_agents(self):
-        for role in ("soundwave", "recon", "scanner"):
+        for role in ("soundwave", "recon"):
             assert AGENT_TIERS[role] == Tier.LOW
 
     def test_all_agents_have_temperature(self):

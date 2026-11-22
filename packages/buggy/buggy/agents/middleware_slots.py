@@ -99,10 +99,10 @@ def skills_sources_for(role: str) -> list[str]:
     appended last so commercial / 3rd-party skills can layer on top of
     the OSS baseline without overriding the whole SKILLS slot factory.
 
-    Plugin specialists (detector, scanner, vulnresearch, …) and any
-    out-of-tree commercial agent should NOT rely on this fallback —
-    they pass an explicit ``skill_sources=`` kwarg to ``build_middleware``
-    instead (see the 6 OSS plugin factories for the canonical pattern).
+    Plugin specialists and any out-of-tree commercial agent should NOT
+    rely on this fallback — they pass an explicit ``skill_sources=`` kwarg
+    to ``build_middleware`` instead (see the bounty factories in
+    ``buggy.agents.bounty._common`` for the canonical pattern).
     The fallback exists purely so the OSS 10 standard factories don't
     have to repeat ``[f"/skills/standard/{_ROLE}/", "/skills/shared/"]``
     each.

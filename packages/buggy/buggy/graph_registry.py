@@ -37,21 +37,9 @@ STANDARD_GRAPHS: dict[str, str] = {
     "analyst": "./buggy/agents/standard/analyst.py:graph",
 }
 
-# Plugins bundle — vulnresearch family (community-plugin shape demonstrated
-# from inside OSS). Opt-in via ``BUGGY_PLUGINS=standard,plugins`` or
-# ``[plugins] enabled = ["standard", "plugins"]`` in ``.buggy.toml``.
-PLUGIN_GRAPHS: dict[str, str] = {
-    "vulnresearch": "./buggy/agents/plugins/vulnresearch.py:graph",
-    "scanner": "./buggy/agents/plugins/scanner.py:graph",
-    "detector": "./buggy/agents/plugins/detector.py:graph",
-    "verifier": "./buggy/agents/plugins/verifier.py:graph",
-    "patcher": "./buggy/agents/plugins/patcher.py:graph",
-    "exploiter": "./buggy/agents/plugins/exploiter.py:graph",
-}
-
 # Bounty bundle — fork-only appsec / bug-bounty specialist slate. Opt-in via
-# ``BUGGY_PLUGINS=standard,plugins,bounty`` or
-# ``[plugins] enabled = ["standard", "plugins", "bounty"]`` in
+# ``BUGGY_PLUGINS=standard,bounty`` or
+# ``[plugins] enabled = ["standard", "bounty"]`` in
 # ``.buggy.toml`` (the fork ships it enabled in pyproject). Kept in its
 # own dict — and deliberately OUT of ``langgraph.json`` / ``STANDARD_GRAPHS`` —
 # so the standard bundle can still track upstream cleanly.
@@ -72,19 +60,18 @@ BOUNTY_GRAPHS: dict[str, str] = {
 # Mapping from bundle name to its graph dict — used by build_langserve_graphs.
 _BUNDLE_TO_GRAPHS: dict[str, dict[str, str]] = {
     "standard": STANDARD_GRAPHS,
-    "plugins": PLUGIN_GRAPHS,
     "bounty": BOUNTY_GRAPHS,
 }
 
 # Backward-compat alias — full unfiltered manifest (every OSS-shipped graph).
 # Prefer ``build_langserve_graphs()`` which respects BUGGY_PLUGINS.
-BUILTIN_GRAPHS: dict[str, str] = {**STANDARD_GRAPHS, **PLUGIN_GRAPHS, **BOUNTY_GRAPHS}
+BUILTIN_GRAPHS: dict[str, str] = {**STANDARD_GRAPHS, **BOUNTY_GRAPHS}
 
 
 def build_langserve_graphs() -> dict[str, str]:
     """Return ``{name: module:graph}`` for active bundles + discovered plugins.
 
-    OSS-internal bundles (``standard``, ``plugins``) are filtered by
+    OSS-internal bundles (``standard``, ``bounty``) are filtered by
     ``BUGGY_PLUGINS`` / config-file allowlist. Plugin-contributed
     agents (registered under the ``buggy.agents`` entry-point group
     by external packages) are always merged in — installing the package

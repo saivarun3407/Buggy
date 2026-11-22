@@ -523,14 +523,9 @@ AGENT_TIERS: dict[str, Tier] = {
     # long context accumulation. Failure cost is mission-critical.
     "buggy": Tier.HIGH,
     "exploit": Tier.HIGH,
-    "exploiter": Tier.HIGH,
-    "patcher": Tier.HIGH,
     "analyst": Tier.HIGH,
-    "vulnresearch": Tier.HIGH,
     # MID — precision execution, code generation, structured judgment.
     # Tool-heavy with moderate iteration.
-    "detector": Tier.MID,
-    "verifier": Tier.MID,
     # Bounty bundle (fork-only). HIGH for the high-payout chained-logic
     # specialists (account takeover, multi-step business-logic abuse,
     # SSRF → cloud pivot); MID for the structured-audit / enumeration
@@ -551,20 +546,13 @@ AGENT_TIERS: dict[str, Tier] = {
     # LOW — high-throughput, low reasoning depth. Recon / triage / docs.
     "soundwave": Tier.LOW,
     "recon": Tier.LOW,
-    "scanner": Tier.LOW,
 }
 
 AGENT_TEMPERATURES: dict[str, float] = {
     "buggy": 0.4,
     "soundwave": 0.4,
     "exploit": 0.3,
-    "exploiter": 0.2,
-    "detector": 0.2,
-    "verifier": 0.2,
-    "patcher": 0.2,
     "analyst": 0.2,
-    "scanner": 0.2,
-    "vulnresearch": 0.4,
     "recon": 0.3,
     # Bounty bundle (fork-only). Low temperatures for deterministic
     # audit / enumeration; slightly higher where creative chaining helps

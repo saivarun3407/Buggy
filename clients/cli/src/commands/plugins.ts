@@ -1,9 +1,9 @@
 /**
  * /plugins — runtime plugin bundle enable/disable.
  *
- * OSS default loads the ``standard`` bundle only (10 official agents).
- * The ``plugins`` bundle ships extras (vulnresearch orchestrator + its
- * 5 specialists) but is off by default. /plugins lets the operator
+ * OSS default loads the ``standard`` bundle only. Other bundles (the
+ * ``bounty`` web/API slate, external plugins) can be toggled at runtime.
+ * /plugins lets the operator
  * toggle bundles without restarting the langgraph container — the
  * langgraph platform exposes a custom HTTP surface under
  * ``/_buggy/bundles`` that calls ``register_graph()`` at runtime.
@@ -14,11 +14,10 @@
  *   /plugins disable <name>   Drop every graph in the bundle
  *
  * Enabling a bundle adds its orchestrator(s) to the /agent switcher.
- * For ``plugins`` that means ``vulnresearch`` becomes selectable.
  *
  * Persistence: runtime-only. Bundles activated here do NOT survive a
  * ``buggy restart``. To make a selection permanent, set
- * ``BUGGY_PLUGINS=standard,plugins`` in ``~/.buggy/.env``.
+ * ``BUGGY_PLUGINS=standard,bounty`` in ``~/.buggy/.env``.
  */
 
 import type { Command } from "./types.js";
@@ -136,10 +135,6 @@ const plugins: Command = {
           lines.push(
             `  Skipped (already ${verb === "enabled" ? "active" : "absent"}): ${data.skipped.join(", ")}`,
           );
-        }
-        if (verb === "enabled" && data.bundle === "plugins") {
-          lines.push("");
-          lines.push("Tip: switch to the new orchestrator with `/agent vulnresearch`.");
         }
         ctx.addSystemEvent(lines.join("\n"));
       } catch (err) {

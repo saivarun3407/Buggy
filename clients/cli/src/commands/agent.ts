@@ -35,7 +35,7 @@ function apiBase(): string {
   return process.env.BUGGY_API_URL || "http://localhost:2024";
 }
 
-const ORCHESTRATORS = new Set(["buggy", "soundwave", "vulnresearch"]);
+const ORCHESTRATORS = new Set(["buggy", "soundwave"]);
 
 /**
  * Discover orchestrators dynamically from the agent runtime.
@@ -90,7 +90,7 @@ const agent: Command = {
           }
           lines.push("");
           lines.push("Usage:");
-          lines.push("  /agent <name>     Switch (e.g. /agent vulnresearch)");
+          lines.push("  /agent <name>     Switch (e.g. /agent soundwave)");
           lines.push("  /agent clear      Drop the override, resume default behaviour");
           ctx.addSystemEvent(lines.join("\n"));
         } catch (err) {

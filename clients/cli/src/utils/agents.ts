@@ -20,12 +20,6 @@ export const AGENT_LABELS: Record<string, string> = {
 
   // Specialist agents
   analyst: "Analyst",
-  vulnresearch: "VulnResearch",
-  scanner: "Scanner",
-  detector: "Detector",
-  verifier: "Verifier",
-  patcher: "Patcher",
-  exploiter: "Exploiter",
 };
 
 /** Convert a backend agent name to its display label. */

@@ -8,14 +8,13 @@ startup.
 
 Bundle model
 ------------
-Buggy's graph manifest is split into two bundles by
+Buggy's graph manifest is split into bundles by
 ``buggy.graph_registry``:
 
-  - ``standard``: official OSS agents (buggy + 9 specialists).
+  - ``standard``: official OSS agents (buggy + its specialists).
     Always loaded at startup.
-  - ``plugins``: vulnresearch family (orchestrator + 5 specialists).
-    Off by default. Activated either via ``BUGGY_PLUGINS`` env
-    (next-restart) or this API (immediately).
+  - ``bounty``: the web/API specialist slate. Activated either via
+    ``BUGGY_PLUGINS`` env (next-restart) or this API (immediately).
 
 Endpoints
 ---------

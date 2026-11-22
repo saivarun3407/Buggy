@@ -77,53 +77,17 @@ export const AGENT_DISPLAY_CONFIG: Record<string, AgentDisplayMeta> = {
     role: "Reconnaissance",
     color: "#3b82f6",
   },
-  scanner: {
-    name: "Scanner",
-    description: "Vulnerability scanning — CVE detection, fingerprinting",
-    role: "Reconnaissance",
-    color: "#6366f1",
-  },
   exploit: {
     name: "Exploit",
     description: "Initial access — exploit development and execution",
     role: "Exploitation",
     color: "#f59e0b",
   },
-  exploiter: {
-    name: "Exploiter",
-    description: "PoC development — proof-of-concept exploit crafting",
-    role: "Exploitation",
-    color: "#d97706",
-  },
-  vulnresearch: {
-    name: "Vulnresearch",
-    description: "Vulnerability research orchestrator — five-stage pipeline",
-    role: "Vulnerability Research",
-    color: "#dc2626",
-  },
   analyst: {
     name: "Analyst",
     description: "Deep vulnerability analysis — SSRF, SQLi, XSS chains",
     role: "Analysis",
     color: "#f97316",
-  },
-  detector: {
-    name: "Detector",
-    description: "Vulnerability detection — pattern matching, triage",
-    role: "Vulnerability Research",
-    color: "#84cc16",
-  },
-  verifier: {
-    name: "Verifier",
-    description: "Vulnerability verification — confirms exploitability",
-    role: "Vulnerability Research",
-    color: "#64748b",
-  },
-  patcher: {
-    name: "Patcher",
-    description: "Patch proposal — generates and tests fixes",
-    role: "Vulnerability Research",
-    color: "#78716c",
   },
 };
 
