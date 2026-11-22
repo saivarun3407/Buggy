@@ -990,7 +990,6 @@ class RoleCapabilityPolicy:
 ROLE_CAPABILITY_POLICY: dict[str, RoleCapabilityPolicy] = {
     "recon": RoleCapabilityPolicy(phases=("TA0043",), max_risk=RiskTier.BOUNDED_ACTIVE),
     "exploit": RoleCapabilityPolicy(phases=("TA0001", "TA0002"), max_risk=RiskTier.INTRUSIVE),
-    "cloud_hunter": RoleCapabilityPolicy(phases=("TA0043", "TA0006"), max_risk=RiskTier.INTRUSIVE),
     "asvs_assessor": RoleCapabilityPolicy(phases=("TA0001",), max_risk=RiskTier.BOUNDED_ACTIVE),
     "analyst": RoleCapabilityPolicy(max_risk=RiskTier.PASSIVE),
     "contract_auditor": RoleCapabilityPolicy(max_risk=RiskTier.INTRUSIVE),

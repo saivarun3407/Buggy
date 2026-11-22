@@ -37,7 +37,6 @@ STANDARD_GRAPHS: dict[str, str] = {
     "analyst": "./buggy/agents/standard/analyst.py:graph",
     "asvs_assessor": "./buggy/agents/standard/asvs_assessor.py:graph",
     "contract_auditor": "./buggy/agents/standard/contract_auditor.py:graph",
-    "cloud_hunter": "./buggy/agents/standard/cloud_hunter.py:graph",
     "blue_cell": "./buggy/agents/standard/blue_cell.py:graph",
 }
 

@@ -105,7 +105,6 @@ _STANDARD_FACTORIES = [
         "buggy.agents.standard.contract_auditor",
         "create_contract_auditor_agent",
     ),
-    ("cloud_hunter", "buggy.agents.standard.cloud_hunter", "create_cloud_hunter_agent"),
 ]
 
 

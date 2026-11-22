@@ -189,7 +189,7 @@ _BASE_SLOTS: frozenset[MiddlewareSlot] = _TAIL_SLOTS | {
 }
 
 # Standard bash-executing agents (recon/exploit/analyst/
-# reverser/contract_auditor/cloud_hunter + plugin
+# contract_auditor + plugin
 # specialists verifier/patcher/scanner/exploiter): base + engagement
 # context + sandbox notification.
 _BASH_AGENT_SLOTS: frozenset[MiddlewareSlot] = _BASE_SLOTS | {
@@ -253,7 +253,6 @@ SLOTS_PER_ROLE: dict[str, frozenset[MiddlewareSlot]] = {
     "analyst": _BASH_AGENT_SLOTS | {MiddlewareSlot.KG},
     "asvs_assessor": _BASH_AGENT_SLOTS,
     "contract_auditor": _BASH_AGENT_SLOTS | {MiddlewareSlot.KG},
-    "cloud_hunter": _BASH_AGENT_SLOTS,
     # ── Plugin orchestrator (no EngagementContext per the existing
     # vulnresearch factory — it consumes its parent's context) ──
     "vulnresearch": _BASE_SLOTS

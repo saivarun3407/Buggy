@@ -5,7 +5,6 @@ from buggy.tools.bash import (
     bash_output,
     bash_status,
 )
-from buggy.tools.cloud.tools import CLOUD_TOOLS
 from buggy.tools.contracts.tools import CONTRACT_TOOLS
 from buggy.tools.defense import DEFENSE_TOOLS
 from buggy.tools.evidence import EVIDENCE_TOOLS
@@ -22,7 +21,6 @@ __all__ = [
     "bash_output",
     "bash_status",
     "BASH_TOOLS",
-    "CLOUD_TOOLS",
     "CONTRACT_TOOLS",
     "DEFENSE_TOOLS",
     "EVIDENCE_TOOLS",

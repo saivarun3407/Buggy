@@ -8,7 +8,6 @@
     "analyst": "./packages/buggy/buggy/agents/standard/analyst.py:graph",
     "asvs_assessor": "./packages/buggy/buggy/agents/standard/asvs_assessor.py:graph",
     "contract_auditor": "./packages/buggy/buggy/agents/standard/contract_auditor.py:graph",
-    "cloud_hunter": "./packages/buggy/buggy/agents/standard/cloud_hunter.py:graph",
     "blue_cell": "./packages/buggy/buggy/agents/standard/blue_cell.py:graph"
   },
   "env": ".env",

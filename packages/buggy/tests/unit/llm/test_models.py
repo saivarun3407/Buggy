@@ -123,7 +123,6 @@ class TestAgentTiers:
         for role in (
             "detector",
             "verifier",
-            "cloud_hunter",
         ):
             assert AGENT_TIERS[role] == Tier.MID
 

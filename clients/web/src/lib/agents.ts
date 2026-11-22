@@ -107,12 +107,6 @@ export const AGENT_DISPLAY_CONFIG: Record<string, AgentDisplayMeta> = {
     role: "Analysis",
     color: "#f97316",
   },
-  cloud_hunter: {
-    name: "Cloud Hunter",
-    description: "Cloud security — AWS IAM, K8s, Terraform, metadata",
-    role: "Domain Specialist",
-    color: "#0ea5e9",
-  },
   contract_auditor: {
     name: "Contract Auditor",
     description: "Smart contract security — Solidity, Slither, Foundry",

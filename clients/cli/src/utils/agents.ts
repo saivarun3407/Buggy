@@ -21,7 +21,6 @@ export const AGENT_LABELS: Record<string, string> = {
   // Specialist agents
   analyst: "Analyst",
   contract_auditor: "Contract Auditor",
-  cloud_hunter: "Cloud Hunter",
   vulnresearch: "VulnResearch",
   scanner: "Scanner",
   detector: "Detector",
