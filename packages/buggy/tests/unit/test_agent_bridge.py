@@ -169,10 +169,11 @@ class TestRealTools:
         for name in ("RECON", "CAPTURE", "SCOPE", "BROWSER"):
             monkeypatch.delenv(f"BUGGY_MCP_{name}_URL", raising=False)
         monkeypatch.delenv("BUGGY_AGENT_WEB", raising=False)
-        # research_fetch needs no server; nothing that reaches the target is offered.
-        assert set(agent_bridge.tool_table()) == {"research_fetch"}
+        # research_fetch and the skill files need no server; nothing that reaches the
+        # target is offered.
+        assert set(agent_bridge.tool_table()) == {"research_fetch", "skill_list", "skill_get"}
         monkeypatch.setenv("BUGGY_AGENT_WEB", "off")
-        assert agent_bridge.tool_table() == {}
+        assert set(agent_bridge.tool_table()) == {"skill_list", "skill_get"}
 
 
 class TestResearch:
