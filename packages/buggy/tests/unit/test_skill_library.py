@@ -11,7 +11,8 @@ from buggy.tools import skill_library
 def test_every_hacktricks_web_skill_is_listed_and_readable() -> None:
     root = skill_library.SKILLS_ROOT / "standard" / "exploit" / "web" / "hacktricks"
     slugs = sorted(p.parent.name for p in root.glob("*/SKILL.md"))
-    assert len(slugs) == 89
+    bugs = [slug for slug in slugs if not slug.startswith("tech-")]
+    assert len(bugs) >= 89 and len(slugs) > len(bugs)  # bug classes, then technologies
     names = {row["name"] for row in skill_library.find("")} | set(skill_library._index())  # noqa: SLF001
     for slug in slugs:
         assert f"web-{slug}" in names

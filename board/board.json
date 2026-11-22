@@ -218,7 +218,7 @@
   {
    "id": "E16",
    "name": "Web bug skills from HackTricks",
-   "score_now": 3,
+   "score_now": 2,
    "score_target": 3,
    "leaders": "HackTricks",
    "they_do_right": [
@@ -1199,6 +1199,104 @@
    "tests": "hunt, capture and recon tests pass",
    "note": "live on Juice Shop: 3 accounts via the sign-up API, walk found 6 own objects, BOLA/IDOR first: 2 proven (basket, user record); then SQLi and open redirect proven, other classes ran clean",
    "order": 53
+  },
+  {
+   "id": "H10",
+   "epic": "E16",
+   "lane": "F",
+   "title": "Technology skills (1)",
+   "depends": [],
+   "status": "in_progress",
+   "agent": "skills agent",
+   "branch": "",
+   "commit": "",
+   "tests": "",
+   "note": "web-tech-php-tricks-esp",
+   "order": 69
+  },
+  {
+   "id": "H11",
+   "epic": "E16",
+   "lane": "F",
+   "title": "Technology skills (13)",
+   "depends": [],
+   "status": "in_progress",
+   "agent": "skills agent",
+   "branch": "",
+   "commit": "",
+   "tests": "",
+   "note": "web-tech-drupal, web-tech-bolt-cms, web-tech-django, web-tech-git, web-tech-imagemagick-security, web-tech-jsp, web-tech-moodle, web-tech-sitecore, web-tech-ruby-tricks, web-tech-ssr-meta-frameworks, web-tech-symphony, web-tech-veeam-service-provider-console, web-tech-wordpress",
+   "order": 70
+  },
+  {
+   "id": "H12",
+   "epic": "E16",
+   "lane": "F",
+   "title": "Technology skills (14)",
+   "depends": [],
+   "status": "in_progress",
+   "agent": "skills agent",
+   "branch": "",
+   "commit": "",
+   "tests": "",
+   "note": "web-tech-pentesting-web-methodology, web-tech-apache-tapestry, web-tech-cgi, web-tech-dotnet-soap-wsdl-client-exploitation, web-tech-geonetwork, web-tech-ispconfig, web-tech-java-servlet-filter-memory-shells, web-tech-nextjs, web-tech-perl-tricks, web-tech-code-review-tools, web-tech-spring-actuators, web-tech-traefik, web-tech-vuejs, web-tech-wsgi",
+   "order": 71
+  },
+  {
+   "id": "H13",
+   "epic": "E16",
+   "lane": "F",
+   "title": "Technology skills (14)",
+   "depends": [],
+   "status": "in_progress",
+   "agent": "skills agent",
+   "branch": "",
+   "commit": "",
+   "tests": "",
+   "note": "web-tech-aem-adobe-experience-cloud, web-tech-apache, web-tech-citrix-netscaler, web-tech-dotnetnuke-dnn, web-tech-grafana, web-tech-jboss, web-tech-laravel, web-tech-nginx, web-tech-prestashop, web-tech-roundcube, web-tech-spring-data-binding-classloader-manipulation, web-tech-tomcat, web-tech-vmware-esx-vcenter, web-tech-zabbix",
+   "order": 72
+  },
+  {
+   "id": "H14",
+   "epic": "E16",
+   "lane": "F",
+   "title": "Technology skills (14)",
+   "depends": [],
+   "status": "in_progress",
+   "agent": "skills agent",
+   "branch": "",
+   "commit": "",
+   "tests": "",
+   "note": "web-tech-adobe-coldfusion, web-tech-artifactory-hacking-guide, web-tech-custom-protocols, web-tech-flask, web-tech-h2-java-sql-database, web-tech-jira, web-tech-meshcentral, web-tech-nodejs-express, web-tech-proxmox-ve, web-tech-salesforce, web-tech-supabase-postgrest, web-tech-telerik-ui-aspnet-ajax-unsafe-reflection-webresource-axd, web-tech-put-method-webdav, web-tech-zoneminder-motioneye-motion",
+   "order": 73
+  },
+  {
+   "id": "H15",
+   "epic": "E16",
+   "lane": "F",
+   "title": "Technology skills (13)",
+   "depends": [],
+   "status": "in_progress",
+   "agent": "skills agent",
+   "branch": "",
+   "commit": "",
+   "tests": "",
+   "note": "web-tech-angular, web-tech-beyondtrust-remote-support-mrs-origin-spoofing, web-tech-debug-and-admin-endpoints, web-tech-fortinet-fortiweb, web-tech-iis-internet-information-services, web-tech-joomla, web-tech-microsoft-sharepoint, web-tech-react, web-tech-rocket-chat, web-tech-servicenow, web-tech-swagger-openapi-ui, web-tech-uncovering-cloudflare, web-tech-werkzeug",
+   "order": 74
+  },
+  {
+   "id": "H16",
+   "epic": "E16",
+   "lane": "F",
+   "title": "Add methodology the existing web skills do not have yet",
+   "depends": [],
+   "status": "in_progress",
+   "agent": "skills agent",
+   "branch": "",
+   "commit": "",
+   "tests": "",
+   "note": "web vulnerabilities methodology + 80,443 web methodology + third-party tools, compared item by item against the 89 skills; the index lists the technology skills",
+   "order": 76
   }
  ]
 }
