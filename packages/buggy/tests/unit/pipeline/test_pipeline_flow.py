@@ -296,7 +296,7 @@ class TestFullRun:
             "dnsx",                        # 2 dns
             "naabu", "httpx",              # 3 live (4 fingerprint reuses the probe)
             "katana", "gau", "waybackurls",  # 5 urls (+ JS parsing, built in)
-            "nuclei", "gitleaks",          # 7 issues (6 apispec is built in)
+            "nuclei", "gitleaks",          # 9 issues (6 web, 7 apispec, 8 api are built in)
         ]  # fmt: skip
 
     def test_out_of_scope_assets_never_reach_a_tool(self, env) -> None:
@@ -344,8 +344,10 @@ class TestFullRun:
         _pipeline(env).run()
         counts = env["store"].count_records("acme")
         assert counts == {
+            "api_base": 4,  # /api/v1 on three services, /v1 on www (web and API recon)
             "api_operation": 1,
             "api_spec": 1,
+            "auth_surface": 3,  # the /login page of each service
             "dns_record": 3,
             "endpoint": 3,
             "graphql": 1,
@@ -360,6 +362,7 @@ class TestFullRun:
             "tls": 3,
             "url": 10,
             "vulnerability": 1,
+            "web_finding": 12,  # four headers the three services did not send
         }
         (www,) = env["store"].query_records("acme", record_type="subdomain", asset="www.acme.test")
         assert www.sources == ("amass", "crtsh", "subfinder")  # deduplicated across sources

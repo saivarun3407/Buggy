@@ -565,6 +565,15 @@ Approving still happens with `buggy-cli approvals allow` or in the dashboard.
   login form), reflected XSS and command injection. The same run without
   accounts found none of them. It has not been run on a real program, and a
   single-page application gives the crawl much less to read.
+- **Web and API recon has been run on one practice app.** On 2026-11-22 the
+  recon pipeline ran on the local Juice Shop and DVGA with the issue scan
+  turned off: 84 seconds. The two new stages sent 6 known-file requests,
+  4 discovery requests and 40 endpoint GETs. They found 14 sign-in related
+  pages, 3 API roots, security.txt and the missing headers, and one
+  endpoint that hands out `User.email`, `User.password`, `User.role`,
+  `User.deluxeToken` and `User.totpSecret` with no login (`/rest/memories`).
+  Before this, only the agent had found that endpoint. Nothing has been run
+  on a real program.
 - **Two agent runs have been measured, both on the practice apps.** Claude
   Code ran the agent stage through the agent bridge
   ([claude-code-agent.md](claude-code-agent.md)).

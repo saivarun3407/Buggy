@@ -132,6 +132,11 @@ REPORT_TYPES: dict[str, int] = {
     "js_finding": 500,
     "endpoint": 1500,
     "url": 1500,
+    "js_file": 500,
+    "web_finding": 500,
+    "auth_surface": 300,
+    "api_base": 100,
+    "api_profile": 500,
 }
 
 
@@ -694,7 +699,9 @@ STAGE_LABELS = {
     "live": "probing services",
     "fingerprint": "fingerprinting",
     "urls": "mapping URLs and endpoints",
+    "web": "web recon: robots, sitemap, headers, sign-in pages",
     "apispec": "reading API specifications",
+    "api": "API recon: API roots, OAuth discovery, one GET per endpoint",
     "issues": "checking for known issues (the slow stage at a polite request rate)",
 }
 

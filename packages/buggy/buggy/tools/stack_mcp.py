@@ -239,7 +239,11 @@ async def recon_query(
 ) -> str:
     """Query pipeline records. record_type: subdomain, dns_record, port, http_service,
     technology, tls, header, url, js_file, endpoint, api_spec, api_operation, graphql,
-    vulnerability, secret. Filter by asset (host) and/or a substring of the value. Paged."""
+    parameter, js_finding, vulnerability, secret, and from web and API recon: auth_surface
+    (sign-in, sign-up, reset, MFA, OAuth and admin pages by kind), api_base (API roots and
+    versions), api_profile (how an API endpoint answered a GET with no login), web_finding
+    (missing headers, cookie flags, version banners). Filter by asset (host) and/or a
+    substring of the value. Paged."""
     return await _engagement_call(
         "recon",
         "recon_query",

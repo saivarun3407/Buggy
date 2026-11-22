@@ -44,6 +44,10 @@ class RecordType(StrEnum):
     VULNERABILITY = "vulnerability"
     SECRET = "secret"
     JS_FINDING = "js_finding"
+    WEB_FINDING = "web_finding"
+    AUTH_SURFACE = "auth_surface"
+    API_BASE = "api_base"
+    API_PROFILE = "api_profile"
 
 
 _HOST_RE = re.compile(

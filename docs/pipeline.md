@@ -15,8 +15,65 @@ pipeline; `test_guards.py::TestNoLLMInTheLoop` enforces it.
 | 3 | `live` | naabu (connect scan), httpx | yes |
 | 4 | `fingerprint` | technology, TLS, response headers from the stage-3 probe | no new requests |
 | 5 | `urls` | katana, gau, waybackurls, JS endpoint extraction | katana and JS fetch only |
-| 6 | `apispec` | OpenAPI / Swagger probing, GraphQL introspection | yes |
-| 7 | `issues` | nuclei (vetted set), gitleaks on fetched JS and listed public repos | nuclei only |
+| 6 | `web` | web recon: robots.txt, sitemaps, security.txt; security headers and session cookie flags; sign-in pages by kind | known files only |
+| 7 | `apispec` | OpenAPI / Swagger probing, GraphQL introspection | yes |
+| 8 | `api` | API recon: API roots and versions, OAuth / OpenID discovery, one unauthenticated GET per API endpoint | discovery documents and the endpoint GETs |
+| 9 | `issues` | nuclei (vetted set), gitleaks on fetched JS and listed public repos | nuclei only |
+
+## Web and API recon
+
+Both stages are built in (no binary), read-only, rate-limited, and send every
+request through the scoped client, so an out-of-scope URL in a sitemap or a
+discovery document is never requested or stored.
+
+**`web`** (`pipeline/tools/webrecon.py`), per live origin:
+
+- fetches `/robots.txt`, `/sitemap.xml` (and up to five nested sitemaps or the
+  sitemaps robots.txt names) and `/.well-known/security.txt`. Paths and
+  sitemap URLs become `url` records, cut at the first wildcard, so the
+  parameter extraction and the tests see them;
+- reads the headers the live probe stored (no request) and records a missing
+  `Content-Security-Policy`, `X-Content-Type-Options`, `Referrer-Policy`,
+  `X-Frame-Options` (unless `frame-ancestors` is set) or, on HTTPS,
+  `Strict-Transport-Security`; a session cookie without `Secure`, `HttpOnly`
+  or `SameSite`; a `Server` or `X-Powered-By` value with a version number
+  (`web_finding`). These go in the report's fix list, never in the lead queue;
+- sorts every stored page and endpoint into sign-in, sign-up, password reset,
+  logout, multi-factor, OAuth, account and admin pages (`auth_surface`).
+
+**`api`** (`pipeline/tools/apirecon.py`), per live origin:
+
+- groups every API-looking URL, endpoint and operation by its root
+  (`/api/v2`, `/rest`), with the versions served side by side and how many
+  endpoints take an object id in the path (`api_base`);
+- fetches `/.well-known/openid-configuration` and
+  `/.well-known/oauth-authorization-server`; the endpoints they name become
+  `auth_surface` records of kind `oauth`;
+- sends one GET with no credentials to each concrete API endpoint, at most 40
+  per origin, endpoints with an object id first. The query string is never
+  sent (an archived URL can carry a reset token), templates such as
+  `/users/{id}` are skipped, and so is any URL that names logout, delete or a
+  switch (the crawler's rule). It keeps the status, whether it asked for
+  credentials and how, the CORS and rate-limit headers, the methods a 405
+  allows, and the top-level field names of a JSON answer, never the values
+  (`api_profile`). A 404 or 410 is not kept.
+
+With `passive_only` both stages send nothing and still do the parts that only
+read the store.
+
+What they add to the lead queue (`rank_candidates`):
+
+| Record | Lead |
+|---|---|
+| `api_profile`: answered with no login, object id in the path | access control, `idor` |
+| `api_profile`: answered with no login, a list or sensitive field names | information exposure |
+| `api_profile`: `Access-Control-Allow-Origin` `*` or `null` with credentials | misconfiguration, `cors` |
+| `api_profile`: asks for a bearer token | login and session, `jwt_alg_none` |
+| `auth_surface`: password reset, MFA, OAuth, sign-in, sign-up | login and session |
+| `auth_surface`: admin page | access control |
+| `api_base`: more than one version served | API |
+| `web_finding`: session cookie without its flags | misconfiguration |
+| `js_file` source map | information exposure |
 
 ## Scope
 

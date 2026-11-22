@@ -132,6 +132,10 @@ _PROBE_SUBJECT: dict[tuple[str, str], str] = {
     ("graphql", "graphql_checks"): "a GraphQL endpoint",
     ("auth_session", "http_send"): "an authentication or session path",
     ("access_control", "http_send"): "an administrative or internal path",
+    ("info_exposure", "http_send"): "data or source served to anyone",
+    ("misconfiguration", "cors"): "a cross-origin policy",
+    ("misconfiguration", "http_send"): "a session cookie setting",
+    ("api", "http_send"): "more than one API version",
 }
 
 _CONTROL = re.compile(r"[\x00-\x1f\x7f-\x9f​-‏ -‮⁠-⁤﻿]")

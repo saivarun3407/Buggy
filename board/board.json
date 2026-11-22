@@ -1025,6 +1025,20 @@
    "tests": "10418 tests pass",
    "note": "every command that shows a scope prints the same four lists, built by rule from the stored scope; a switch moves its line between do and don't",
    "order": 51
+  },
+  {
+   "id": "T4",
+   "epic": "E14",
+   "lane": "A",
+   "title": "Recon covers the web app and its APIs, not only the network",
+   "depends": [],
+   "status": "done",
+   "agent": "",
+   "branch": "",
+   "commit": "",
+   "tests": "10436 tests pass",
+   "note": "two built-in stages: web (robots, sitemaps, security.txt, headers, cookie flags, sign-in pages) and api (API roots, OAuth discovery, one GET per endpoint); live on Juice Shop: flagged /rest/memories handing out password hashes and TOTP secrets with no login",
+   "order": 52
   }
  ]
 }

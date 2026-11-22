@@ -50,7 +50,9 @@ COVERAGE_STAGE_LABELS: tuple[tuple[str, str], ...] = (
     ("live", "live-service probe"),
     ("fingerprint", "technology, TLS and header fingerprints"),
     ("urls", "URL and endpoint discovery"),
+    ("web", "web recon: robots, sitemap, security.txt, headers, sign-in pages"),
     ("apispec", "API specification discovery"),
+    ("api", "API recon: API roots, OAuth discovery, endpoint profiles"),
     ("issues", "known-issue and secret scanning"),
 )
 MAX_GAPS_PER_STAGE = 50
@@ -63,6 +65,21 @@ _HINT_ROWS: dict[str, tuple[str, str, str]] = {
     "file-like": ("file_handling", "names a file or path", "path_traversal"),
 }
 MAX_NAMED_PARAMETERS = 3
+#: What a sign-in related page (``auth_surface`` kind) is worth testing for.
+_SURFACE_WHY: dict[str, tuple[str, str]] = {
+    "password_reset": (
+        "auth_session",
+        "password reset: token reuse, expiry, host-header poisoning, account enumeration",
+    ),
+    "mfa": ("auth_session", "multi-factor step: skipping it, reusing or brute-forcing codes"),
+    "oauth": ("auth_session", "OAuth / single sign-on: redirect_uri, state and token handling"),
+    "login": ("auth_session", "sign-in: account enumeration, lockout and session handling"),
+    "signup": ("auth_session", "sign-up: duplicate accounts, role or privilege fields in the form"),
+    "admin": (
+        "access_control",
+        "administrative page: request it without and with a low-privilege account",
+    ),
+}
 _AUTH_PATH = re.compile(
     r"/(login|signin|logout|register|signup|reset|forgot|token|oauth|sso|session|mfa|2fa)\b",
     re.IGNORECASE,
@@ -160,6 +177,52 @@ def rank_candidates(
                     probe,
                 )
 
+    # API endpoints that answered a GET with no login (``api_profile``).
+    for record in records.get("api_profile", []):
+        attrs = _attrs(record)
+        url = str(attrs.get("url") or "")
+        status = attrs.get("status")
+        if attrs.get("auth") != "none" or not isinstance(status, int) or not 200 <= status < 300:
+            continue
+        if "json" not in str(attrs.get("content_type") or ""):
+            continue
+        sensitive = [str(f) for f in attrs.get("sensitive_fields") or []]
+        fields = f" with fields {', '.join(sensitive[:MAX_NAMED_PARAMETERS])}" if sensitive else ""
+        if attrs.get("object_id_in_path"):
+            add(
+                "access_control",
+                f"GET {url}",
+                f"answers without a login and takes an object id in the path{fields}: "
+                "change the id, then try another account",
+                "idor",
+            )
+        elif sensitive:
+            # A public list (products, languages) is not a lead; fields like
+            # email or password handed to anyone are.
+            count = attrs.get("items")
+            listing = (
+                f"returns {count} records" if isinstance(count, int) and count > 1 else "answers"
+            )
+            add("info_exposure", f"GET {url}", f"{listing} without a login{fields}", MANUAL)
+
+    for record in records.get("auth_surface", []):
+        attrs = _attrs(record)
+        why = _SURFACE_WHY.get(str(attrs.get("kind") or ""))
+        if why is not None:
+            add(why[0], str(record.get("value") or ""), why[1], MANUAL)
+
+    for record in records.get("api_base", []):
+        attrs = _attrs(record)
+        found = [str(v) for v in attrs.get("versions") or []]
+        if len(found) > 1:
+            add(
+                "api",
+                str(record.get("value") or ""),
+                f"several API versions are served ({', '.join(found)}): "
+                "an older one may lack checks the newer one has",
+                MANUAL,
+            )
+
     for record in records.get("graphql", []):
         attrs = _attrs(record)
         why = "GraphQL endpoint"
@@ -243,6 +306,42 @@ def rank_candidates(
                     "administrative or internal path: request it without and with a low-privilege account",
                     MANUAL,
                 )
+    # Lower-value rows last, so they never push a stronger lead past the limit.
+    for record in records.get("api_profile", []):
+        attrs = _attrs(record)
+        origin = str(attrs.get("cors_origin") or "")
+        if origin in ("*", "null") and attrs.get("cors_credentials"):
+            add(
+                "misconfiguration",
+                f"GET {attrs.get('url')}",
+                f"allows cross-origin requests from {origin!r} with credentials",
+                "cors",
+            )
+        if str(attrs.get("auth_scheme") or "").lower() == "bearer":
+            add(
+                "auth_session",
+                f"GET {attrs.get('url')}",
+                "asks for a bearer token: check signature and expiry handling",
+                "jwt_alg_none",
+            )
+    for record in records.get("web_finding", []):
+        attrs = _attrs(record)
+        if attrs.get("kind") == "cookie_flags":
+            add(
+                "misconfiguration",
+                str(attrs.get("url") or ""),
+                f"cookie {attrs.get('name')}: {attrs.get('detail')}",
+                MANUAL,
+            )
+    for record in records.get("js_file", []):
+        attrs = _attrs(record)
+        if attrs.get("kind") == "source_map":
+            add(
+                "info_exposure",
+                str(record.get("value") or ""),
+                f"source map published: {attrs.get('sources_count', 0)} original source files",
+                MANUAL,
+            )
     order = {
         "access_control": 0,
         "auth_session": 1,
@@ -251,6 +350,8 @@ def rank_candidates(
         "api": 4,
         "graphql": 5,
         "xss": 6,
+        "info_exposure": 7,
+        "misconfiguration": 8,
     }
     return sorted(out, key=lambda c: (order.get(c["class"], 9), c["where"]))
 
@@ -339,6 +440,93 @@ def _table(headers: list[str], rows: list[list[str]]) -> list[str]:
     return lines
 
 
+def _web_section(records: dict[str, list[dict[str, Any]]]) -> list[str]:
+    """Sign-in pages, header findings and published files, from the ``web`` stage."""
+    surface = records.get("auth_surface", [])
+    findings = records.get("web_finding", [])
+    if not surface and not findings:
+        return []
+    lines = ["## Web", ""]
+    if surface:
+        by_kind: dict[str, list[str]] = {}
+        for record in surface:
+            by_kind.setdefault(str(_attrs(record).get("kind") or "other"), []).append(
+                str(record.get("value") or "")
+            )
+        lines += _table(
+            ["Sign-in related pages", "Count", "Examples"],
+            [
+                [kind.replace("_", " "), str(len(urls)), ", ".join(f"`{u}`" for u in urls[:3])]
+                for kind, urls in sorted(by_kind.items())
+            ],
+        )
+        lines.append("")
+    if findings:
+        lines += _table(
+            ["Where", "What", "Detail"],
+            [
+                [
+                    str(_attrs(r).get("url") or ""),
+                    f"{str(_attrs(r).get('kind') or '').replace('_', ' ')} {_attrs(r).get('name') or ''}".strip(),
+                    str(_attrs(r).get("detail") or ""),
+                ]
+                for r in findings[:60]
+            ],
+        )
+        lines += [
+            "",
+            "Missing headers and version banners are listed for the fix list; most programs "
+            "do not accept them as findings on their own.",
+            "",
+        ]
+    return lines
+
+
+def _api_section(records: dict[str, list[dict[str, Any]]]) -> list[str]:
+    """API roots and how each profiled endpoint answered, from the ``api`` stage."""
+    bases = records.get("api_base", [])
+    profiles = records.get("api_profile", [])
+    if not bases and not profiles:
+        return []
+    lines = ["## API inventory", ""]
+    if bases:
+        lines += _table(
+            ["API root", "Endpoints", "With an object id", "Versions"],
+            [
+                [
+                    str(r.get("value") or ""),
+                    str(_attrs(r).get("endpoints", 0)),
+                    str(_attrs(r).get("with_object_id", 0)),
+                    ", ".join(str(v) for v in _attrs(r).get("versions") or []) or "-",
+                ]
+                for r in bases[:40]
+            ],
+        )
+        lines.append("")
+    if profiles:
+        open_count = sum(1 for r in profiles if _attrs(r).get("auth") == "none")
+        closed = sum(1 for r in profiles if _attrs(r).get("auth") == "required")
+        lines.append(
+            f"{len(profiles)} endpoint(s) were requested once without a login: "
+            f"{open_count} answered, {closed} asked for credentials."
+        )
+        lines.append("")
+        lines += _table(
+            ["Endpoint", "Status", "Login", "Fields worth a look"],
+            [
+                [
+                    str(_attrs(r).get("url") or ""),
+                    str(_attrs(r).get("status") or ""),
+                    str(_attrs(r).get("auth") or ""),
+                    ", ".join(str(f) for f in _attrs(r).get("sensitive_fields") or []) or "-",
+                ]
+                for r in sorted(profiles, key=lambda r: _attrs(r).get("auth") != "none")[:60]
+            ],
+        )
+        lines.append("")
+    return lines
+
+
 def render_report(
     engagement: str,
     summary: dict[str, Any],
@@ -374,6 +562,8 @@ def render_report(
             ["URLs and endpoints", str(counts.get("url", 0) + counts.get("endpoint", 0))],
             ["API specifications", str(counts.get("api_spec", 0) + counts.get("graphql", 0))],
             ["API operations", str(counts.get("api_operation", 0))],
+            ["API roots", str(counts.get("api_base", 0))],
+            ["Sign-in related pages", str(counts.get("auth_surface", 0))],
             ["Known issues (distinct)", str(len(issues))],
             ["Exposed secrets", str(counts.get("secret", 0))],
             ["Candidates dropped as out of scope", str(run.get("scope_drops", 0))],
@@ -496,6 +686,9 @@ def render_report(
             rows.append([str(record.get("value")), detail])
         lines += _table(["Location", "What"], rows)
         lines.append("")
+
+    lines += _web_section(records)
+    lines += _api_section(records)
 
     candidates = rank_candidates(records)
     lines += ["## Test next", ""]

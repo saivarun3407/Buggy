@@ -34,7 +34,7 @@ from typing import Any
 from urllib.parse import urlsplit
 
 from buggy.pipeline import versions, wildcard
-from buggy.pipeline.http import OutOfScopeRequest, RateLimiter, ScopedHTTP, fetch_passive
+from buggy.pipeline.http import OutOfScopeRequest, RateLimiter, Response, ScopedHTTP, fetch_passive
 from buggy.pipeline.runner import RunResult, run_tool
 from buggy.pipeline.schema import (
     Record,
@@ -46,7 +46,7 @@ from buggy.pipeline.schema import (
 )
 from buggy.pipeline.scope import ScopeFilter
 from buggy.pipeline.store import ReconStore
-from buggy.pipeline.tools import apispec, crtsh, jsparse, params
+from buggy.pipeline.tools import apirecon, apispec, crtsh, jsparse, params, webrecon
 from buggy.pipeline.tools.amass import Amass
 from buggy.pipeline.tools.archives import Gau, Waybackurls
 from buggy.pipeline.tools.base import Invocation
@@ -60,7 +60,7 @@ from buggy.pipeline.tools.subfinder import Subfinder
 
 log = logging.getLogger("buggy.pipeline")
 
-STAGES = ("enumerate", "dns", "live", "fingerprint", "urls", "apispec", "issues")
+STAGES = ("enumerate", "dns", "live", "fingerprint", "urls", "web", "apispec", "api", "issues")
 
 # The live stage does two separate things to a host: the port scan (naabu) and
 # the HTTP probe (httpx). Program rules can turn the first off while the second
@@ -73,7 +73,9 @@ COVERAGE_STAGES = (
     "live",
     "fingerprint",
     "urls",
+    "web",
     "apispec",
+    "api",
     "issues",
 )
 PORT_SCAN_DISABLED = "port scan disabled by program rules"
@@ -81,7 +83,7 @@ STAGE_DISABLED = "disabled by program rules"
 
 # Stages whose records are retired when a re-processed input stops reporting
 # them. Discovery stages (subdomains, URLs) only accumulate.
-RETIRING_STAGES = frozenset({"dns", "live", "fingerprint", "apispec", "issues"})
+RETIRING_STAGES = frozenset({"dns", "live", "fingerprint", "web", "apispec", "api", "issues"})
 
 # Stage-cache namespace of the DNS stage's wildcard check: one row per
 # enumeration root (the verdict), next to the stage's own per-host rows.
@@ -266,7 +268,9 @@ class Pipeline:
             "live": self._stage_live,
             "fingerprint": self._stage_fingerprint,
             "urls": self._stage_urls,
+            "web": self._stage_web,
             "apispec": self._stage_apispec,
+            "api": self._stage_api,
             "issues": self._stage_issues,
         }
         current = ""
@@ -1268,7 +1272,197 @@ class Pipeline:
             pairs.append((_with_line(record, len(lines)), record.asset))
         return found
 
-    # ── stage 6: API specifications ─────────────────────────────────
+    # ── stage 6: web recon ──────────────────────────────────────────
+
+    def _service_origins(self, stage: str, tool: str) -> dict[str, list[StoredRecord]]:
+        """``{origin: its live services}`` for the in-scope services this run wants."""
+        origins: dict[str, list[StoredRecord]] = {}
+        for record in self._records(RecordType.HTTP_SERVICE):
+            if not self._wanted(record.asset):
+                continue
+            origin = _origin(record.value)
+            if self.scope.admit([origin], stage=stage, tool=tool, direction="input"):
+                origins.setdefault(origin, []).append(record)
+        return origins
+
+    def _page_urls(self, *, operations: bool = True) -> list[tuple[str, str]]:
+        """``(url, tool that found it)`` for every stored page and endpoint.
+
+        With ``operations``, API operations too; the web stage leaves them
+        out, because the API description stage that finds them runs after it.
+        """
+        pages: list[tuple[str, str]] = []
+        for kind in (RecordType.URL, RecordType.ENDPOINT):
+            pages += [(r.value, r.source_tool) for r in self._records(kind)]
+        if operations:
+            for record in self._records(RecordType.API_OPERATION):
+                url = str(record.attrs.get("url") or "")
+                if url:
+                    pages.append((url, record.source_tool))
+        return pages
+
+    @staticmethod
+    def _digest(*parts: Iterable[str]) -> str:
+        """A stable hash of several string collections (a stage input's hash)."""
+        sha = hashlib.sha256()
+        for part in parts:
+            for item in sorted(part):
+                sha.update(item.encode("utf-8", "replace") + b"\0")
+            sha.update(b"\1")
+        return sha.hexdigest()
+
+    def _fetch(self, client: ScopedHTTP, url: str, sent: list[int]) -> Response | None:
+        """One GET through the scoped client; counts it, ``None`` if refused or unanswered."""
+        try:
+            response = client.get(url)
+        except OutOfScopeRequest:
+            return None
+        sent[0] += 1
+        if response is None:
+            sent[1] += 1
+        return response
+
+    def _stage_web(self, stats: StageStats) -> None:
+        """Known files, security headers and the sign-in pages of every live origin.
+
+        ``robots.txt``, ``sitemap.xml`` and ``security.txt`` are fetched (one
+        GET each, plus nested sitemaps); everything else is read off records
+        the earlier stages stored. URLs the known files name become ``url``
+        records, so the API description stage and the tests see them.
+        """
+        origins = self._service_origins("web", webrecon.KNOWN_FILES_TOOL)
+        headers = webrecon.headers_by_service(self._records(RecordType.HEADER))
+        pages = self._page_urls(operations=False)
+        candidates = {
+            origin: self._digest(
+                [s.content_hash for s in services],
+                [
+                    f"{u}|{n}|{v}"
+                    for u, h in headers.items()
+                    if _origin(u) == origin
+                    for n, v in h.items()
+                ],
+                # What this stage adds itself is not part of its input.
+                [u for u, t in pages if _origin(u) == origin and t != webrecon.KNOWN_FILES_TOOL],
+            )
+            for origin, services in origins.items()
+        }
+        pending = self._pending("web", stats, candidates)
+        if not pending:
+            return
+        known = {
+            r.value
+            for kind in (RecordType.URL, RecordType.JS_FILE, RecordType.ENDPOINT)
+            for r in self._records(kind)
+            if r.source_tool != webrecon.KNOWN_FILES_TOOL
+        }
+        found: list[tuple[Record, str]] = []
+        found_lines: list[str] = []
+        if self.scope.limits.passive_only:
+            stats.tools.setdefault(webrecon.KNOWN_FILES_TOOL, {})["skipped"] = "passive_only"
+            self._note(webrecon.KNOWN_FILES_TOOL, "skipped", "passive_only")
+        else:
+            client = self._http("web", webrecon.KNOWN_FILES_TOOL)
+            tally: dict[str, list[int]] = {}
+            for origin in pending:
+                sent = tally.setdefault(_asset(origin), [0, 0])
+                sitemaps = [origin + webrecon.SITEMAP]
+                listed: list[str] = []
+                robots = self._fetch(client, origin + webrecon.ROBOTS, sent)
+                if robots is not None and robots.status == 200:
+                    paths, named = webrecon.parse_robots(robots.text(), origin + "/")
+                    listed += paths
+                    sitemaps += named
+                    found_lines.append(
+                        json.dumps({"url": robots.url, "paths": paths, "sitemaps": named})
+                    )
+                queue = list(dict.fromkeys(sitemaps))
+                read = 0
+                while queue and read <= webrecon.MAX_NESTED_SITEMAPS:
+                    url = queue.pop(0)
+                    if url.lower().endswith(".gz"):
+                        continue
+                    read += 1
+                    response = self._fetch(client, url, sent)
+                    if response is None or response.status != 200:
+                        continue
+                    urls, nested = webrecon.parse_sitemap(response.text())
+                    listed += urls
+                    queue += [n for n in nested if n not in queue]
+                    if urls or nested:
+                        found_lines.append(
+                            json.dumps({"url": response.url, "urls": len(urls), "nested": nested})
+                        )
+                security = self._fetch(client, origin + webrecon.SECURITY_TXT, sent)
+                if (
+                    security is not None
+                    and security.status == 200
+                    and webrecon.is_security_txt(security.text())
+                ):
+                    found.append((webrecon.security_txt_record(security.url), origin))
+                new = [u for u in dict.fromkeys(listed) if u not in known]
+                found += [
+                    (record, origin) for record in webrecon.url_records(new, source="known_files")
+                ]
+            stats.tools.setdefault(webrecon.KNOWN_FILES_TOOL, {})["requests"] = client.requests_sent
+            self._note_requests(webrecon.KNOWN_FILES_TOOL, tally)
+        if found:
+            ref = self._save_raw(
+                "web", webrecon.KNOWN_FILES_TOOL, "\n".join(found_lines or ["{}"]) + "\n"
+            )
+            self._store(
+                "web",
+                stats,
+                webrecon.KNOWN_FILES_TOOL,
+                found,
+                version=versions.BUILTIN_VERSION,
+                raw_ref=ref,
+            )
+
+        header_records = [
+            (record, _origin(service_url))
+            for service_url, sent_headers in sorted(headers.items())
+            if _origin(service_url) in pending
+            for record in webrecon.header_findings(service_url, sent_headers)
+        ]
+        self._note(webrecon.HEADERS_TOOL, "complete")
+        if header_records:
+            lines = [
+                json.dumps({"value": r.value, **r.attrs}, sort_keys=True)
+                for r, _o in header_records
+            ]
+            ref = self._save_raw("web", webrecon.HEADERS_TOOL, "\n".join(lines) + "\n")
+            self._store(
+                "web",
+                stats,
+                webrecon.HEADERS_TOOL,
+                header_records,
+                version=versions.BUILTIN_VERSION,
+                raw_ref=ref,
+            )
+
+        added = [(r.value, "known_files") for r, _o in found if r.type is RecordType.URL]
+        surface = [
+            (record, _origin(record.value))
+            for record in webrecon.surface_records(
+                (url, tool) for url, tool in [*pages, *added] if _origin(url) in pending
+            )
+        ]
+        self._note(webrecon.SURFACE_TOOL, "complete")
+        if surface:
+            lines = [json.dumps({"url": r.value, **r.attrs}, sort_keys=True) for r, _o in surface]
+            ref = self._save_raw("web", webrecon.SURFACE_TOOL, "\n".join(lines) + "\n")
+            self._store(
+                "web",
+                stats,
+                webrecon.SURFACE_TOOL,
+                surface,
+                version=versions.BUILTIN_VERSION,
+                raw_ref=ref,
+            )
+        self._complete("web", stats, pending)
+
+    # ── stage 7: API specifications ─────────────────────────────────
 
     #: ``<control>/<engagement>``, where the operator's ``contracts/`` directory
     #: is. ``None``: the control root the environment names.
@@ -1516,7 +1710,110 @@ class Pipeline:
                 "apispec", stats, params.NAME, pairs, version=versions.BUILTIN_VERSION, raw_ref=ref
             )
 
-    # ── stage 7: known issues ───────────────────────────────────────
+    # ── stage 8: API recon ──────────────────────────────────────────
+
+    def _stage_api(self, stats: StageStats) -> None:
+        """The API inventory, OAuth / OpenID discovery and one profile per API endpoint.
+
+        The inventory is read off stored records. The discovery documents and
+        the endpoint profiles are fetched: one unauthenticated GET each, never
+        to a URL that names logout, delete or the like, at most
+        :data:`apirecon.MAX_PROFILES_PER_ORIGIN` endpoints per origin.
+        """
+        from buggy.capture.crawl import never_request_reason  # noqa: PLC0415
+
+        origins = self._service_origins("api", apirecon.PROFILE_TOOL)
+        api_urls = [url for url, _tool in self._page_urls() if apirecon.api_root(url)]
+        candidates = {
+            origin: self._digest(
+                [s.content_hash for s in services], [u for u in api_urls if _origin(u) == origin]
+            )
+            for origin, services in origins.items()
+        }
+        pending = self._pending("api", stats, candidates)
+        if not pending:
+            return
+        mine = [u for u in api_urls if _origin(u) in pending]
+        bases = [(record, _origin(record.value)) for record in apirecon.inventory(mine)]
+        self._note(apirecon.INVENTORY_TOOL, "complete")
+        if bases:
+            lines = [json.dumps({"root": r.value, **r.attrs}, sort_keys=True) for r, _o in bases]
+            ref = self._save_raw("api", apirecon.INVENTORY_TOOL, "\n".join(lines) + "\n")
+            self._store(
+                "api",
+                stats,
+                apirecon.INVENTORY_TOOL,
+                bases,
+                version=versions.BUILTIN_VERSION,
+                raw_ref=ref,
+            )
+        if self.scope.limits.passive_only:
+            for tool in (apirecon.OIDC_TOOL, apirecon.PROFILE_TOOL):
+                stats.tools.setdefault(tool, {})["skipped"] = "passive_only"
+                self._note(tool, "skipped", "passive_only")
+            self._complete("api", stats, pending)
+            return
+
+        oidc_client = self._http("api", apirecon.OIDC_TOOL)
+        oidc_tally: dict[str, list[int]] = {}
+        oidc: list[tuple[Record, str]] = []
+        oidc_lines: list[str] = []
+        for origin in pending:
+            sent = oidc_tally.setdefault(_asset(origin), [0, 0])
+            for path in apirecon.OIDC_PATHS:
+                response = self._fetch(oidc_client, origin + path, sent)
+                if response is None or response.status != 200:
+                    continue
+                records = list(apirecon.parse_discovery(response.text(), response.url))
+                if records:
+                    oidc_lines.append(
+                        json.dumps({"url": response.url, "endpoints": [r.value for r in records]})
+                    )
+                    oidc += [(record, origin) for record in records]
+                    break
+        stats.tools.setdefault(apirecon.OIDC_TOOL, {})["requests"] = oidc_client.requests_sent
+        self._note_requests(apirecon.OIDC_TOOL, oidc_tally)
+        if oidc:
+            ref = self._save_raw("api", apirecon.OIDC_TOOL, "\n".join(oidc_lines) + "\n")
+            self._store(
+                "api",
+                stats,
+                apirecon.OIDC_TOOL,
+                oidc,
+                version=versions.BUILTIN_VERSION,
+                raw_ref=ref,
+            )
+
+        client = self._http("api", apirecon.PROFILE_TOOL)
+        tally: dict[str, list[int]] = {}
+        profiles: list[tuple[Record, str]] = []
+        lines: list[str] = []
+        for url in apirecon.profile_targets(mine, never=never_request_reason):
+            origin = _origin(url)
+            sent = tally.setdefault(_asset(origin), [0, 0])
+            response = self._fetch(client, url, sent)
+            if response is None or response.status in apirecon.NOT_THERE:
+                continue
+            record = apirecon.profile(
+                response.url, response.status, response.headers, response.body
+            )
+            lines.append(json.dumps({"value": record.value, **record.attrs}, sort_keys=True))
+            profiles.append((_with_line(record, len(lines)), origin))
+        stats.tools.setdefault(apirecon.PROFILE_TOOL, {})["requests"] = client.requests_sent
+        self._note_requests(apirecon.PROFILE_TOOL, tally)
+        if profiles:
+            ref = self._save_raw("api", apirecon.PROFILE_TOOL, "\n".join(lines) + "\n")
+            self._store(
+                "api",
+                stats,
+                apirecon.PROFILE_TOOL,
+                profiles,
+                version=versions.BUILTIN_VERSION,
+                raw_ref=ref,
+            )
+        self._complete("api", stats, pending)
+
+    # ── stage 9: known issues ───────────────────────────────────────
 
     def _stage_issues(self, stats: StageStats) -> None:
         services = {

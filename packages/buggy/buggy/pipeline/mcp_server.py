@@ -75,8 +75,13 @@ def register_tools(mcp: Any, queries: ReconQueries) -> None:
     ) -> dict[str, Any]:
         """Query records. record_type is one of: subdomain, dns_record, port, http_service,
         technology, tls, header, url, js_file, endpoint, api_spec, api_operation, graphql,
-        parameter, js_finding, vulnerability, secret. A parameter record names one input (query, path,
-        body, header, cookie, form) with hints such as id-like or url-like. Filter by asset (host) and/or a substring of the value.
+        parameter, js_finding, vulnerability, secret, web_finding, auth_surface, api_base, api_profile.
+        A parameter record names one input (query, path, body, header, cookie, form) with hints such
+        as id-like or url-like. auth_surface: sign-in, sign-up, reset, MFA, OAuth and admin pages by
+        kind. api_base: each API root with its versions. api_profile: how one API endpoint answered a
+        GET with no login (status, whether it asked for credentials, CORS, field names).
+        web_finding: missing security headers, session cookie flags, version banners, security.txt.
+        Filter by asset (host) and/or a substring of the value.
         Results are paged: follow next_offset while truncated is true."""
         return _guard(queries.query)(
             engagement, record_type, asset, contains, limit, offset, include_gone

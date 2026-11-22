@@ -721,7 +721,21 @@ class TestInThePipeline:
         finally:
             plain_store.close()
         assert "contracts" not in summary["stages"]["apispec"]["tools"]
-        assert env["opener"].requested == plain["opener"].requested != []
+        # Loading the contract sends nothing. The only extra requests are the API
+        # recon stage's one GET to each concrete endpoint the contract names.
+        extra = [r for r in env["opener"].requested if r not in plain["opener"].requested]
+        assert plain["opener"].requested != []
+        assert [r for r in env["opener"].requested if r not in extra] == plain["opener"].requested
+        operations = {
+            url.split("?", 1)[0]
+            for value in _values(env, "api_operation")
+            for method, _, url in [value.partition(" ")]
+            if method == "GET"
+        }
+        assert extra and all(m == "GET" and url in operations for m, url in extra)
+        assert summary["stages"]["api"]["tools"]["api_profile"]["requests"] < len(
+            env["opener"].requested
+        )
         # Same tools, same order, same inputs (gitleaks is given a per-run directory).
         with_contracts = [(n, i) for n, i, _argv in env["tools"].calls if n != "gitleaks"]
         assert with_contracts == [(n, i) for n, i, _argv in plain["tools"].calls if n != "gitleaks"]
@@ -826,7 +840,9 @@ class TestInThePipeline:
         summary = _pipeline(env, _roe()).run()
         assert _values(env, "api_operation") == {"GET https://www.acme.test/v1/users"}
         assert _values(env, "api_spec") == {"https://www.acme.test/openapi.json"}
-        assert summary["diff"]["removed"] == 6 and summary["diff"]["added"] == 0
+        # The six operations, and what API recon had derived from them.
+        assert summary["diff"]["added"] == 0
+        assert summary["diff"]["removed"] == 6 + summary["stages"]["api"]["retired"]
         assert _stats(summary) == {"contracts": 0, "loaded": 0, "cached": 0, "records": 0}
         # And nothing is left to do on the run after that.
         again = _pipeline(env, _roe()).run()

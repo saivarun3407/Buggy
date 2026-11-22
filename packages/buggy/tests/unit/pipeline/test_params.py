@@ -23,7 +23,7 @@ from buggy.pipeline.query import ReconQueries
 from buggy.pipeline.schema import RecordType, StoredRecord
 from buggy.pipeline.scope import ScopeFilter
 from buggy.pipeline.store import ReconStore
-from buggy.pipeline.tools import apispec, params
+from buggy.pipeline.tools import apirecon, apispec, params, webrecon
 
 from .test_pipeline_flow import ROE, FakeOpener, FakeTools
 
@@ -463,9 +463,18 @@ class TestInThePipeline:
             "subfinder", "amass", "dnsx", "naabu", "httpx",
             "katana", "gau", "waybackurls", "nuclei", "gitleaks",
         ]  # fmt: skip
-        # Every request is a spec probe, a GraphQL probe or a script fetch:
-        # no URL a parameter was read from is ever requested.
-        probes = {*apispec.OPENAPI_PATHS, *apispec.GRAPHQL_PATHS, "/app.js"}
+        # Every request is a known file, a spec or discovery probe, a script
+        # fetch or one API endpoint profile, never with a query: no URL a
+        # parameter was read from is ever requested as it was found.
+        probes = {
+            *apispec.OPENAPI_PATHS,
+            *apispec.GRAPHQL_PATHS,
+            *webrecon.KNOWN_FILES,
+            *apirecon.OIDC_PATHS,
+            "/app.js",
+            "/api/v1/users",
+            "/v1/users",
+        }
         assert env["opener"].requested
         for _method, url in env["opener"].requested:
             assert urlsplit(url).path in probes and not urlsplit(url).query, url
