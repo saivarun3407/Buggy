@@ -794,6 +794,7 @@ def write_report(
     directory.mkdir(parents=True, exist_ok=True)
     path = directory / "recon-report.md"
     path.write_text(text, encoding="utf-8")
+    write_technologies(directory, records)
     issues = group_issues(records.get("vulnerability", []))
     digest = {
         "issues": {
@@ -806,6 +807,33 @@ def write_report(
     }
     digest["records"] = records
     return path, digest
+
+
+#: What recon saw the target run on, and the skills that fit (read by the agent's brief).
+TECHNOLOGIES_FILE = "technologies.json"
+
+
+def write_technologies(directory: Path, records: dict[str, list[dict[str, Any]]]) -> list[str]:
+    """Write the technology names recon found and their ``web-tech-*`` skills; return the skills."""
+    from buggy.findings import skill_map  # noqa: PLC0415
+
+    names: list[str] = []
+    for record in records.get("technology", []):
+        attrs = record.get("attrs") if isinstance(record.get("attrs"), dict) else {}
+        name = str((attrs or {}).get("name") or "").strip()
+        if name:
+            version = str((attrs or {}).get("version") or "").strip()
+            names.append(f"{name}:{version}" if version else name)
+    names = sorted(set(names))
+    skills = skill_map.for_technologies(names)
+    try:
+        (directory / TECHNOLOGIES_FILE).write_text(
+            json.dumps({"technologies": names, "skills": skills}, indent=1) + "\n",
+            encoding="utf-8",
+        )
+    except OSError:
+        pass
+    return skills
 
 
 def capture_available() -> bool:

@@ -40,7 +40,7 @@ from buggy.capture.probes.registry import REGISTRY
 from buggy.coordination import DB_FILENAME as BOARD_DB
 from buggy.coordination import Board
 from buggy.coordination.board import BoardError
-from buggy.findings import candidates, report, verifier
+from buggy.findings import candidates, report, skill_map, verifier
 from buggy.findings.model import Finding, Status
 from buggy.findings.service import FindingService
 from buggy.findings.store import FindingStore
@@ -551,6 +551,9 @@ class Workbench:
                 limit=max(1, min(int(limit), 20)),
                 claimed_by=_actor(actor),
             )
+            # The skill files to read before working each lead (skill_get), by fixed rules.
+            for row in rows:
+                row["skills"] = skill_map.for_lead(row)
             return {"ok": True, "candidates": rows, "count": len(rows)}
 
         return self._guard(run)

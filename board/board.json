@@ -1297,6 +1297,20 @@
    "tests": "",
    "note": "12 skills gained methodology they lacked (~130 items already covered); 4 new class skills: exposed files and secrets, TLS, server-side code injection, cloud storage buckets",
    "order": 76
+  },
+  {
+   "id": "H17",
+   "epic": "E16",
+   "lane": "F",
+   "title": "Agents read the right skill: leads name skills, sections, read-before-submit, check names tested",
+   "depends": [],
+   "status": "done",
+   "agent": "",
+   "branch": "",
+   "commit": "",
+   "tests": "1536 tests in the affected suites pass",
+   "note": "leads carry skills (probe, words, class); brief lists technology skills from recon; skill_get section=; finding_submit refused until a class skill is read; test: every check a skill names exists",
+   "order": 77
   }
  ]
 }

@@ -81,7 +81,28 @@ records point to it), how to test it step by step (read-only first, writes
 marked "needs approval"), payloads and bypasses, how to prove it, false
 positives, which Buggy check covers it, what not to do, and the fix, with the
 HackTricks pages it came from. `web-web-vulnerabilities-methodology` is the
-index. The agent's rules tell it to read a bug's skill before testing it.
+index. 69 more, named `web-tech-<slug>`, cover one technology each (Tomcat,
+WordPress, Spring Actuators, Next.js and so on).
+
+How the agent is pointed at the right skill (all fixed rules in
+`buggy/findings/skill_map.py`, no model):
+
+- **Each lead names its skills.** `candidates_next` adds `skills` to every
+  lead: the probe that raised it (`sqli` -> `web-sql-injection`), words in its
+  endpoint and description (`reset` -> `web-reset-password`, `wp-login.php`
+  -> `web-tech-wordpress`), then its bug class. At most four; the index when
+  nothing fits.
+- **The brief names the technology skills.** After recon, `hunt` writes
+  `<control>/<engagement>/technologies.json` (what httpx saw and the matching
+  `web-tech-*` skills); the agent's brief lists both.
+- **Read only what is needed.** `skill_get` takes `section`, e.g.
+  `section="how to test"` or `section="prove, do not"`.
+- **No finding without its skill.** The bridge refuses `finding_submit` for a
+  bug class until the agent has read one of that class's skills in this run,
+  and names the skill and the sections to read.
+- **Skills cannot name checks that do not exist.** A test checks every Buggy
+  check a skill's "In Buggy" section names against the probe registry and the
+  agent tools, and that every skill the map hands out exists.
 
 HackTricks allows adapting its content with attribution; commercial use needs
 its author's permission.

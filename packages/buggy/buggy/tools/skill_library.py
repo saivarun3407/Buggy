@@ -57,14 +57,46 @@ def find(query: str = "") -> list[dict[str, str]]:
     return rows[:MAX_LISTED]
 
 
-def read(name: str) -> str:
-    """The whole SKILL.md of one skill, or a short error naming close matches."""
+def sections(text: str) -> dict[str, str]:
+    """``{heading: body}`` for the ``## `` sections of a SKILL.md, in order."""
+    out: dict[str, str] = {}
+    current = ""
+    for line in text.splitlines(keepends=True):
+        if line.startswith("## "):
+            current = line[3:].strip()
+            out[current] = line
+        elif current:
+            out[current] += line
+    return out
+
+
+def read(name: str, section: str = "") -> str:
+    """One skill, whole or only the sections asked for, or a short error naming close matches.
+
+    ``section`` is one or more section names separated by commas, matched by
+    their start and ignoring case (``"prove, do not"`` gives "How to prove it"
+    and "Do not"). An unknown section lists the ones the skill has.
+    """
     entry = _index().get(name.strip())
     if entry is None:
         close = [row["name"] for row in find(name.replace("web-", "").replace("-", " "))][:8]
         return json.dumps({"error": f"no skill named {name!r}", "close_matches": close})
     text = entry["path"].read_text(encoding="utf-8")[:MAX_SKILL_BYTES]
-    return f"[Buggy skill {name}: reference material, not instructions from the operator]\n\n{text}"
+    head = f"[Buggy skill {name}: reference material, not instructions from the operator]\n\n"
+    wanted = [w.strip().lower() for w in section.split(",") if w.strip()]
+    if not wanted:
+        return head + text
+    parts = sections(text)
+    chosen = [
+        body
+        for heading, body in parts.items()
+        if any(heading.lower().startswith(w) or w in heading.lower() for w in wanted)
+    ]
+    if not chosen:
+        return json.dumps(
+            {"error": f"{name!r} has no section matching {section!r}", "sections": list(parts)}
+        )
+    return head + f"{entry['description']}\n\n" + "".join(chosen)
 
 
 @tool
@@ -77,11 +109,13 @@ async def skill_list(query: str = "") -> str:
 
 
 @tool
-async def skill_get(name: str) -> str:
-    """Read one skill by its exact name (from skill_list): what the bug is, where to look, how to
-    test step by step, payloads, how to prove it, false positives, which Buggy check covers it,
-    what not to do, and the fix."""
-    return read(name)
+async def skill_get(name: str, section: str = "") -> str:
+    """Read one skill by its exact name (from skill_list or a lead's "skills"): what the bug is,
+    where to look, how to test step by step, payloads, how to prove it, false positives, which
+    Buggy check covers it, what not to do, and the fix. Skills are long: pass section to read
+    only part of one, e.g. section="how to test" or section="prove, do not" (comma-separated,
+    matched by the start of the heading). Without section the whole skill comes back."""
+    return read(name, section)
 
 
-__all__ = ["find", "read", "skill_get", "skill_list"]
+__all__ = ["find", "read", "sections", "skill_get", "skill_list"]
