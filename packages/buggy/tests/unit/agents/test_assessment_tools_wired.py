@@ -23,18 +23,16 @@ def test_orchestrator_factory_exposes_the_complete_assessment_interface(
     assert {tool.name for tool in ASSESSMENT_TOOLS} <= {tool.name for tool in graph["tools"]}
 
 
-def test_asvs_specialists_share_assessment_review_tools(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_asvs_specialist_gets_assessment_review_tools(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("BUGGY_PLUGINS", "assessment-test-only")
-    assessor = importlib.import_module("buggy.agents.standard.asvs_assessor")
     from buggy.agents.bounty._common import build_bounty_tools
     from buggy.tools.assessment import ASSESSMENT_REVIEW_TOOLS
 
     expected = {tool.name for tool in ASSESSMENT_REVIEW_TOOLS}
-    assert expected <= set(assessor._STANDARD_TOOLS)
     assert expected <= {tool.name for tool in build_bounty_tools("asvs", [])}
 
 
-@pytest.mark.parametrize("role", ["buggy", "asvs_assessor", "asvs"])
+@pytest.mark.parametrize("role", ["buggy", "asvs"])
 def test_assessment_prompts_require_explicit_coverage_review(role: str) -> None:
     from buggy.agents.prompts import load_prompt
 
@@ -42,12 +40,3 @@ def test_assessment_prompts_require_explicit_coverage_review(role: str) -> None:
     prompt = load_prompt(role, shared=shared)
     assert "assessment_status" in prompt
     assert "not full ASVS" in prompt
-
-
-def test_asvs_assessor_uses_version_five_chapter_names() -> None:
-    from buggy.agents.prompts import load_prompt
-
-    prompt = load_prompt("asvs_assessor", shared=[])
-    assert "V1  — Encoding and Sanitization" in prompt
-    assert "V6  — Authentication" in prompt
-    assert "V17 — WebRTC" in prompt

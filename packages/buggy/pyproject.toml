@@ -175,7 +175,6 @@ enabled = ["standard", "plugins", "bounty"]
 recon = "buggy.agents.standard.recon:SUBAGENT_SPEC"
 exploit = "buggy.agents.standard.exploit:SUBAGENT_SPEC"
 analyst = "buggy.agents.standard.analyst:SUBAGENT_SPEC"
-asvs_assessor = "buggy.agents.standard.asvs_assessor:SUBAGENT_SPEC"
 # Plugins bundle — vulnresearch family, attached to the ``vulnresearch`` main agent.
 scanner = "buggy.agents.plugins.scanner:SUBAGENT_SPEC"
 detector = "buggy.agents.plugins.detector:SUBAGENT_SPEC"

@@ -104,7 +104,6 @@ class TestPhaseForRoleMapping:
             "recon",
             "exploit",
             "analyst",
-            "asvs_assessor",
             "soundwave",
             "buggy",
         }

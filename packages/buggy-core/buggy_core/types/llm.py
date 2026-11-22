@@ -526,7 +526,6 @@ AGENT_TIERS: dict[str, Tier] = {
     "exploiter": Tier.HIGH,
     "patcher": Tier.HIGH,
     "analyst": Tier.HIGH,
-    "asvs_assessor": Tier.HIGH,
     "vulnresearch": Tier.HIGH,
     # MID — precision execution, code generation, structured judgment.
     # Tool-heavy with moderate iteration.
@@ -564,7 +563,6 @@ AGENT_TEMPERATURES: dict[str, float] = {
     "verifier": 0.2,
     "patcher": 0.2,
     "analyst": 0.2,
-    "asvs_assessor": 0.2,
     "scanner": 0.2,
     "vulnresearch": 0.4,
     "recon": 0.3,

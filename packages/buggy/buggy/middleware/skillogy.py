@@ -131,7 +131,6 @@ _PHASE_FOR_ROLE: dict[str, str] = {
     "recon": "reconnaissance",
     "exploit": "web-exploitation",
     "analyst": "analyst",
-    "asvs_assessor": "analyst",
     "soundwave": "planning",
     "buggy": "orchestration",
     # Bounty bundle (fork-only) — phase-scope each appsec / bug-bounty

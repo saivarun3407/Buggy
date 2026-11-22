@@ -125,7 +125,7 @@ def test_shared_defensive_skill_is_discoverable_without_tool_grants(
     assert decode_assessment_contract(skill["assessment_contract_json"]) == contract
     assert skill["allowed_tools"] == []
     assert "defensive-assessment" in skill["tags_raw"]
-    for role in ("buggy", "asvs_assessor", "analyst"):
+    for role in ("buggy", "analyst"):
         assert any(skill["path"].startswith(prefix) for prefix in skills_sources_for(role))
 
 
