@@ -1847,8 +1847,12 @@ def class_coverage(outcome: dict[str, Any], slug: str) -> list[dict[str, Any]]:
     """
     from buggy.pipeline import sweep  # noqa: PLC0415
 
+    def section_of(source: dict[str, Any], name: str) -> dict[str, Any]:
+        value = source.get(name)
+        return value if isinstance(value, dict) else {}
+
     totals: dict[str, dict[str, int]] = {}
-    signed_in = outcome.get("signed_in") if isinstance(outcome.get("signed_in"), dict) else {}
+    signed_in = section_of(outcome, "signed_in")
     sections = [outcome.get("probes"), outcome.get("state")]
     sections += [signed_in.get("probes"), signed_in.get("state")]
     for section in sections:
@@ -1858,8 +1862,8 @@ def class_coverage(outcome: dict[str, Any], slug: str) -> list[dict[str, Any]]:
             for key in _CLASS_COUNTS:
                 into[key] += int(counts.get(key) or 0)
 
-    access = outcome.get("access") if isinstance(outcome.get("access"), dict) else {}
-    inferred = signed_in.get("inferred") if isinstance(signed_in.get("inferred"), dict) else {}
+    access = section_of(outcome, "access")
+    inferred = section_of(signed_in, "inferred")
     objects = int(access.get("objects") or 0) + int(inferred.get("objects") or 0)
     if objects:
         into = totals.setdefault("access_control", dict.fromkeys(_CLASS_COUNTS, 0))
