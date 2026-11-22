@@ -52,6 +52,9 @@ NO_SIGNUP_FOUND = "NO_SIGNUP_FOUND"
 REGISTRATION_REFUSED = "REGISTRATION_REFUSED"
 LOGIN_FAILED = "LOGIN_FAILED"
 NOT_ENABLED = "NOT_ENABLED"
+#: An account Buggy prepared exists on paper only: a person has to finish its
+#: sign-up (a CAPTCHA, an email link), after which Buggy signs in with it.
+WAITING_FOR_OPERATOR = "WAITING_FOR_OPERATOR"
 
 MAX_ACCOUNTS = 3
 DEFAULT_MAX_ACCOUNTS = 2
@@ -845,19 +848,24 @@ def provision(
     signup = find_signup(crawl_result, api_ops)
     login = find_login(crawl_result, api_ops)
 
+    target = policy.max_accounts if count is None else max(0, min(int(count), policy.max_accounts))
+    result["credentials_file"] = f"audit/{engagement}/accounts-created.json"
+    if login is not None:
+        result["login"] = login.summary()
     if signup is None:
         reason, detail = _no_signup_reason(gateway, engagement, crawl_result)
         failed.append({"name": "", "reason": reason, "detail": detail})
+        # Buggy cannot register here, but a person can. Prepare the accounts (an
+        # address, a user name and a strong password each) so that the operator
+        # registers exactly those, and sign in with the ones already registered.
+        _prepared_accounts(gateway, engagement, policy, login, target, seed_list[0], result)
         result["requests"] = len(gateway.store.list(engagement, limit=500)) - before
         return result
     result["signup"] = signup.summary()
-    if login is not None:
-        result["login"] = login.summary()
 
     grant = gateway.account_creation_grant(engagement, [signup.url, login.url if login else ""])
 
     existing = _load_existing(gateway, engagement)
-    target = policy.max_accounts if count is None else max(0, min(int(count), policy.max_accounts))
     accounts: list[_Account] = []
     created: list[str] = []
     reused: list[str] = []
@@ -873,6 +881,15 @@ def provision(
         )
         if login is not None and _signin(gateway, engagement, grant, login, account):
             reused.append(name)
+        else:
+            failed.append(
+                {
+                    "name": name,
+                    "reason": WAITING_FOR_OPERATOR,
+                    "detail": "this prepared account does not sign in yet: finish its sign-up "
+                    "(or its email verification) with the values in the credentials file",
+                }
+            )
         accounts.append(account)
         stored.append(account.record())
 
@@ -933,6 +950,59 @@ def provision(
     result["ok"] = bool(created or reused)
     result["requests"] = len(gateway.store.list(engagement, limit=500)) - before
     return result
+
+
+def _prepared_accounts(
+    gateway: CaptureGateway,
+    engagement: str,
+    policy: AccountPolicy,
+    login: Signup | None,
+    target: int,
+    seed: str,
+    result: dict[str, Any],
+) -> None:
+    """Keep ``target`` prepared accounts on file and sign in those a person registered.
+
+    Fills ``result["reused"]`` with the accounts that sign in and
+    ``result["prepared"]`` with the ones still waiting for the operator.
+    """
+    existing = _load_existing(gateway, engagement)
+    accounts: list[_Account] = [
+        _Account(
+            name=name,
+            email=str(entry.get("email") or ""),
+            username=str(entry.get("username") or ""),
+            password=str(entry.get("password") or ""),
+        )
+        for name, entry in list(existing.items())[:target]
+    ]
+    index = 0
+    while len(accounts) < target:
+        index += 1
+        name = f"auto{index}"
+        if name in {a.name for a in accounts}:
+            continue
+        tag = secrets.token_hex(TAG_BYTES)
+        accounts.append(
+            _Account(
+                name=name,
+                email=policy.email_for(tag),
+                username=f"auto{tag}",
+                password=_strong_password(),
+            )
+        )
+    grant = gateway.account_creation_grant(engagement, [login.url]) if login is not None else None
+    working: list[str] = []
+    for account in accounts:
+        if login is not None and grant is not None:
+            _signin(gateway, engagement, grant, login, account)
+    _store_accounts(gateway, engagement, [a.record() for a in accounts])
+    for account in accounts:
+        if account.has_session() and _verify(gateway, engagement, seed, account.name):
+            working.append(account.name)
+    result["reused"] = working
+    result["prepared"] = [a.name for a in accounts if a.name not in working]
+    result["ok"] = bool(working)
 
 
 def _no_signup_reason(

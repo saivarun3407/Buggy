@@ -257,6 +257,21 @@ login) stops it, with `truncated: true`.
 
 ## Accounts Buggy creates itself
 
+**When Buggy needs you.** Buggy registers and signs in by itself wherever it
+can. Where a person is needed it stops that step, prints `YOUR TURN` with the
+exact thing to do (and sends it to your notification webhook), and carries on
+when you run `buggy hunt --resume <engagement>`:
+
+| Blocker | What you do | What Buggy does on resume |
+|---|---|---|
+| CAPTCHA, a field it does not understand, a refused registration | Open the sign-up page and register the accounts with the email, user name and password Buggy prepared. They are in `~/.buggy/audit/<engagement>/accounts-created.json`. | Signs in with those values. |
+| Email verification | Click the links in the emails sent to your address pattern. | Signs in. |
+| No sign-up found, but a sign-in exists | Register the prepared accounts wherever the site lets you. | Signs in with them. |
+| Single sign-on, or no sign-in Buggy can use | Sign in yourself and declare the accounts by session cookie or header in `identities.json` (see *Test accounts* above). | Uses the sessions you declared. |
+
+Buggy never registers the same account twice, and a prepared account that
+does not sign in yet is reported as waiting for you, not as a failure.
+
 Access-control testing needs more than one account, and declaring them by hand
 (the section above) is not always possible. When the operator allows it, Buggy
 registers its own test accounts on the target, signs in and keeps the sessions
@@ -318,6 +333,13 @@ the operator should sign in with those credentials and delete the accounts (or
 have the target's owner remove them).
 
 ## Evidence, reports and CI
+
+**Evidence is for valid bugs only.** The evidence step runs only for a finding
+that was re-proven and graded `submit`. A finding that was proven but held by
+the grader (a duplicate of a known issue, outside the program's rules, no
+real impact) gets no video and no log bundle; the reports list it as "proven,
+not reportable" with the grader's reason. With no valid bug, no evidence is
+recorded and the run says so.
 
 - `evidence_export` writes a redacted bundle under
   `~/.buggy/audit/<engagement>/evidence/<id>/`: `evidence.har`,

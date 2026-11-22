@@ -109,7 +109,9 @@ def test_each_proven_finding_gets_logs_a_video_and_a_place_in_the_word_report(
     control, audit = setup(tmp_path, [FINDING])
     calls = servers(monkeypatch, audit)
     out = hunt.write_proof_and_word(control, audit, "acme", RESULT)
-    assert out == {"videos": 1, "logs": 1, "word": hunt.WORD_REPORT, "errors": []}
+    assert out == {
+        "videos": 1, "logs": 1, "word": hunt.WORD_REPORT, "errors": [], "valid": 1, "held": 0,
+    }  # fmt: skip
     assert [c[0] for c in calls] == ["evidence_export", "proof_record"]
     recorded = calls[1][2]
     assert recorded["finding_id"] == FINDING["id"] and FINDING["title"] in recorded["html"]
@@ -153,3 +155,31 @@ def test_a_missing_or_damaged_report_is_reported(tmp_path, monkeypatch) -> None:
     (control / "acme" / "report.json").write_text("[1, 2]")
     out = hunt.write_proof_and_word(control, audit, "acme", RESULT)
     assert out["word"] == "" and out["errors"] == ["report.json: not a report"]
+
+
+def test_only_valid_bugs_get_evidence(tmp_path, monkeypatch) -> None:
+    held = {
+        **FINDING,
+        "id": "F-00000000aaaa",
+        "title": "Duplicate of a scanner hit",
+        "grade": {"decision": "hold", "reasons": ["rule 5: the scanner already reported this"]},
+    }
+    ungraded = {**FINDING, "id": "F-00000000bbbb", "title": "Never graded", "grade": {}}
+    control, audit = setup(tmp_path, [FINDING, held, ungraded])
+    calls = servers(monkeypatch, audit)
+    out = hunt.write_proof_and_word(control, audit, "acme", RESULT)
+    assert (out["valid"], out["held"], out["videos"], out["logs"]) == (1, 2, 1, 1)
+    touched = {c[2]["finding_id"] for c in calls}
+    assert touched == {FINDING["id"]}  # nothing was recorded or exported for the other two
+    text = document(control)
+    assert "Proven, not reportable: rule 5: the scanner already reported this" in text
+    assert "Proven, not reportable: not graded yet" in text
+
+
+def test_no_valid_bug_means_no_evidence_step(tmp_path, monkeypatch) -> None:
+    held = {**FINDING, "grade": {"decision": "discard", "reasons": ["rule 2: out of scope now"]}}
+    control, audit = setup(tmp_path, [held])
+    calls = servers(monkeypatch, audit)
+    out = hunt.write_proof_and_word(control, audit, "acme", RESULT)
+    assert calls == [] and (out["valid"], out["held"], out["videos"]) == (0, 1, 0)
+    assert not (audit / "acme").exists()

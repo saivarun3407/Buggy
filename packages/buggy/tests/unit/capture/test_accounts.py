@@ -609,3 +609,62 @@ def test_accounts_provision_is_a_workbench_tool_without_an_agent_wrapper() -> No
     from buggy.tools import stack_mcp
 
     assert "accounts_provision" not in {t.name for t in stack_mcp.ALL_STACK_MCP_TOOLS}
+
+
+class TestOperatorFinishesTheSignUp:
+    """Where Buggy cannot register, it prepares the accounts and signs in once a person did."""
+
+    def created(self, roots: Roots) -> list[dict]:
+        path = roots.audit / "acme" / "accounts-created.json"
+        return json.loads(path.read_text())["accounts"]
+
+    def test_email_verification_is_finished_by_the_operator_and_buggy_signs_in(self, env) -> None:
+        gateway, origin, roots, target = env
+        target.verify_email = True
+        first = provision(gateway, "acme", [SEED])
+        assert first["created"] == [] and first["reused"] == []
+        assert {f["reason"] for f in first["failed"]} == {accounts.EMAIL_VERIFICATION}
+        registered = origin.count("POST", REGISTER_URL)
+        assert registered == 2 and len(self.created(roots)) == 2
+
+        # The operator has not clicked the links yet: nothing is registered twice.
+        waiting = provision(gateway, "acme", [SEED])
+        assert {f["reason"] for f in waiting["failed"]} == {accounts.WAITING_FOR_OPERATOR}
+        assert origin.count("POST", REGISTER_URL) == registered
+
+        # The operator clicks the links; the next run signs in and carries on.
+        target.verify_email = False
+        done = provision(gateway, "acme", [SEED])
+        assert sorted(done["reused"]) == ["auto1", "auto2"] and done["failed"] == []
+        assert origin.count("POST", REGISTER_URL) == registered
+        assert gateway.send("acme", "GET", ACCOUNT_URL, identity="auto1").status == 200
+
+    def test_without_a_sign_up_buggy_prepares_accounts_for_the_operator_to_register(
+        self, env
+    ) -> None:
+        gateway, origin, roots, target = env
+        # The site has a login but no sign-up Buggy can find.
+        del origin.routes[("GET", REGISTER_URL)]
+        del origin.routes[("POST", REGISTER_URL)]
+        origin.routes[("GET", SEED)] = (200, "text/html", '<a href="/login">Log in</a>')
+
+        first = provision(gateway, "acme", [SEED])
+        assert first["ok"] is False and first["prepared"] == ["auto1", "auto2"]
+        assert {f["reason"] for f in first["failed"]} == {accounts.NO_SIGNUP_FOUND}
+        assert first["credentials_file"] == "audit/acme/accounts-created.json"
+        prepared = self.created(roots)
+        assert [a["name"] for a in prepared] == ["auto1", "auto2"]
+        assert all(a["email"].endswith("@" + EMAIL_DOMAIN) and a["password"] for a in prepared)
+        # Nothing about the prepared values is in the result the hunt command sees.
+        assert prepared[0]["password"] not in json.dumps(first)
+        assert prepared[0]["email"] not in json.dumps(first)
+
+        # The operator registers exactly those values on the site (by hand).
+        for account in prepared:
+            target.users[account["email"]] = account["password"]
+        second = provision(gateway, "acme", [SEED])
+        assert second["ok"] is True and sorted(second["reused"]) == ["auto1", "auto2"]
+        assert second["prepared"] == []
+        # The same prepared accounts were kept, not replaced by new ones.
+        assert self.created(roots)[0]["email"] == prepared[0]["email"]
+        assert gateway.send("acme", "GET", ACCOUNT_URL, identity="auto2").status == 200

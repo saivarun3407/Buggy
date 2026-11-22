@@ -540,8 +540,8 @@ def _body(
     out.append(_heading("Not proven", 1))
     out.append(
         _text(
-            "These items were not re-proved by a replay. They are not findings and are listed "
-            "so they can be followed up."
+            "These items are not reportable findings: either a replay did not re-prove them, "
+            "or they were proven and the grader held them. Each row says why."
         )
     )
     rows: list[list[Any]] = []

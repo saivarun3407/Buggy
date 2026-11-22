@@ -1408,6 +1408,18 @@ def _browser(tool: str, engagement: str, **arguments: Any) -> dict[str, Any]:
     return call_mcp_sync("browser", tool, {"engagement": engagement, **arguments})
 
 
+def _grade_decision(finding: dict[str, Any]) -> str:
+    grade = finding.get("grade")
+    return str(grade.get("decision") or "") if isinstance(grade, dict) else ""
+
+
+def _grade_reason(finding: dict[str, Any]) -> str:
+    grade = finding.get("grade")
+    reasons = grade.get("reasons") if isinstance(grade, dict) else None
+    first = str(reasons[0]) if isinstance(reasons, list) and reasons else "not graded yet"
+    return first[:200]
+
+
 def write_proof_and_word(
     control: Path, audit: Path, engagement: str, result: dict[str, Any]
 ) -> dict[str, Any]:
@@ -1424,7 +1436,7 @@ def write_proof_and_word(
     from buggy.findings.docx import to_docx  # noqa: PLC0415
     from buggy.findings.proof_page import proof_html  # noqa: PLC0415
 
-    out: dict[str, Any] = {"videos": 0, "logs": 0, "word": "", "errors": []}
+    out: dict[str, Any] = {"videos": 0, "logs": 0, "word": "", "errors": [], "valid": 0, "held": 0}
     directory = control / engagement
     try:
         report = json.loads((directory / "report.json").read_text(encoding="utf-8"))
@@ -1438,7 +1450,26 @@ def write_proof_and_word(
     report["not_tested"] = list(result.get("not_tested") or [])
     images: dict[str, bytes] = {}
     videos: dict[str, str] = {}
-    findings = [f for f in report.get("findings") or [] if isinstance(f, dict) and f.get("id")]
+    # Evidence is for valid bugs only: re-proven AND graded as reportable. A
+    # proven finding the grader held (a duplicate, outside the program's rules,
+    # no real impact) stays in the report as "not reportable" with the reason,
+    # and gets no video and no log bundle.
+    proven = [f for f in report.get("findings") or [] if isinstance(f, dict) and f.get("id")]
+    findings = [f for f in proven if _grade_decision(f) == "submit"]
+    held = [f for f in proven if _grade_decision(f) != "submit"]
+    report["findings"] = findings
+    report["unverified"] = [
+        *(
+            {
+                **f,
+                "status": "proven, not reportable",
+                "verifier_reasons": ["Proven, not reportable: " + _grade_reason(f)],
+            }
+            for f in held
+        ),
+        *(u for u in report.get("unverified") or [] if isinstance(u, dict)),
+    ]
+    out["valid"], out["held"] = len(findings), len(held)
     for finding in findings[:MAX_PROOF_VIDEOS]:
         finding_id = str(finding["id"])
         folder = f"audit/{engagement}/evidence/{finding_id}"
@@ -1914,17 +1945,78 @@ def run_account_creation(
                 "reason": str(result.get("detail") or result.get("error") or "not available")[:300]}  # fmt: skip
     names = [str(n) for n in [*(result.get("created") or []), *(result.get("reused") or [])]]
     failed = [f for f in result.get("failed") or [] if isinstance(f, dict)]
-    return {
+    out: dict[str, Any] = {
         "ok": bool(names),
         "enabled": bool(result.get("enabled", True)),
         "created": [str(n) for n in result.get("created") or []],
         "reused": [str(n) for n in result.get("reused") or []],
         "failed": [
-            {"reason": str(f.get("reason") or ""), "detail": str(f.get("detail") or "")[:200]}
+            {
+                "name": str(f.get("name") or ""),
+                "reason": str(f.get("reason") or ""),
+                "detail": str(f.get("detail") or "")[:200],
+            }
             for f in failed
         ],
         "reason": "" if names else "; ".join(str(f.get("reason")) for f in failed) or "no account",
     }
+    out["your_turn"] = operator_steps(engagement, result, out)
+    return out
+
+
+#: Blockers a person can clear by finishing the sign-up Buggy started or prepared.
+_FINISH_SIGNUP = frozenset(
+    {"CAPTCHA", "UNKNOWN_REQUIRED_FIELD", "REGISTRATION_REFUSED", "WAITING_FOR_OPERATOR",
+     "NO_SIGNUP_FOUND", "LOGIN_FAILED"}
+)  # fmt: skip
+WANTED_ACCOUNTS = 2
+
+
+def operator_steps(engagement: str, raw: dict[str, Any], summary: dict[str, Any]) -> list[str]:
+    """What the operator has to do so that account creation can finish; ``[]`` when nothing.
+
+    Buggy does everything it can by itself. Where a person is needed (a
+    CAPTCHA, a link in an email, a sign-up it could not find), it says exactly
+    what to do, with the values it prepared, and continues on ``--resume``.
+    """
+    working = len(summary["created"]) + len(summary["reused"])
+    reasons = {f["reason"] for f in summary["failed"]}
+    if working >= WANTED_ACCOUNTS or not reasons or reasons == {"NOT_ENABLED"}:
+        return []
+    raw_signup, raw_login = raw.get("signup"), raw.get("login")
+    signup: dict[str, Any] = raw_signup if isinstance(raw_signup, dict) else {}
+    login: dict[str, Any] = raw_login if isinstance(raw_login, dict) else {}
+    where = str(signup.get("url") or "the target's sign-up page")
+    file = f"~/.buggy/{raw.get('credentials_file') or f'audit/{engagement}/accounts-created.json'}"
+    resume = f"buggy hunt --resume {engagement}"
+    declare = (
+        f"declare two accounts by session cookie or header in "
+        f"~/.buggy/secrets/{engagement}/identities.json (format: docs/findings.md), then run: "
+        f"{resume}"
+    )
+    if "SSO_ONLY" in reasons or (not login and "EMAIL_VERIFICATION" not in reasons):
+        # Nothing Buggy can sign in to with a password: the operator hands over sessions.
+        why = (
+            "the site signs in through single sign-on"
+            if "SSO_ONLY" in reasons
+            else "Buggy found no sign-in form or API it can use"
+        )
+        return [f"Sign-in cannot be automated here ({why}).", f"Sign in yourself and {declare}"]
+    if "EMAIL_VERIFICATION" in reasons:
+        return [
+            "The accounts are registered and wait for email verification.",
+            "Open the verification emails sent to your address pattern and click the links.",
+            f"Then run: {resume}  (Buggy signs in and continues)",
+        ]
+    if reasons & _FINISH_SIGNUP:
+        blocker = "a CAPTCHA" if "CAPTCHA" in reasons else "a step it cannot do by itself"
+        return [
+            f"Sign-up needs you once: {blocker}.",
+            f"Open {where} and register the accounts with the email, user name and password "
+            f"Buggy prepared for each: {file}",
+            f"Then run: {resume}  (Buggy signs in with them and continues)",
+        ]
+    return []
 
 
 def _accounts_stage(
@@ -1942,13 +2034,14 @@ def _accounts_stage(
         kept = f"; reused {', '.join(result['reused'])}" if result["reused"] else ""
         print(f"  test accounts    created {made}{kept}", file=sys.stderr)
     else:
-        print(
-            f"  test accounts    could not be created: {result['reason']}. Declare accounts "
-            f"yourself in ~/.buggy/secrets/{slug}/identities.json",
-            file=sys.stderr,
-        )
+        print(f"  test accounts    not ready yet: {result['reason']}", file=sys.stderr)
     for failure in result["failed"]:
         print(f"    not created: {failure['reason']} {failure['detail']}".rstrip(), file=sys.stderr)
+    if result["your_turn"]:
+        print("  YOUR TURN        " + result["your_turn"][0], file=sys.stderr)
+        for number, step in enumerate(result["your_turn"][1:], 1):
+            print(f"    {number}. {step}", file=sys.stderr)
+        _notify("failure_event", slug, "test accounts need you", " ".join(result["your_turn"]))
     if args.non_interactive:
         print(json.dumps({"type": "accounts", **result}))
     return result
@@ -2143,6 +2236,7 @@ def not_tested(
     *,
     agents_ran: bool = False,
     signed_in: dict[str, Any] | None = None,
+    accounts: dict[str, Any] | None = None,
 ) -> list[dict[str, str]]:
     """What this run did not test, and what would make it tested. Plain facts for the operator.
 
@@ -2172,11 +2266,17 @@ def not_tested(
             }
         )
     if probes is not None and not (signed_in or {}).get("ran"):
+        steps = list((accounts or {}).get("your_turn") or [])
         missing.append(
             {
                 "area": "everything behind the login",
-                "reason": str((signed_in or {}).get("reason") or "no signed-in crawl or probe ran"),
-                "enable": f"declare test accounts in ~/.buggy/secrets/{slug}/identities.json",
+                "reason": steps[0]
+                if steps
+                else str((signed_in or {}).get("reason") or "no signed-in crawl or probe ran"),
+                "enable": " ".join(steps[1:])
+                if steps
+                else f"declare test accounts in ~/.buggy/secrets/{slug}/identities.json, or "
+                "let Buggy create them with --create-accounts",
             }
         )
     agents_off = bool(getattr(args, "no_agent", False)) or (
@@ -2299,7 +2399,9 @@ def run_stages(  # noqa: PLR0912, PLR0915
         "state": writes,
         "accounts": accounts,
     }
-    outcome["not_tested"] = not_tested(slug, args, probes, access, signed_in=signed_in)
+    outcome["not_tested"] = not_tested(
+        slug, args, probes, access, signed_in=signed_in, accounts=accounts
+    )
     outcome["coverage"] = class_coverage(outcome, slug)
     if probes is not None:
         print_coverage(outcome["coverage"])
@@ -2559,10 +2661,19 @@ def main(argv: list[str] | None = None) -> int:  # noqa: PLR0911, PLR0912, PLR09
                     f"  Word report      {_host_path(control / slug / WORD_REPORT)}",
                     file=sys.stderr,
                 )
-            if proof["logs"] or proof["videos"]:
+            if proof["valid"]:
                 print(
-                    f"  proof            {proof['videos']} videos and {proof['logs']} log bundles "
-                    f"under ~/.buggy/audit/{slug}/evidence/<finding-id>/",
+                    f"  evidence         {proof['valid']} valid bugs: {proof['videos']} videos and "
+                    f"{proof['logs']} log bundles under "
+                    f"~/.buggy/audit/{slug}/evidence/<finding-id>/",
+                    file=sys.stderr,
+                )
+            else:
+                print("  evidence         none recorded: no valid bug was proven", file=sys.stderr)
+            if proof["held"]:
+                print(
+                    f"  not reportable   {proof['held']} proven but held by the grader (listed "
+                    "with the reason in the report; no evidence recorded)",
                     file=sys.stderr,
                 )
             for problem in proof["errors"][:10]:

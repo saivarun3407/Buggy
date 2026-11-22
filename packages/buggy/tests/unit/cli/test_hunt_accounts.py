@@ -153,7 +153,7 @@ class TestStage:
         result = hunt._accounts_stage(self.run_args(), "acme", self.scope(True), RECORDS)  # noqa: SLF001
         assert result is not None and result["ok"] is False and result["reason"] == "CAPTCHA"
         err = capsys.readouterr().err
-        assert "could not be created: CAPTCHA" in err and "identities.json" in err
+        assert "not ready yet: CAPTCHA" in err and "YOUR TURN" in err
 
     def test_a_gateway_without_the_tool_is_reported_not_crashed(self, monkeypatch) -> None:
         monkeypatch.setattr(hunt, "_capture", lambda *_a, **_k: {"error": "unknown tool"})
@@ -170,4 +170,80 @@ class TestStage:
         }
         monkeypatch.setattr(hunt, "_capture", lambda *_a, **_k: leaky)
         result = hunt.run_account_creation("acme", RECORDS)
-        assert set(result) == {"ok", "enabled", "created", "reused", "failed", "reason"}
+        assert set(result) == {
+            "ok",
+            "enabled",
+            "created",
+            "reused",
+            "failed",
+            "reason",
+            "your_turn",
+        }
+        assert "a@b.c" not in str(result) and result["your_turn"] == []
+
+
+class TestYourTurn:
+    """Buggy does what it can; where a person is needed it says exactly what to do."""
+
+    def steps(self, monkeypatch, answer: dict) -> list[str]:
+        monkeypatch.setattr(hunt, "_capture", lambda *_a, **_k: answer)
+        return hunt.run_account_creation("acme", RECORDS)["your_turn"]
+
+    def answer(self, reason: str, **extra) -> dict:
+        base = {
+            "enabled": True, "created": [], "reused": [],
+            "failed": [{"name": "auto1", "reason": reason, "detail": ""}],
+            "signup": {"kind": "form", "url": "https://app.acme.test/register"},
+            "login": {"kind": "form", "url": "https://app.acme.test/login"},
+            "credentials_file": "audit/acme/accounts-created.json",
+        }  # fmt: skip
+        return {**base, **extra}
+
+    def test_a_captcha_is_handed_to_the_operator_with_the_prepared_values(
+        self, monkeypatch
+    ) -> None:
+        steps = self.steps(monkeypatch, self.answer("CAPTCHA"))
+        assert steps[0] == "Sign-up needs you once: a CAPTCHA."
+        assert "https://app.acme.test/register" in steps[1]
+        assert "~/.buggy/audit/acme/accounts-created.json" in steps[1]
+        assert steps[2].startswith("Then run: buggy hunt --resume acme")
+
+    def test_email_verification_asks_for_the_click_only(self, monkeypatch) -> None:
+        steps = self.steps(monkeypatch, self.answer("EMAIL_VERIFICATION"))
+        assert "wait for email verification" in steps[0] and "click the links" in steps[1]
+        assert "buggy hunt --resume acme" in steps[2]
+
+    def test_a_prepared_account_still_waiting_repeats_the_same_step(self, monkeypatch) -> None:
+        steps = self.steps(monkeypatch, self.answer("WAITING_FOR_OPERATOR"))
+        assert steps and "register the accounts" in steps[1]
+
+    def test_sso_or_no_sign_in_asks_for_sessions_instead(self, monkeypatch) -> None:
+        sso = self.steps(monkeypatch, self.answer("SSO_ONLY"))
+        assert "single sign-on" in sso[0] and "identities.json" in sso[1]
+        blind = self.steps(monkeypatch, self.answer("NO_SIGNUP_FOUND", signup=None, login=None))
+        assert "no sign-in form or API" in blind[0] and "identities.json" in blind[1]
+
+    def test_nothing_is_asked_when_two_accounts_work_or_it_is_off(self, monkeypatch) -> None:
+        working = {"enabled": True, "created": ["auto1"], "reused": ["auto2"], "failed": []}
+        assert self.steps(monkeypatch, working) == []
+        off = {"enabled": False, "created": [], "reused": [],
+               "failed": [{"name": "", "reason": "NOT_ENABLED", "detail": ""}]}  # fmt: skip
+        assert self.steps(monkeypatch, off) == []
+
+    def test_the_run_prints_the_steps_and_lists_them_as_not_tested(
+        self, monkeypatch, capsys
+    ) -> None:
+        monkeypatch.setattr(hunt, "_capture", lambda *_a, **_k: self.answer("CAPTCHA"))
+        monkeypatch.setattr(hunt, "_notify", lambda *_a, **_k: None)
+        args = argparse.Namespace(
+            no_probes=False, non_interactive=False, no_agent=True, force_agent=False
+        )
+        scope = {"enforcement_extra": {"account_creation": {"enabled": True}}}
+        accounts = hunt._accounts_stage(args, "acme", scope, RECORDS)  # noqa: SLF001
+        err = capsys.readouterr().err
+        assert "YOUR TURN        Sign-up needs you once: a CAPTCHA." in err
+        assert "    2. Then run: buggy hunt --resume acme" in err
+        items = hunt.not_tested("acme", args, {"ran": 1}, {"ran": True}, accounts=accounts)
+        (entry,) = [i for i in items if i["area"] == "everything behind the login"]
+        assert entry["reason"] == "Sign-up needs you once: a CAPTCHA."
+        assert "buggy hunt --resume acme" in entry["enable"]
