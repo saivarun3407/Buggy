@@ -131,7 +131,7 @@ packages/
     cli/                  python CLI: engage, auth, audit, scan, telemetry, workflows
     telemetry/            OTel config (default off in this fork)
   buggy-sdk/       Plugin SDK (scaffold, examples, testing helpers)
-clients/                launcher (Go), cli (Ink), web (Next.js), desktop, shared
+clients/                launcher (Go), cli (Ink), web (Next.js), shared
 config/                 litellm.yaml + provider OAuth handlers
 benchmark/              XBOW / Cybench / CyberGym / ExploitBench runners, kg_recorder, kg_seed_learnings
 containers/             Dockerfiles + entrypoints
