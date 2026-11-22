@@ -438,12 +438,24 @@ def parse_identities(document: Any) -> dict[str, Identity]:
 
 
 class IdentityStore:
-    """The operator's identities, read from the secrets root on every use."""
+    """The operator's identities, read from the secrets root on every use.
 
-    def __init__(self, secrets_root: str | Path | None = None) -> None:
+    When ``accounts_root`` is given, the accounts the gateway's account-creation
+    module created for the engagement are read from there too and appended after
+    the operator's own. A declared identity of the same name always wins: the
+    operator's file is authoritative over anything the gateway created.
+    """
+
+    def __init__(
+        self,
+        secrets_root: str | Path | None = None,
+        *,
+        accounts_root: str | Path | None = None,
+    ) -> None:
         if secrets_root is None:
             secrets_root = os.environ.get("BUGGY_SECRETS_ROOT") or "/secrets"
         self.root = Path(secrets_root)
+        self.accounts_root = Path(accounts_root) if accounts_root is not None else None
 
     def path(self, engagement: str) -> Path:
         bad = not engagement or engagement.startswith(".")
@@ -451,8 +463,7 @@ class IdentityStore:
             raise IdentityError("engagement", "is not a valid engagement name")
         return self.root / engagement / IDENTITIES_FILE
 
-    def load(self, engagement: str) -> dict[str, Identity]:
-        """Every identity of the engagement by name; ``{}`` when none are declared."""
+    def _declared(self, engagement: str) -> dict[str, Identity]:
         path = self.path(engagement)
         try:
             text = path.read_text(encoding="utf-8")
@@ -468,6 +479,58 @@ class IdentityStore:
                 IDENTITIES_FILE, f"is not valid JSON (line {exc.lineno}, column {exc.colno})"
             ) from None
         return parse_identities(document)
+
+    def created_path(self, engagement: str) -> Path | None:
+        """The gateway-owned file of accounts it created, or ``None`` when disabled."""
+        if self.accounts_root is None:
+            return None
+        # Reuse the engagement-name validation of ``path``.
+        bad = not engagement or engagement.startswith(".")
+        if bad or any(ch in engagement for ch in ("/", "\\", "\x00")):
+            raise IdentityError("engagement", "is not a valid engagement name")
+        return self.accounts_root / f"{engagement}.json"
+
+    def _created(self, engagement: str) -> dict[str, Identity]:
+        path = self.created_path(engagement)
+        if path is None:
+            return {}
+        try:
+            text = path.read_text(encoding="utf-8")
+        except FileNotFoundError:
+            return {}
+        except (OSError, UnicodeDecodeError) as exc:
+            raise IdentityError(
+                "accounts", f"the created-accounts file cannot be read ({type(exc).__name__})"
+            ) from exc
+        try:
+            document = json.loads(text)
+        except json.JSONDecodeError as exc:
+            raise IdentityError(
+                "accounts",
+                f"the created-accounts file is not valid JSON (line {exc.lineno})",
+            ) from None
+        if not isinstance(document, dict) or not isinstance(document.get("accounts"), list):
+            raise IdentityError("accounts", "the created-accounts file must be an accounts list")
+        out: dict[str, Identity] = {}
+        for index, entry in enumerate(document["accounts"]):
+            if not isinstance(entry, dict) or not isinstance(entry.get("identity"), dict):
+                raise IdentityError(f"accounts[{index}]", "must carry an identity definition")
+            identity = _parse_identity(entry["identity"], f"accounts[{index}].identity")
+            out[identity.name] = identity
+        return out
+
+    def load(self, engagement: str) -> dict[str, Identity]:
+        """Every identity of the engagement by name; ``{}`` when none are declared.
+
+        Operator-declared identities come first, then the accounts the gateway
+        created; a declared name wins over a created one of the same name.
+        """
+        declared = self._declared(engagement)
+        merged: dict[str, Identity] = dict(declared)
+        for name, identity in self._created(engagement).items():
+            if name not in merged:
+                merged[name] = identity
+        return merged
 
     def get(self, engagement: str, name: str) -> Identity:
         identity = self.load(engagement).get(name)

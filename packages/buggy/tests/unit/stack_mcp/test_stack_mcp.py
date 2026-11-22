@@ -295,9 +295,14 @@ def _lab_scope(stack, **extra) -> None:
 
 def test_every_capture_server_tool_has_an_agent_wrapper_and_no_actor_argument() -> None:
     wrapped = {t.name: t for t in stack_mcp.ALL_STACK_MCP_TOOLS}
-    # candidates_add is used by the recon stage and owners_infer by the hunt command
-    # (operator side), not by agents.
-    for name in set(capture_server.TOOL_NAMES) - {"candidates_add", "owners_infer"}:
+    # candidates_add is used by the recon stage, owners_infer and accounts_provision by
+    # the hunt command (operator side), not by agents. accounts_provision creates accounts
+    # on the target, which an agent must never do.
+    for name in set(capture_server.TOOL_NAMES) - {
+        "candidates_add",
+        "owners_infer",
+        "accounts_provision",
+    }:
         assert name in wrapped, f"{name} has no agent wrapper"
     for name, tool in wrapped.items():
         assert not {"engagement", "actor"} & set(tool.args), (

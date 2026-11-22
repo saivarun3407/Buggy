@@ -263,6 +263,15 @@ class TestWhatItReads:
         }
         assert PASSWORD_DEFAULT not in json.dumps(result)
         assert search["method"] == "GET" and search["action"] == BASE + "/search"
+        # Each field record also carries its input type (a superset of {name, value}).
+        types = {f["name"]: f["type"] for f in update["fields"]}
+        assert types == {
+            "csrf": "hidden",
+            "email": "text",
+            "password": "password",
+            "plan": "select",
+            "bio": "textarea",
+        }
 
     def test_paths_are_taken_from_json(self, env) -> None:
         _site(env.origin)

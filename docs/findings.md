@@ -255,6 +255,68 @@ one URL (out of scope, internal address) is listed and the crawl goes on; a
 refusal that would repeat for every request (no enforced scope, a failed
 login) stops it, with `truncated: true`.
 
+## Accounts Buggy creates itself
+
+Access-control testing needs more than one account, and declaring them by hand
+(the section above) is not always possible. When the operator allows it, Buggy
+registers its own test accounts on the target, signs in and keeps the sessions
+inside the gateway, exactly as it does for declared identities.
+
+Registering an account changes the target, so it is a state-changing action and
+is off by default. It is turned on only in the operator-written scope document,
+with a block under `machine_enforcement`:
+
+```json
+"account_creation": {
+  "enabled": true,
+  "email_template": "qa+{tag}@yourcompany.example",
+  "max_accounts": 2
+}
+```
+
+The `hunt` command will write this block from a flag; it can also be added to
+`control/<engagement>/roe.json` by hand. `email_template` must contain `{tag}`
+and look like an email address; Buggy replaces `{tag}` with a random string so
+each account gets its own address. `max_accounts` is 1 to 3 (default 2). The
+written switch is the approval: it covers only the registration and login
+requests of the accounts Buggy creates, and each such request is recorded as an
+account-creation request (`approval_id = "account_creation"`), with its body and
+the body's hash redacted everywhere because it holds a password.
+
+**Use addresses you own.** Every account's email comes from your template, so
+the template must point at a mailbox or domain the operator controls. The
+accounts are real accounts on the target; a confirmation link or a later notice
+goes to that address.
+
+Buggy finds the sign-up deterministically, from an anonymous crawl of the seed
+URLs (and any recon API operations): a form with a password field and an email
+or username field whose action, page or button says register / sign up / join /
+create account, or a JSON API whose path names users/register/signup/accounts.
+It generates a strong password with `secrets` for each account, registers it,
+signs in, and builds a working `static` identity from the session (a session
+cookie, or a bearer token from the login response). The accounts are named
+`auto1`, `auto2`, … and appear in `identities_list` with role `auto`; their
+email and username become the account's markers automatically, so the
+access-control matrix can tell their data apart. No password, email, cookie or
+token is ever returned to an agent or written to the ledger.
+
+**What stops it, with a named reason, rather than guessing:** a CAPTCHA on the
+sign-up page (`CAPTCHA`), a page offering only single sign-on with no password
+field (`SSO_ONLY`), a required field whose purpose Buggy cannot determine
+(`UNKNOWN_REQUIRED_FIELD`), a sign-up that demands email verification before the
+account works (`EMAIL_VERIFICATION`), no sign-up found at all (`NO_SIGNUP_FOUND`),
+a registration the target refused (`REGISTRATION_REFUSED`), a session that could
+not be obtained or verified (`LOGIN_FAILED`), or the switch being off
+(`NOT_ENABLED`). Provisioning is idempotent: an account that already exists and
+still signs in is reused, and only the missing ones are created.
+
+**Where the accounts are.** The gateway writes the accounts it created, with
+their passwords, to two files no agent can read: `data/accounts/<engagement>.json`
+and a copy for the operator at `audit/<engagement>/accounts-created.json`, both
+mode `0600`. These are **test data on the target.** When the engagement is done,
+the operator should sign in with those credentials and delete the accounts (or
+have the target's owner remove them).
+
 ## Evidence, reports and CI
 
 - `evidence_export` writes a redacted bundle under

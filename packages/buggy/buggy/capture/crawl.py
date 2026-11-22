@@ -286,9 +286,9 @@ class _Page(HTMLParser):
         if tag == "input" and name and len(fields) < MAX_FIELDS:
             kind = a.get("type", "text").lower()
             value = "" if kind == "password" else a.get("value", "")
-            fields.append({"name": name[:MAX_VALUE], "value": value[:MAX_VALUE]})
+            fields.append({"name": name[:MAX_VALUE], "value": value[:MAX_VALUE], "type": kind[:40]})
         elif tag == "select" and name and len(fields) < MAX_FIELDS:
-            self._select = {"name": name[:MAX_VALUE], "value": ""}
+            self._select = {"name": name[:MAX_VALUE], "value": "", "type": "select"}
             self._select_set = False
             fields.append(self._select)
         elif tag == "option" and self._select is not None:
@@ -296,7 +296,7 @@ class _Page(HTMLParser):
                 self._select["value"] = a.get("value", "")[:MAX_VALUE]
                 self._select_set = True
         elif tag == "textarea" and name and len(fields) < MAX_FIELDS:
-            self._textarea = {"name": name[:MAX_VALUE], "value": ""}
+            self._textarea = {"name": name[:MAX_VALUE], "value": "", "type": "textarea"}
             fields.append(self._textarea)
 
     def handle_endtag(self, tag: str) -> None:
@@ -520,7 +520,9 @@ def crawl(
 
     Returns ``{"identity", "requested", "truncated", "pages": [{"url", "status",
     "content_type", "capture_id"}], "urls": [...], "forms": [{"page", "method",
-    "action", "fields": [{"name", "value"}]}], "skipped": [{"url", "reason"}]}``.
+    "action", "fields": [{"name", "value", "type"}]}], "skipped": [{"url", "reason"}]}``.
+    ``type`` is the input type (``password``, ``checkbox``, ``hidden``, ...),
+    ``select`` or ``textarea``; a password field's value is always ``""``.
     ``truncated`` is true when the budget ran out with URLs still queued, or a
     refusal stopped the crawl (named under ``skipped``). A refusal for one URL
     (out of scope, internal address) is listed under ``skipped`` and the crawl

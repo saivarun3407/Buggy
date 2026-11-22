@@ -79,6 +79,10 @@ PROBE_RUN_MAX_REQUESTS = 40
 log = logging.getLogger("buggy.capture.gateway")
 
 INTERNAL_LOGIN = "internal_login"
+# What a capture and its ledger line carry instead of an approval id when the
+# request is this gateway's own registration or login for an account the
+# account-creation module created (its body holds a fresh password).
+ACCOUNT_CREATION = "account_creation"
 REDACTED_HASH = "<redacted>"
 
 
@@ -198,6 +202,23 @@ class ProbeGrant:
     remaining: int = PROBE_RUN_MAX_REQUESTS
 
 
+@dataclass(frozen=True, slots=True)
+class AccountGrant:
+    """Permission for the account-creation module to register and log in accounts.
+
+    The gateway issues one from :meth:`CaptureGateway.account_creation_grant`
+    only when the engagement's scope turns account creation on, and only for the
+    exact URLs discovered for the sign-up and the accounts' logins. ``send``
+    honours it for nothing but a request to one of those URLs, and re-reads the
+    policy and re-checks the URL on every request. No tool argument reaches it:
+    an agent cannot construct a grant this gateway issued.
+    """
+
+    engagement: str
+    urls: frozenset[str]
+    request_id: str
+
+
 def origin_of(url: str) -> str:
     """``scheme://host[:port]`` of a URL, lower-cased; ``""`` when it has none."""
     try:
@@ -268,12 +289,13 @@ class CaptureGateway:
         self._lock = threading.Lock()
         self._limiters: dict[tuple[str, int], RateLimiter] = {}
         self._ledgers: dict[str, Ledger] = {}
-        self.identities = IdentityStore(roots.secrets)
+        self.identities = IdentityStore(roots.secrets, accounts_root=roots.data / "accounts")
         self.sessions = SessionManager(self, self.identities)
         # Called with the request record when a NEW approval request is filed
         # (the capture server sets it to notify the operator). Never raises here.
         self.on_approval_request: Any = None
         self._grants: dict[str, ProbeGrant] = {}
+        self._account_grants: dict[str, AccountGrant] = {}
 
     # ── scope / policy ──────────────────────────────────────────────
 
@@ -533,6 +555,85 @@ class CaptureGateway:
             grant.remaining -= 1
         return grant.request_id
 
+    # ── account creation ────────────────────────────────────────────
+
+    def account_creation_grant(self, engagement: str, urls: Iterable[str]) -> AccountGrant:
+        """Permission to register and log in accounts, for the URLs the module found.
+
+        Issued only when the engagement's scope turns account creation on
+        (``machine_enforcement.account_creation``), and only for ``urls`` that
+        are in the enforced scope. Raises ``NOT_ENABLED`` when the switch is off,
+        ``BAD_ACCOUNT_POLICY`` when the block is malformed, or ``OUT_OF_SCOPE``.
+        Only the account-creation module calls this.
+        """
+        from buggy.capture.accounts import AccountPolicyError, account_creation_policy
+
+        scope, document = self.scope_for(engagement)
+        try:
+            policy = account_creation_policy(document)
+        except AccountPolicyError as exc:
+            raise GatewayRefusal("BAD_ACCOUNT_POLICY", str(exc)) from exc
+        if policy is None:
+            raise GatewayRefusal(
+                "NOT_ENABLED",
+                "account creation is not enabled for this engagement in the scope document; "
+                "nothing was sent",
+            )
+        clean: set[str] = set()
+        for url in urls:
+            if not url:
+                continue
+            allowed, reason = scope.decide(url)
+            if not allowed:
+                raise GatewayRefusal(
+                    "OUT_OF_SCOPE",
+                    f"{host_of(url)!r} is not in the enforced scope ({reason}); not sent",
+                )
+            clean.add(url)
+        grant = AccountGrant(engagement, frozenset(clean), f"acr-{uuid.uuid4().hex[:12]}")
+        self._account_grants[grant.request_id] = grant
+        return grant
+
+    def _account_creation_approval(
+        self, grant: AccountGrant, engagement: str, method: str, url: str, document: dict[str, Any]
+    ) -> str:
+        """The approval id for an account-creation request, re-checking policy and URL.
+
+        Raises a refusal (and records a dropped-request ledger line) when the
+        grant was not issued here, the engagement differs, the policy is off or
+        malformed, or the URL is not one of the grant's.
+        """
+        from buggy.capture.accounts import AccountPolicyError, account_creation_policy
+
+        if (
+            self._account_grants.get(grant.request_id) is not grant
+            or grant.engagement != engagement
+        ):
+            raise GatewayRefusal(
+                "NOT_A_DECLARED_LOGIN",
+                "this account-creation grant was not issued for this engagement; not sent",
+            )
+        try:
+            policy = account_creation_policy(document)
+        except AccountPolicyError as exc:
+            self._refused(engagement, method, url, "BAD_ACCOUNT_POLICY")
+            raise GatewayRefusal("BAD_ACCOUNT_POLICY", str(exc)) from exc
+        if policy is None:
+            self._refused(engagement, method, url, "NOT_ENABLED")
+            raise GatewayRefusal(
+                "NOT_ENABLED",
+                "account creation is not enabled for this engagement in the scope document; "
+                "nothing was sent",
+            )
+        if url not in grant.urls:
+            self._refused(engagement, method, url, "NOT_AN_ACCOUNT_URL")
+            raise GatewayRefusal(
+                "NOT_AN_ACCOUNT_URL",
+                "only the discovered sign-up URL or an account's login URL may be sent under an "
+                "account-creation grant; not sent",
+            )
+        return ACCOUNT_CREATION
+
     # ── sending ─────────────────────────────────────────────────────
 
     def send(
@@ -549,6 +650,7 @@ class CaptureGateway:
         identity: str = "",
         internal: bool = False,
         grant: ProbeGrant | None = None,
+        account_grant: AccountGrant | None = None,
     ) -> Capture:
         """Send one request and return its capture, or raise :class:`GatewayRefusal`.
 
@@ -564,6 +666,11 @@ class CaptureGateway:
 
         ``grant`` is an approved probe run (:meth:`probe_grant`); only an object
         this gateway issued is honoured, and no tool argument reaches it either.
+
+        ``account_grant`` is the account-creation module's permission
+        (:meth:`account_creation_grant`); like ``internal`` it waives the
+        approval hold only, for nothing but a request to the sign-up or a
+        created account's login URL, and no tool argument reaches it.
         """
         return self._send(
             engagement,
@@ -577,6 +684,7 @@ class CaptureGateway:
             identity=identity,
             internal=internal,
             grant=grant,
+            account_grant=account_grant,
         )
 
     def _send(
@@ -594,6 +702,7 @@ class CaptureGateway:
         internal: bool = False,
         also_redact: tuple[str, ...] = (),
         grant: ProbeGrant | None = None,
+        account_grant: AccountGrant | None = None,
     ) -> Capture:
         def exchange(session: Session | None) -> tuple[Capture, Session | None, bool]:
             return self._exchange(
@@ -610,6 +719,7 @@ class CaptureGateway:
                 also_redact=also_redact,
                 session=session,
                 grant=grant,
+                account_grant=account_grant,
             )
 
         capture, session, fresh = exchange(None)
@@ -696,6 +806,7 @@ class CaptureGateway:
         also_redact: tuple[str, ...],
         session: Session | None,
         grant: ProbeGrant | None = None,
+        account_grant: AccountGrant | None = None,
     ) -> tuple[Capture, Session | None, bool]:
         """One request through every check. Returns the capture, the session used and
         whether that session was opened (logged in) for this request."""
@@ -712,6 +823,10 @@ class CaptureGateway:
             raise GatewayRefusal("BODY_TOO_LARGE", f"request body exceeds {MAX_REQUEST_BODY} bytes")
         if not isinstance(identity, str) or (identity and internal):
             raise GatewayRefusal("BAD_ARGUMENT", "identity must be a name; a login names none")
+        if account_grant is not None and (internal or identity):
+            raise GatewayRefusal(
+                "BAD_ARGUMENT", "an account-creation request names no identity and is not internal"
+            )
 
         scope, document = self.scope_for(engagement)
         allowed, reason = scope.decide(url)
@@ -741,7 +856,13 @@ class CaptureGateway:
                 ) from exc
 
         approval_id = ""
-        if internal is True and logins:
+        if account_grant is not None:
+            # The account-creation exemption: the module registers or logs in an
+            # account the operator turned on. Policy and URL are re-checked here.
+            approval_id = self._account_creation_approval(
+                account_grant, engagement, method, url, document
+            )
+        elif internal is True and logins:
             # The one exemption from the approval hold: the operator wrote this
             # request down as a test account's login. Recorded as such below.
             approval_id = INTERNAL_LOGIN
@@ -820,7 +941,7 @@ class CaptureGateway:
             scope_digest=scope.digest,
             identity=identity,
             redact_headers=tuple(sorted(redact_headers)),
-            redact_bodies=approval_id == INTERNAL_LOGIN,
+            redact_bodies=approval_id in (INTERNAL_LOGIN, ACCOUNT_CREATION),
         )
         self._ledger(engagement).append(
             {
@@ -831,9 +952,12 @@ class CaptureGateway:
                 "method": method,
                 "url": url,
                 "status": status,
-                # A login body holds a password: its hash would allow offline guessing.
+                # A login or registration body holds a password: its hash would
+                # allow offline guessing.
                 "request_sha256": (
-                    REDACTED_HASH if approval_id == INTERNAL_LOGIN else capture.request_sha256
+                    REDACTED_HASH
+                    if approval_id in (INTERNAL_LOGIN, ACCOUNT_CREATION)
+                    else capture.request_sha256
                 ),
                 "response_sha256": capture.response_sha256,
                 "probe": probe,
@@ -902,9 +1026,11 @@ class CaptureGateway:
 
 
 __all__ = [
+    "ACCOUNT_CREATION",
     "ALLOWED_METHODS",
     "INTERNAL_LOGIN",
     "SAFE_METHODS",
+    "AccountGrant",
     "CaptureGateway",
     "GatewayRefusal",
     "Roots",

@@ -30,7 +30,7 @@ from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
-from buggy.capture import authz_matrix, crawl
+from buggy.capture import accounts, authz_matrix, crawl
 from buggy.capture import export as evidence
 from buggy.capture.canary import Canary
 from buggy.capture.gateway import CaptureGateway, GatewayRefusal
@@ -71,6 +71,7 @@ WORKBENCH_TOOL_NAMES = (
     "report_build",
     "evidence_export",
     "identities_list",
+    "accounts_provision",
     "authz_matrix_run",
     "owners_infer",
     "surface_crawl",
@@ -445,6 +446,37 @@ class Workbench:
 
         return self._guard(run)
 
+    def accounts_provision(
+        self,
+        engagement: str,
+        seeds_json: str,
+        api_operations_json: str = "",
+        count: int = 0,
+    ) -> dict[str, Any]:
+        """Register and sign in test accounts, when the operator turned creation on.
+
+        For the hunt command, not for an agent. Discovers the sign-up from an
+        anonymous crawl of ``seeds_json`` (and optional recon API operations),
+        then registers up to the scope's ``max_accounts`` accounts through the
+        gateway's account-creation exemption. No credential is returned.
+        """
+
+        def run() -> dict[str, Any]:
+            name = self._engagement(engagement)
+            seeds = _json(seeds_json, "seeds_json", list, [])
+            if not seeds:
+                raise _refuse("BAD_ARGUMENT", "seeds_json must list at least one URL")
+            api_operations = _json(api_operations_json, "api_operations_json", list, [])
+            return accounts.provision(
+                self.gateway,
+                name,
+                [str(seed) for seed in seeds],
+                api_operations=api_operations,
+                count=int(count) or None,
+            )
+
+        return self._guard(run)
+
     def authz_matrix_run(
         self,
         engagement: str,
@@ -763,6 +795,17 @@ def register_workbench(mcp: Any, bench: Workbench) -> None:
     def identities_list(engagement: str) -> dict[str, Any]:
         """Test accounts the operator declared: name, role and what each owns. No secrets."""
         return bench.identities_list(engagement)
+
+    @mcp.tool()
+    def accounts_provision(
+        engagement: str, seeds_json: str, api_operations_json: str = "", count: int = 0
+    ) -> dict[str, Any]:
+        """Register and sign in test accounts when the operator turned account creation on
+        in the scope document. Discovers the sign-up from an anonymous crawl of seeds_json
+        (and optional recon API operations), registers up to max_accounts accounts, and
+        returns names and reasons only — never an email, password, cookie or token. For the
+        hunt command, not for agents."""
+        return bench.accounts_provision(engagement, seeds_json, api_operations_json, count)
 
     @mcp.tool()
     def authz_matrix_run(
