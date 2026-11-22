@@ -30,7 +30,7 @@ from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
-from buggy.capture import accounts, authz_matrix, crawl
+from buggy.capture import accounts, authz_matrix, crawl, recipes
 from buggy.capture import export as evidence
 from buggy.capture.canary import Canary
 from buggy.capture.gateway import CaptureGateway, GatewayRefusal
@@ -52,6 +52,7 @@ log = logging.getLogger("buggy.capture.workbench")
 
 FINDINGS_DB = "findings.sqlite3"
 PROBE_RUNS_DB = "probe_runs.sqlite3"
+RECIPES_DB = "recipes.sqlite3"
 MAX_LIST = 200
 MAX_BOARD_ITEMS = 200
 MAX_MATRIX_REQUESTS = 300
@@ -84,6 +85,11 @@ WORKBENCH_TOOL_NAMES = (
     "intent_conclude",
     "hints_list",
     "hint_add",
+    "recipe_check",
+    "recipe_run",
+    "recipe_save",
+    "recipe_list",
+    "recipe_get",
 )
 
 
@@ -157,6 +163,86 @@ class ProbeRuns:
             self._db.close()
 
 
+class RecipeStore:
+    """Recipes an agent saved, per engagement: canonical JSON, author, last outcome.
+
+    Only the recipe (templates, never an extracted value) is stored.
+    """
+
+    def __init__(self, path: Path) -> None:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        self._lock = threading.Lock()
+        self._db = sqlite3.connect(path, check_same_thread=False)
+        self._db.execute(
+            "CREATE TABLE IF NOT EXISTS recipes ("
+            " engagement TEXT NOT NULL, name TEXT NOT NULL, recipe TEXT NOT NULL,"
+            " author TEXT NOT NULL, created_at REAL NOT NULL,"
+            " last_outcome TEXT NOT NULL DEFAULT '', last_run_at REAL NOT NULL DEFAULT 0,"
+            " PRIMARY KEY (engagement, name))"
+        )
+        self._db.commit()
+
+    def save(self, engagement: str, recipe: recipes.Recipe, author: str) -> bool:
+        """Store ``recipe`` under its name; True when it replaced a different saved recipe."""
+        with self._lock:
+            row = self._db.execute(
+                "SELECT recipe FROM recipes WHERE engagement = ? AND name = ?",
+                (engagement, recipe.name),
+            ).fetchone()
+            self._db.execute(
+                "INSERT OR REPLACE INTO recipes VALUES (?, ?, ?, ?, ?, '', 0)",
+                (engagement, recipe.name, recipe.canonical, author, time.time()),
+            )
+            self._db.commit()
+        return row is not None and row[0] != recipe.canonical
+
+    def has(self, engagement: str, name: str) -> bool:
+        return self.get(engagement, name) is not None
+
+    def get(self, engagement: str, name: str) -> dict[str, Any] | None:
+        with self._lock:
+            row = self._db.execute(
+                "SELECT name, recipe, author, created_at, last_outcome, last_run_at FROM recipes"
+                " WHERE engagement = ? AND name = ?",
+                (engagement, name),
+            ).fetchone()
+        return self._row(row) if row else None
+
+    def listed(self, engagement: str) -> list[dict[str, Any]]:
+        with self._lock:
+            rows = self._db.execute(
+                "SELECT name, recipe, author, created_at, last_outcome, last_run_at FROM recipes"
+                " WHERE engagement = ? ORDER BY name LIMIT ?",
+                (engagement, MAX_LIST),
+            ).fetchall()
+        return [self._row(row) for row in rows]
+
+    def record_outcome(self, engagement: str, recipe: recipes.Recipe, outcome: str) -> None:
+        """Remember the last outcome, only for the exact recipe saved under that name."""
+        with self._lock:
+            self._db.execute(
+                "UPDATE recipes SET last_outcome = ?, last_run_at = ?"
+                " WHERE engagement = ? AND name = ? AND recipe = ?",
+                (outcome, time.time(), engagement, recipe.name, recipe.canonical),
+            )
+            self._db.commit()
+
+    @staticmethod
+    def _row(row: tuple[Any, ...]) -> dict[str, Any]:
+        return {
+            "name": row[0],
+            "recipe": json.loads(row[1]),
+            "author": row[2],
+            "created_at": row[3],
+            "last_outcome": row[4],
+            "last_run_at": row[5],
+        }
+
+    def close(self) -> None:
+        with self._lock:
+            self._db.close()
+
+
 class Workbench:
     """Findings, candidates, memory and the board, bound to one evidence gateway."""
 
@@ -180,12 +266,14 @@ class Workbench:
             FindingStore(roots.data / FINDINGS_DB), gateway, sessions=gateway.sessions
         )
         self.probe_runs = ProbeRuns(roots.data / PROBE_RUNS_DB)
+        self.recipes = RecipeStore(roots.data / RECIPES_DB)
         self.lessons = LessonStore(roots.data / LESSONS_DB)
         self.board = Board(roots.data / BOARD_DB)
 
     def close(self) -> None:
         self.findings.store.close()
         self.probe_runs.close()
+        self.recipes.close()
         self.lessons.close()
         self.board.close()
 
@@ -243,9 +331,13 @@ class Workbench:
     def _prover(self, engagement: str) -> Callable[[Finding], verifier.Verification | None]:
         def prove(finding: Finding) -> verifier.Verification | None:
             recorded = self.probe_runs.get(engagement, finding.id)
-            if recorded is None or recorded[0] not in REGISTRY:
+            if recorded is None:
                 return None
             probe, url, params = recorded
+            if probe.startswith(candidates.SOURCE_RECIPE_PREFIX):
+                return self._prove_by_recipe(engagement, finding, probe, url, params)
+            if probe not in REGISTRY:
+                return None
             return verifier.verify_by_probe(
                 finding,
                 probe,
@@ -254,6 +346,139 @@ class Workbench:
             )
 
         return prove
+
+    def _prove_by_recipe(
+        self, engagement: str, finding: Finding, label: str, url: str, params: dict[str, Any]
+    ) -> verifier.Verification:
+        """Re-prove a recipe-sourced finding by running the exact recipe again.
+
+        The same rule as a probe: the recorded run must be about the finding's
+        endpoint, and anything but a fresh ``vulnerable: true`` (controls
+        included) leaves it inconclusive. A state-changing recipe needs its own
+        approval for the re-run; the reason then names the request id.
+        """
+
+        def rerun() -> dict[str, Any]:
+            try:
+                recipe = recipes.validate(params.get("recipe"))
+            except recipes.RecipeError as exc:
+                return {"vulnerable": None, "summary": f"the stored recipe is invalid ({exc})"}
+            return recipes.execute(self.gateway, engagement, recipe)
+
+        return verifier.verify_by_probe(finding, label, url, rerun)
+
+    # ── recipes: checks the agent builds itself ──────────────────────
+
+    def _load_recipe(self, engagement: str, recipe_json: str) -> recipes.Recipe | dict[str, Any]:
+        """The validated recipe, or the agent-facing error result."""
+        try:
+            raw = json.loads(recipe_json) if isinstance(recipe_json, str) else recipe_json
+        except json.JSONDecodeError as exc:
+            return {"ok": False, "errors": [{"path": "recipe", "message": f"not JSON: {exc}"}]}
+        if isinstance(raw, dict) and set(raw) == {"use"}:
+            name = str(raw.get("use") or "")
+            saved = self.recipes.get(engagement, name)
+            if saved is None:
+                raise _refuse("UNKNOWN_RECIPE", f"no saved recipe {name!r} in this engagement")
+            raw = saved["recipe"]
+        try:
+            return recipes.validate(raw)
+        except recipes.RecipeError as exc:
+            return {"ok": False, "errors": [exc.to_dict()]}
+
+    def recipe_check(self, engagement: str, recipe_json: str) -> dict[str, Any]:
+        def run() -> dict[str, Any]:
+            self._engagement(engagement)
+            return recipes.check(recipe_json)
+
+        return self._guard(run)
+
+    def recipe_run(self, engagement: str, recipe_json: str, actor: str) -> dict[str, Any]:
+        """Validate, get the run approved if it can change state, run it, queue a positive."""
+
+        def run() -> dict[str, Any]:
+            name = self._engagement(engagement)
+            author = _actor(actor)
+            loaded = self._load_recipe(name, recipe_json)
+            if not isinstance(loaded, recipes.Recipe):
+                return loaded
+            result = recipes.execute(self.gateway, name, loaded)
+            outcome = str(result.get("outcome") or result.get("code") or "")
+            self.recipes.record_outcome(name, loaded, outcome)
+            return self.after_recipe(name, loaded, result, author)
+
+        return self._guard(run)
+
+    def after_recipe(
+        self, engagement: str, recipe: recipes.Recipe, result: dict[str, Any], author: str
+    ) -> dict[str, Any]:
+        """Queue a positive recipe run and remember the exact recipe so the verifier re-runs it."""
+        candidate = candidates.from_recipe(result, engagement, recipe.data)
+        if candidate is None:
+            return result
+        queued = candidates.enqueue(self.findings, [candidate], recipe.probe)
+        ids = queued.get("ids") or []
+        if not ids:
+            return {**result, "queue": {"queued": False, "errors": queued.get("errors")}}
+        self.probe_runs.record(
+            engagement, ids[0], recipe.probe, recipe.endpoint, {"recipe": recipe.data}
+        )
+        if not self.recipes.has(engagement, recipe.name):
+            self.recipes.save(engagement, recipe, author)
+            self.recipes.record_outcome(engagement, recipe, str(result.get("outcome") or ""))
+        return {**result, "finding_id": ids[0], "queue": {"queued": True}}
+
+    def recipe_save(self, engagement: str, recipe_json: str, actor: str) -> dict[str, Any]:
+        def run() -> dict[str, Any]:
+            name = self._engagement(engagement)
+            author = _actor(actor)
+            try:
+                recipe = recipes.parse(recipe_json)
+            except recipes.RecipeError as exc:
+                return {"ok": False, "errors": [exc.to_dict()]}
+            replaced = self.recipes.save(name, recipe, author)
+            return {
+                "ok": True,
+                "name": recipe.name,
+                "replaced": replaced,
+                "state_changing": recipe.state_changing,
+                "steps": len(recipe.steps),
+            }
+
+        return self._guard(run)
+
+    def recipe_list(self, engagement: str) -> dict[str, Any]:
+        def run() -> dict[str, Any]:
+            rows = self.recipes.listed(self._engagement(engagement))
+            return {
+                "ok": True,
+                "recipes": [
+                    {
+                        "name": row["name"],
+                        "class": row["recipe"].get("class"),
+                        "title": row["recipe"].get("title"),
+                        "endpoint": row["recipe"].get("endpoint"),
+                        "steps": len(row["recipe"].get("steps") or []),
+                        "author": row["author"],
+                        "created_at": row["created_at"],
+                        "last_outcome": row["last_outcome"],
+                        "last_run_at": row["last_run_at"],
+                    }
+                    for row in rows
+                ],
+                "count": len(rows),
+            }
+
+        return self._guard(run)
+
+    def recipe_get(self, engagement: str, name: str) -> dict[str, Any]:
+        def run() -> dict[str, Any]:
+            saved = self.recipes.get(self._engagement(engagement), str(name or ""))
+            if saved is None:
+                raise _refuse("UNKNOWN_RECIPE", f"no saved recipe {name!r} in this engagement")
+            return {"ok": True, **saved}
+
+        return self._guard(run)
 
     # ── findings ─────────────────────────────────────────────────────
 
@@ -757,8 +982,8 @@ def register_workbench(mcp: Any, bench: Workbench) -> None:
 
     @mcp.tool()
     def finding_verify(engagement: str, finding_id: str) -> dict[str, Any]:
-        """Re-prove a finding independently: re-run the probe it came from, or re-send its
-        cited captures and check the assertions. Only this sets exploit_verified."""
+        """Re-prove a finding independently: re-run the probe or recipe it came from, or
+        re-send its cited captures and check the assertions. Only this sets exploit_verified."""
         return bench.finding_verify(engagement, finding_id)
 
     @mcp.tool()
@@ -907,5 +1132,39 @@ def register_workbench(mcp: Any, bench: Workbench) -> None:
         """Leave a hint for other workers."""
         return bench.hint_add(engagement, text, actor)
 
+    @mcp.tool()
+    def recipe_check(engagement: str, recipe_json: str) -> dict[str, Any]:
+        """Validate a recipe (a multi-step check described as JSON) without sending anything.
+        Returns {ok, state_changing, steps} or {ok: false, errors: [{path, message}]}."""
+        return bench.recipe_check(engagement, recipe_json)
 
-__all__ = ["WORKBENCH_TOOL_NAMES", "ProbeRuns", "Workbench", "register_workbench"]
+    @mcp.tool()
+    def recipe_run(engagement: str, recipe_json: str, actor: str) -> dict[str, Any]:
+        """Run a recipe through the gateway (or {"use": "<saved name>"}). A recipe with a
+        state-changing step is approved as one run. vulnerable true is queued as a candidate
+        (finding_id); finding_verify re-runs the recipe as its proof."""
+        return bench.recipe_run(engagement, recipe_json, actor)
+
+    @mcp.tool()
+    def recipe_save(engagement: str, recipe_json: str, actor: str) -> dict[str, Any]:
+        """Save a valid recipe under its name for this engagement (replaces one of that name)."""
+        return bench.recipe_save(engagement, recipe_json, actor)
+
+    @mcp.tool()
+    def recipe_list(engagement: str) -> dict[str, Any]:
+        """Saved recipes: name, class, title, endpoint, author and last outcome."""
+        return bench.recipe_list(engagement)
+
+    @mcp.tool()
+    def recipe_get(engagement: str, name: str) -> dict[str, Any]:
+        """One saved recipe in full (templates only; extracted values are never stored)."""
+        return bench.recipe_get(engagement, name)
+
+
+__all__ = [
+    "WORKBENCH_TOOL_NAMES",
+    "ProbeRuns",
+    "RecipeStore",
+    "Workbench",
+    "register_workbench",
+]

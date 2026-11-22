@@ -542,3 +542,69 @@ def test_the_surface_crawl_is_gated_on_the_hosts_of_its_seeds() -> None:
     assert extract({"seeds_json": "not json"}) == []
     assert extract({"seeds_json": '{"url": "x"}'}) == []
     assert "surface_crawl" in {t.name for t in stack_mcp.ALL_STACK_MCP_TOOLS}
+
+
+def _greeting_recipe(target: str) -> dict:
+    """A read-only recipe against the loopback target, which answers every GET the same."""
+    return {
+        "name": "greeting-open",
+        "class": "info_exposure",
+        "title": "The greeting is served without a session",
+        "endpoint": f"{target}/greeting",
+        "remediation": "Require a session before serving the greeting, or make it public on purpose.",
+        "steps": [
+            {"id": "plain", "method": "GET", "url": f"{target}/greeting", "identity": "",
+             "extract": {"who": {"from": "json", "path": "hello"}}},
+            {"id": "again", "method": "GET", "url": f"{target}/greeting?x={{{{who|urlencode}}}}"},
+        ],
+        "verdict": {
+            "vulnerable_if": [{"step": "again", "json": "hello", "equals": "target"}],
+            "control": [{"step": "plain", "status": 200}, {"step": "again", "same_as": "plain"}],
+        },
+    }  # fmt: skip
+
+
+def test_recipes_round_trip_through_the_agent_wrappers(stack) -> None:
+    _lab_scope(stack)
+    recipe = _greeting_recipe(stack["target"])
+    checked = _call(stack_mcp.recipe_check, recipe_json=json.dumps(recipe))
+    assert checked == {"ok": True, "state_changing": False, "steps": 2}
+    no_control = {**recipe, "verdict": {**recipe["verdict"], "control": []}}
+    refused = _call(stack_mcp.recipe_check, recipe_json=json.dumps(no_control))
+    assert refused["ok"] is False and refused["errors"][0]["path"] == "verdict.control"
+
+    saved = _call(stack_mcp.recipe_save, recipe_json=json.dumps(recipe))
+    assert saved["ok"] and saved["name"] == "greeting-open"
+    assert _call(stack_mcp.recipe_list)["recipes"][0]["name"] == "greeting-open"
+    assert _call(stack_mcp.recipe_get, name="greeting-open")["recipe"]["steps"][0]["id"] == "plain"
+
+    ran = _call(stack_mcp.recipe_run, recipe_json=json.dumps({"use": "greeting-open"}))
+    assert ran["status"] == "completed" and ran["vulnerable"] is True, ran
+    assert ran["variables"] == ["who"] and len(ran["evidence_capture_ids"]) == 2
+    verified = _call(stack_mcp.finding_verify, finding_id=ran["finding_id"])
+    assert verified["finding"]["status"] == "exploit_verified", verified
+    assert verified["finding"]["source"] == "recipe:greeting-open"
+
+    outside = {**recipe, "name": "outside", "endpoint": "https://evil.example/greeting"}
+    outside["steps"] = [{**recipe["steps"][0], "url": "https://evil.example/greeting"}]
+    outside["verdict"] = {
+        "vulnerable_if": [{"step": "plain", "status": 200}],
+        "control": [{"step": "plain", "status": 200}],
+    }
+    blocked = _call(stack_mcp.recipe_run, recipe_json=json.dumps(outside))
+    assert blocked["status"] == "refused" and blocked["code"] == "OUT_OF_SCOPE", blocked
+
+
+def test_recipe_tools_are_gated_on_every_step_host() -> None:
+    assert {"recipe_check", "recipe_run", "recipe_save"} <= GATED_TOOL_NAMES
+    recipe = {
+        "endpoint": "https://a.test/o/1",
+        "steps": [{"url": "https://a.test/o/{{id}}"}, {"url": "https://b.test/x"}, "junk"],
+    }
+    for name in ("recipe_check", "recipe_run", "recipe_save"):
+        extract = NETWORK_TARGET_EXTRACTORS[name]
+        assert extract({"recipe_json": json.dumps(recipe)}) == ["a.test", "a.test", "b.test"]
+        assert extract({"recipe_json": "not json"}) == []
+        assert extract({"recipe_json": json.dumps({"use": "saved"})}) == []
+    names = {t.name for t in stack_mcp.ALL_STACK_MCP_TOOLS}
+    assert {"recipe_check", "recipe_run", "recipe_save", "recipe_list", "recipe_get"} <= names

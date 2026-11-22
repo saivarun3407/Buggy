@@ -1163,8 +1163,11 @@ class TestLeadsAndFindingsReports:
             "identities_list",
             "authz_matrix_run",
             "recon_coverage",
+            "recipe_check",
+            "recipe_run",
         ):
             assert tool in text, tool
+        assert "control step" in text
         assert "A claim is not a finding" in text
 
     def test_the_graph_projection_is_skipped_without_a_graph_database(self, monkeypatch) -> None:

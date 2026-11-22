@@ -486,6 +486,59 @@ def from_probe(result: dict, engagement: str, url: str, parameter: str = "") -> 
     )
 
 
+SOURCE_RECIPE_PREFIX = "recipe:"
+
+
+def from_recipe(result: dict, engagement: str, recipe: dict) -> dict | None:
+    """A ``recipe_run`` result as a candidate, or ``None`` unless ``vulnerable is True``.
+
+    ``recipe`` is the validated recipe's JSON (``buggy.capture.recipes``):
+    class, title, endpoint, parameter and remediation come from it, the
+    severity from the same per-class table probes use. The finding carries no
+    assertions: it is re-proved by running the recipe again, controls included.
+    """
+    if not isinstance(result, dict) or result.get("vulnerable") is not True:
+        return None
+    recipe = _as_dict(recipe)
+    name = _text(recipe.get("name")) or "unnamed"
+    vuln_class = _text(recipe.get("class")).lower()
+    endpoint = _text(recipe.get("endpoint"))
+    steps = [_as_dict(s) for s in _as_list(recipe.get("steps"))]
+    wanted = _path(endpoint)
+
+    def same_path(url: str) -> bool:
+        # A segment with a placeholder ({id}, {{order}}) stands for any value.
+        left = _path(url.split("?")[0]).rstrip("/").split("/")
+        right = wanted.rstrip("/").split("/")
+        return len(left) == len(right) and all(
+            a == b or "{" in a or "{" in b for a, b in zip(left, right, strict=True)
+        )
+
+    on_endpoint = [s for s in steps if same_path(_text(s.get("url")))]
+    method = _text((on_endpoint or steps or [{}])[0].get("method")).upper()
+    if method not in ALLOWED_METHODS:
+        method = "GET"
+    captures = [_text(v) for v in _as_list(result.get("evidence_capture_ids")) if _text(v)]
+    summary = (
+        _text(result.get("summary")).rstrip(".") or "the recipe reported the target vulnerable"
+    )
+    return _candidate(
+        engagement,
+        title=_text(recipe.get("title")) or f"{vuln_class.replace('_', ' ')} on {wanted}",
+        vuln_class=vuln_class,
+        severity=PROBE_SEVERITY.get(vuln_class, Severity.MEDIUM.value),
+        endpoint=endpoint,
+        source=SOURCE_RECIPE_PREFIX + name,
+        method=method,
+        parameter=_text(recipe.get("parameter")),
+        description=(
+            f"Recipe {name} ({len(steps)} steps, built by the agent and run through the "
+            f"gateway): {summary}." + (f" Captures: {', '.join(captures)}." if captures else "")
+        ),
+        remediation=_text(recipe.get("remediation")),
+    )
+
+
 # ── the report's ranked surface ─────────────────────────────────────
 
 
@@ -660,10 +713,12 @@ __all__ = [
     "PROBE_LAYOUTS",
     "PROBE_SEVERITY",
     "SOURCE_PIPELINE",
+    "SOURCE_RECIPE_PREFIX",
     "SOURCE_SURFACE",
     "enqueue",
     "from_pipeline",
     "from_probe",
+    "from_recipe",
     "from_ranked",
     "next_candidates",
     "probe_assertions",

@@ -362,6 +362,54 @@ async def probe_run(probe: str, params_json: str) -> str:
     return await _engagement_call("capture", "probe_run", probe=probe, params_json=params_json)
 
 
+@tool
+async def recipe_check(recipe_json: str) -> str:
+    """Check a recipe without sending anything. When no probe fits a lead, describe the check
+    as data: recipe_json is {"name": slug, "class": vulnerability class, "title", "endpoint":
+    the URL the finding is about, "parameter" (optional), "remediation": what the owner should
+    change, "steps": [1-12 of {"id": slug, "method": GET|HEAD|POST|PUT|PATCH|DELETE, "url"
+    (literal host), "headers", "body" (string, or object sent as JSON), "identity": a test
+    account or "" for none, "extract": {"var": {"from": "json"|"header"|"regex"|"status",
+    "path"|"name"|"pattern": ...}}, "expect": {"status", "body_contains",
+    "body_not_contains"}}], "verdict": {"vulnerable_if": [conditions], "control": [at least
+    one condition showing the normal behaviour]}}. A condition is {"step": id} plus one of
+    "status", "body_contains", "body_not_contains", "same_as": id, "differs_from": id, or
+    "json": dotted path with "equals"|"gt"|"lt". {{var}} is a value extracted by an earlier
+    step; {{rand}} and {{ts}} are built in; pipes: |urlencode |b64 |b64url |json |lower
+    |upper. Returns ok with state_changing and the step count, or errors with exact paths."""
+    return await _engagement_call("capture", "recipe_check", recipe_json=recipe_json)
+
+
+@tool
+async def recipe_run(recipe_json: str) -> str:
+    """Run a recipe through the evidence gateway (scope, approval hold, rate limit and ledger
+    apply to every step), or a saved one with {"use": "<name>"}. Returns vulnerable true /
+    false / null, outcome (vulnerable, not_vulnerable, precondition_failed, control_failed,
+    not_sent), a summary and capture ids per step; extracted values are never returned. A
+    failed expect stops the run as precondition_failed: that is not a finding. A recipe with
+    any POST/PUT/PATCH/DELETE step may return APPROVAL_REQUIRED: one approval covers one run of
+    that exact recipe. A positive result is queued (finding_id); finding_verify re-runs it."""
+    return await _actor_call("recipe_run", recipe_json=recipe_json)
+
+
+@tool
+async def recipe_save(recipe_json: str) -> str:
+    """Save a valid recipe under its name so it can be run again with {"use": "<name>"}."""
+    return await _actor_call("recipe_save", recipe_json=recipe_json)
+
+
+@tool
+async def recipe_list() -> str:
+    """Recipes saved for this engagement: name, class, title, endpoint, last outcome."""
+    return await _engagement_call("capture", "recipe_list")
+
+
+@tool
+async def recipe_get(name: str) -> str:
+    """One saved recipe in full."""
+    return await _engagement_call("capture", "recipe_get", name=name)
+
+
 # ── scope ────────────────────────────────────────────────────────────
 
 
@@ -689,6 +737,11 @@ _BY_SERVER: dict[str, list[Any]] = {
         capture_verify,
         probe_list,
         probe_run,
+        recipe_check,
+        recipe_run,
+        recipe_save,
+        recipe_list,
+        recipe_get,
         candidates_next,
         finding_submit,
         finding_verify,

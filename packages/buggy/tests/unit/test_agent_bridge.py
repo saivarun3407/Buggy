@@ -156,6 +156,9 @@ class TestRealTools:
             table
         )
         assert {"surface_crawl", "authz_matrix_run", "identities_list"} <= set(table)
+        assert {"recipe_check", "recipe_run", "recipe_save", "recipe_list", "recipe_get"} <= set(
+            table
+        )
         for tool in table.values():
             schema = agent_bridge.input_schema(tool)
             assert schema.get("type") == "object", tool.name

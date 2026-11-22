@@ -123,6 +123,9 @@ GATED_TOOL_NAMES: frozenset[str] = frozenset(
         "probe_run",
         "authz_matrix_run",
         "surface_crawl",
+        "recipe_check",
+        "recipe_run",
+        "recipe_save",
     }
 )
 
@@ -197,6 +200,29 @@ def _hosts_from_crawl(args: dict[str, Any]) -> list[str]:
     return [host for seed in seeds for host in _host_from_url(seed)]
 
 
+def _hosts_from_recipe(args: dict[str, Any]) -> list[str]:
+    """The host of every step URL of a recipe (``recipe_json``) and of its endpoint.
+
+    A recipe's step hosts are literal (a ``{{...}}`` in a URL's authority is
+    refused when it is validated), so these are all the hosts a run can reach.
+    ``{"use": "<name>"}`` names a saved recipe and carries no URL; the capture
+    gateway checks its steps before anything is sent.
+    """
+    raw = args.get("recipe_json")
+    try:
+        recipe = json.loads(raw) if isinstance(raw, str) else raw
+    except (json.JSONDecodeError, ValueError):
+        return []
+    if not isinstance(recipe, dict):
+        return []
+    hosts = _host_from_url(recipe.get("endpoint"))
+    steps = recipe.get("steps")
+    for step in steps if isinstance(steps, list) else []:
+        if isinstance(step, dict):
+            hosts += _host_from_url(step.get("url"))
+    return hosts
+
+
 def _hosts_from_web_search(_args: dict[str, Any]) -> list[str]:
     """OSINT exemption: web_search hits an allowlisted provider, not a target.
 
@@ -218,6 +244,9 @@ NETWORK_TARGET_EXTRACTORS: dict[str, Callable[[dict[str, Any]], list[str]]] = {
     "probe_run": _hosts_from_probe_run,
     "authz_matrix_run": _hosts_from_matrix,
     "surface_crawl": _hosts_from_crawl,
+    "recipe_check": _hosts_from_recipe,
+    "recipe_run": _hosts_from_recipe,
+    "recipe_save": _hosts_from_recipe,
 }
 
 

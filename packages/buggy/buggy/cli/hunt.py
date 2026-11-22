@@ -1592,6 +1592,9 @@ def kickoff_text(
         "impact. Priorities: access control and IDOR, authentication and session, SSRF, business "
         "logic, API flaws, GraphQL. For access control use identities_list and authz_matrix_run, "
         "or http_send with identity=...; you never handle a credential.",
+        "When no probe fits a lead, describe the check yourself as a recipe (JSON steps, "
+        "extractions and a verdict) and validate it with recipe_check, then run it with "
+        "recipe_run; always include a control step that shows the normal behaviour.",
         (
             "The sandbox has no network path to the target. Send every request with http_send, "
             "probe_run or the browser_* tools; a state-changing request returns APPROVAL_REQUIRED "

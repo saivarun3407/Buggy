@@ -188,9 +188,10 @@ class GatewayRefusal(Exception):
 
 @dataclass(slots=True)
 class ProbeGrant:
-    """The operator's approval of one run of one probe. Only the gateway makes one.
+    """The operator's approval of one run of one probe or recipe. Only the gateway makes one.
 
-    It covers the requests that run sends to the approved origin, up to
+    It covers the requests that run sends to the approved origin (or, for a
+    recipe, to any of ``origins``, the literal origins of its steps), up to
     ``remaining``. Scope, the internal-address block and the rate limit apply
     to each of them as to any other request.
     """
@@ -200,6 +201,8 @@ class ProbeGrant:
     probe: str
     origin: str
     remaining: int = PROBE_RUN_MAX_REQUESTS
+    origins: frozenset[str] = frozenset()
+    cap: int = PROBE_RUN_MAX_REQUESTS
 
 
 @dataclass(frozen=True, slots=True)
@@ -470,6 +473,119 @@ class CaptureGateway:
             )
         canonical = json.dumps(params, sort_keys=True, default=str)
         fingerprint = sha256_hex(f"probe-run|{probe}|{canonical}".encode())
+        body = params.get("body")
+        preview = body if isinstance(body, str) else json.dumps(body, default=str)
+        return self._run_grant(
+            engagement,
+            probe,
+            fingerprint,
+            frozenset({origin}),
+            PROBE_RUN_MAX_REQUESTS,
+            tool_name="probe_run",
+            shown={
+                "probe": probe,
+                "url": url,
+                "method": str(params.get("method") or "").upper(),
+                "parameter": str(params.get("parameter") or params.get("field") or ""),
+                "location": str(params.get("location") or ""),
+                "what_it_sends": sends,
+                "max_requests": PROBE_RUN_MAX_REQUESTS,
+                "header_names": sorted(str(k) for k in as_dict(params.get("headers"))),
+                "identity": str(params.get("identity") or ""),
+                "body_preview": "" if body is None else preview[:400],
+                "params_sha256": sha256_hex(canonical.encode()),
+            },
+            reason=f"one run of the {probe} probe, which can change state on the target",
+            refusal=(
+                f"the {probe} probe can change state on the target, so a human must approve "
+                "this run first"
+            ),
+            again="Run the probe again with the same parameters after it is approved",
+        )
+
+    def recipe_grant(
+        self,
+        engagement: str,
+        name: str,
+        canonical: str,
+        urls: Iterable[str],
+        shown: dict[str, Any],
+        max_requests: int,
+    ) -> ProbeGrant | None:
+        """The operator's approval for one run of a state-changing recipe (``buggy.capture.recipes``).
+
+        The same mechanism as :meth:`probe_grant`: what is approved is one run
+        of this exact recipe (``canonical`` is its canonical JSON, so an edited
+        recipe needs a new approval), sent to the literal origins of its step
+        URLs and capped at ``max_requests``. Every step URL must be in scope
+        before anything is filed. Returns ``None`` when the engagement does not
+        require approval. ``shown`` is what the operator reads (no header values).
+        """
+        scope, document = self.scope_for(engagement)
+        url_list = [str(u) for u in urls]
+        for url in url_list:
+            allowed, reason = scope.decide(url)
+            if not allowed:
+                self._refused(engagement, "RECIPE", url, reason)
+                raise GatewayRefusal(
+                    "OUT_OF_SCOPE",
+                    f"{host_of(url)!r} is not in the enforced scope ({reason}); not sent",
+                )
+        if not self.approval_required(document):
+            return None
+        origins = frozenset(o for o in (origin_of(u) for u in url_list) if o)
+        label = f"recipe:{name}"
+        fingerprint = sha256_hex(f"recipe-run|{name}|{canonical}".encode())
+        return self._run_grant(
+            engagement,
+            label,
+            fingerprint,
+            origins,
+            max(1, int(max_requests)),
+            tool_name="recipe_run",
+            shown={
+                **shown,
+                "max_requests": max(1, int(max_requests)),
+                "recipe_sha256": sha256_hex(canonical.encode()),
+            },
+            reason=f"one run of the recipe {name}, which can change state on the target",
+            refusal=(
+                f"the recipe {name} can change state on the target, so a human must approve "
+                "this run first"
+            ),
+            again="Run the identical recipe again after it is approved",
+        )
+
+    def check_target(self, engagement: str, url: str, method: str = "") -> None:
+        """Refuse (``OUT_OF_SCOPE``, with a ledger line) unless ``url``'s host is in scope.
+
+        Sends nothing; for callers that must know every target is allowed
+        before the first of several requests leaves.
+        """
+        scope, _document = self.scope_for(engagement)
+        allowed, reason = scope.decide(url)
+        if not allowed:
+            self._refused(engagement, method or "CHECK", url, reason)
+            raise GatewayRefusal(
+                "OUT_OF_SCOPE",
+                f"{host_of(url)!r} is not in the enforced scope ({reason}); not sent",
+            )
+
+    def _run_grant(
+        self,
+        engagement: str,
+        probe: str,
+        fingerprint: str,
+        origins: frozenset[str],
+        cap: int,
+        *,
+        tool_name: str,
+        shown: dict[str, Any],
+        reason: str,
+        refusal: str,
+        again: str,
+    ) -> ProbeGrant:
+        """Issue the grant for an allowed run, or file (once) and refuse with the request id."""
         used_path = self._used_runs_path(engagement)
 
         def spent(request_id: str) -> bool:
@@ -484,13 +600,14 @@ class CaptureGateway:
                         json.dumps({"request_id": approved, "probe": probe, "used_at": time.time()})
                         + "\n"
                     )
-                grant = ProbeGrant(approved, engagement, probe, origin)
+                primary = sorted(origins)[0] if origins else ""
+                grant = ProbeGrant(
+                    approved, engagement, probe, primary, cap, origins=origins, cap=cap
+                )
                 self._grants[approved] = grant
                 return grant
         if not request_id:
             request_id = f"apr-{uuid.uuid4().hex[:12]}"
-            body = params.get("body")
-            preview = body if isinstance(body, str) else json.dumps(body, default=str)
             self._file_request(
                 engagement,
                 {
@@ -498,37 +615,23 @@ class CaptureGateway:
                     "request_id": request_id,
                     "engagement_name": engagement,
                     "agent_name": "capture-gateway",
-                    "tool_name": "probe_run",
-                    "tool_args_redacted": {
-                        "probe": probe,
-                        "url": url,
-                        "method": str(params.get("method") or "").upper(),
-                        "parameter": str(params.get("parameter") or params.get("field") or ""),
-                        "location": str(params.get("location") or ""),
-                        "what_it_sends": sends,
-                        "max_requests": PROBE_RUN_MAX_REQUESTS,
-                        "header_names": sorted(str(k) for k in as_dict(params.get("headers"))),
-                        "identity": str(params.get("identity") or ""),
-                        "body_preview": "" if body is None else preview[:400],
-                        "params_sha256": sha256_hex(canonical.encode()),
-                    },
+                    "tool_name": tool_name,
+                    "tool_args_redacted": shown,
                     "matched_rule": {
                         "technique_tag": None,
-                        "tool_pattern": "state-changing probe run",
+                        "tool_pattern": f"state-changing {tool_name.replace('_', ' ')}",
                         "timeout_seconds": 0,
                         "default_on_timeout": "deny",
                     },
-                    "reason": f"one run of the {probe} probe, which can change state on the target",
+                    "reason": reason,
                     "created_at": time.time(),
-                    "metadata": {"fingerprint": fingerprint, "kind": "probe_run"},
+                    "metadata": {"fingerprint": fingerprint, "kind": tool_name},
                 },
             )
         raise GatewayRefusal(
             "APPROVAL_REQUIRED",
-            f"the {probe} probe can change state on the target, so a human must approve this "
-            f"run first (buggy-cli approvals allow {engagement} {request_id}). Nothing was sent. "
-            "Run the probe again with the same parameters after it is approved; one approval "
-            "covers one run.",
+            f"{refusal} (buggy-cli approvals allow {engagement} {request_id}). Nothing was sent. "
+            f"{again}; one approval covers one run.",
             request_id=request_id,
         )
 
@@ -541,15 +644,14 @@ class CaptureGateway:
             or self._grants.get(grant.request_id) is not grant
             or grant.engagement != engagement
             or grant.probe != probe
-            or grant.origin != origin_of(url)
+            or origin_of(url) not in (grant.origins | {grant.origin})
         ):
             return ""
         with self._lock:
             if grant.remaining <= 0:
                 raise GatewayRefusal(
                     "APPROVAL_SPENT",
-                    f"the approved run of {probe} has sent its {PROBE_RUN_MAX_REQUESTS} "
-                    "requests; not sent",
+                    f"the approved run of {probe} has sent its {grant.cap} requests; not sent",
                     request_id=grant.request_id,
                 )
             grant.remaining -= 1

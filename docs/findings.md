@@ -111,6 +111,74 @@ before the check means anything.
   stays `inconclusive` ("needs operator-approved replay").
 - A cited capture that does not exist in this engagement, or is out of scope
   now, discards the finding.
+- **A finding that came from a recipe** (below) is verified by running the
+  same recipe again, controls included, under the same rule as a probe.
+
+## Checks the agent builds itself (recipes)
+
+When no probe fits a lead, the agent describes the check as a **recipe**: a
+JSON document with the requests to send, what to take from each response for
+the next one, and how to decide. Buggy's code validates it and runs it.
+
+**A recipe is data, not code.** There is no expression language, no loop and
+no condition in it: only literal requests with `{{var}}` placeholders, fixed
+extraction rules (`json` path, response `header`, `regex`, `status`) and fixed
+comparisons. Nothing the agent writes is executed, and every step goes through
+the evidence gateway like any other request, so scope, the internal-address
+block, the approval hold, the rate limit and the ledger apply to each step.
+Nothing can leave the gateway. The host of every step URL must be written
+out: a placeholder before the path is refused when the recipe is checked.
+
+Worked example: can a second account read the first account's order?
+
+```json
+{"name": "order-read-by-other", "class": "access_control",
+ "title": "Another account can read an order it does not own",
+ "endpoint": "https://shop.example.test/api/orders/{id}",
+ "remediation": "Return an order only to the account that owns it; answer 403 otherwise.",
+ "steps": [
+   {"id": "create", "method": "POST", "url": "https://shop.example.test/api/orders",
+    "identity": "alice", "body": {"item": "book-{{rand}}"},
+    "expect": {"status": [200, 201]},
+    "extract": {"order": {"from": "json", "path": "order.id"}}},
+   {"id": "owner", "method": "GET", "url": "https://shop.example.test/api/orders/{{order}}", "identity": "alice"},
+   {"id": "other", "method": "GET", "url": "https://shop.example.test/api/orders/{{order}}", "identity": "bob"},
+   {"id": "nobody", "method": "GET", "url": "https://shop.example.test/api/orders/{{order}}", "identity": ""}],
+ "verdict": {
+   "vulnerable_if": [{"step": "other", "status": 200}, {"step": "other", "same_as": "owner"}],
+   "control": [{"step": "owner", "status": 200}, {"step": "nobody", "status": [401, 403]}]}}
+```
+
+- Placeholders: a variable extracted by an **earlier** step, or `{{rand}}` (one
+  8-character token per run) and `{{ts}}` (unix seconds). Pipes:
+  `|urlencode`, `|b64`, `|b64url`, `|json`, `|lower`, `|upper`. An object body
+  is filled in value by value and sent as JSON.
+- Conditions: `status`, `body_contains`, `body_not_contains`, `same_as` /
+  `differs_from` (another step; the verifier's thresholds), and `json` with
+  `equals`, `gt` or `lt`.
+- **A control is required.** A control is the step that shows the normal,
+  expected behaviour (the owner reads the order; a request without
+  credentials is refused), so a positive means more than "the page answered".
+  A recipe without one is refused. The result is `vulnerable: true` only when
+  every control and every `vulnerable_if` condition holds; `false` when the
+  controls hold and a `vulnerable_if` does not; `null` when a control fails
+  (`control_failed`), a step got no answer (`not_sent`), or a step's `expect`
+  failed (`precondition_failed`, which is never a finding).
+- **Approval.** A recipe with any POST, PUT, PATCH or DELETE step can change
+  state (the agent may also declare `"state_changing": true` on a GET-only
+  one). Where the engagement requires approval it is held and approved as
+  **one run**, like a state-changing probe: the operator sees the recipe name,
+  each step's method and URL template, the accounts used and a body preview
+  (header names only). One approval covers one run of that exact recipe, at
+  most its step count plus two requests; an edited recipe needs a new one, and
+  so does the verifier's re-run.
+- Extracted values are never returned to the agent and never stored; results
+  name only the variables.
+- Tools: `recipe_check` (validate, sends nothing), `recipe_run` (a positive is
+  queued as a candidate with source `recipe:<name>`), `recipe_save`,
+  `recipe_list`, `recipe_get`; `recipe_run` with `{"use": "<name>"}` runs a
+  saved recipe. Limits: 12 steps, 20 conditions, 64 KiB per body, regexes of
+  200 characters at most.
 
 ## Grading rules, in order
 
