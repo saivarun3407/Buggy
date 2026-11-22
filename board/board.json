@@ -1,5 +1,5 @@
 {
- "updated": "2026-11-22 08:12 UTC",
+ "updated": "2026-11-22 17:05 UTC",
  "columns": [
   "backlog",
   "ready",
@@ -951,6 +951,66 @@
    "tests": "",
    "note": "Needs the owner's yes",
    "order": 46
+  },
+  {
+   "id": "G6",
+   "epic": "E14",
+   "lane": "D",
+   "title": "Sign-up needs a person: Buggy nudges, the operator does one step, Buggy continues",
+   "depends": [
+    "G1"
+   ],
+   "status": "done",
+   "agent": "",
+   "branch": "",
+   "commit": "3942310",
+   "tests": "1814 tests in the affected suites",
+   "note": "tested at the gateway: email verification and a site with no sign-up; not yet run on a live site",
+   "order": 47
+  },
+  {
+   "id": "G7",
+   "epic": "E14",
+   "lane": "E",
+   "title": "Evidence only for valid bugs",
+   "depends": [
+    "G3"
+   ],
+   "status": "done",
+   "agent": "",
+   "branch": "",
+   "commit": "3942310",
+   "tests": "1814 tests in the affected suites",
+   "note": "only re-proven findings graded submit get a video and logs; held ones are listed as not reportable with the reason",
+   "order": 48
+  },
+  {
+   "id": "T1",
+   "epic": "E14",
+   "lane": "C",
+   "title": "The agent builds its own checks when no tool fits",
+   "depends": [],
+   "status": "in_progress",
+   "agent": "",
+   "branch": "",
+   "commit": "",
+   "tests": "",
+   "note": "",
+   "order": 49
+  },
+  {
+   "id": "T2",
+   "epic": "E14",
+   "lane": "F",
+   "title": "The agent can look things up on the public internet",
+   "depends": [],
+   "status": "in_progress",
+   "agent": "",
+   "branch": "",
+   "commit": "",
+   "tests": "",
+   "note": "",
+   "order": 50
   }
  ]
 }
