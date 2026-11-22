@@ -107,6 +107,8 @@ UNTRUSTED_TOOL_NAMES: frozenset[str] = frozenset(
         # attacker-influenceable and must reach the model quarantined.
         "web_fetch",
         "web_search",
+        # research_fetch reads public reference pages anyone can write.
+        "research_fetch",
     }
 )
 

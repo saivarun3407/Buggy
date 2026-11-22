@@ -219,8 +219,14 @@ def test_unreachable_or_unconfigured_server_is_an_error_result(monkeypatch) -> N
 def test_tools_are_offered_per_role_and_only_when_configured(monkeypatch) -> None:
     for env in stack_mcp.SERVER_ENV.values():
         monkeypatch.delenv(env, raising=False)
+    monkeypatch.delenv("BUGGY_AGENT_WEB", raising=False)
+    # Without servers only research_fetch (public pages, never the target) is offered.
+    assert [t.name for t in stack_mcp.stack_mcp_tools_for("api_security")] == ["research_fetch"]
+    assert [t.name for t in build_tools(role="recon", standard_tools={})] == ["research_fetch"]
+    monkeypatch.setenv("BUGGY_AGENT_WEB", "off")
     assert stack_mcp.stack_mcp_tools_for("api_security") == []
     assert [t.name for t in build_tools(role="recon", standard_tools={})] == []
+    monkeypatch.delenv("BUGGY_AGENT_WEB")
 
     for env in stack_mcp.SERVER_ENV.values():
         monkeypatch.setenv(env, "http://mcp.test/mcp")
@@ -229,6 +235,7 @@ def test_tools_are_offered_per_role_and_only_when_configured(monkeypatch) -> Non
     assert {"recon_query", "scope_check", "http_send", "probe_run", "browser_open"} <= tester
     assert {"recon_query", "scope_check"} <= reader
     assert not reader & {"http_send", "probe_run", "browser_open"}  # readers cannot touch a target
+    assert "research_fetch" in tester and "research_fetch" in reader
     assert stack_mcp.stack_mcp_tools_for("phisher") == []
     assert "recon_summary" in {t.name for t in build_tools(role="recon", standard_tools={})}
     # No stack tool can run a scanner.

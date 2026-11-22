@@ -49,22 +49,36 @@ func TestUseClaudeCode(t *testing.T) {
 	}
 }
 
-// Claude Code must get nothing but the bridge: no built-in tool, no other
-// MCP server of this machine, and only the bridge's tools allowed.
+func flagValue(t *testing.T, args []string, flag string) string {
+	t.Helper()
+	i := slices.Index(args, flag)
+	if i < 0 || i+1 >= len(args) {
+		t.Fatalf("%s missing in %v", flag, args)
+	}
+	return args[i+1]
+}
+
+// Claude Code must get nothing but the bridge and, of its own built-in tools,
+// web search alone: no shell, no WebFetch (a direct path from this machine to
+// the target), no other MCP server of this machine.
 func TestClaudeArgs_OnlyTheBridge(t *testing.T) {
-	args := claudeArgs("/tmp/x/mcp.json")
-	at := func(flag string) string {
-		i := slices.Index(args, flag)
-		if i < 0 || i+1 >= len(args) {
-			t.Fatalf("%s missing in %v", flag, args)
-		}
-		return args[i+1]
+	args := claudeArgs("/tmp/x/mcp.json", true)
+	at := func(flag string) string { return flagValue(t, args, flag) }
+	if at("--tools") != "WebSearch" {
+		t.Errorf("the only built-in tool must be web search: --tools %q", at("--tools"))
 	}
-	if at("--tools") != "" {
-		t.Errorf("built-in tools are not disabled: --tools %q", at("--tools"))
-	}
-	if at("--allowedTools") != "mcp__buggy" {
+	if at("--allowedTools") != "mcp__buggy,WebSearch" {
 		t.Errorf("--allowedTools = %q", at("--allowedTools"))
+	}
+	for _, flag := range []string{"--tools", "--allowedTools"} {
+		for _, builtin := range []string{"WebFetch", "Bash", "Read", "Write", "Edit", "default"} {
+			if strings.Contains(at(flag), builtin) {
+				t.Errorf("%s %q enables %s", flag, at(flag), builtin)
+			}
+		}
+	}
+	if slices.Contains(args, "--disallowedTools") || slices.Contains(args, "--restricted") {
+		t.Errorf("unexpected tool flags: %v", args)
 	}
 	if at("--mcp-config") != "/tmp/x/mcp.json" || !slices.Contains(args, "--strict-mcp-config") {
 		t.Errorf("the MCP configuration is not exclusive: %v", args)
@@ -79,9 +93,61 @@ func TestClaudeArgs_OnlyTheBridge(t *testing.T) {
 	}
 }
 
+// --no-web: no built-in tool at all, only the bridge allowed.
+func TestClaudeArgs_NoWebHasNoBuiltinTools(t *testing.T) {
+	args := claudeArgs("/tmp/x/mcp.json", false)
+	if got := flagValue(t, args, "--tools"); got != "" {
+		t.Errorf("built-in tools are not disabled: --tools %q", got)
+	}
+	if got := flagValue(t, args, "--allowedTools"); got != "mcp__buggy" {
+		t.Errorf("--allowedTools = %q", got)
+	}
+	if flagValue(t, args, "--mcp-config") != "/tmp/x/mcp.json" || !slices.Contains(args, "--strict-mcp-config") {
+		t.Errorf("the MCP configuration is not exclusive: %v", args)
+	}
+	for _, arg := range args[:len(args)-1] {
+		if strings.Contains(arg, "WebSearch") || strings.Contains(arg, "WebFetch") {
+			t.Errorf("a web tool is named with --no-web: %v", args)
+		}
+	}
+}
+
+func bridgeArgs(t *testing.T, web bool) []string {
+	t.Helper()
+	body, err := claudeMCPConfig(dockerShaped(huntCompose(false)), "acme", web)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var doc struct {
+		Servers map[string]struct {
+			Args []string `json:"args"`
+		} `json:"mcpServers"`
+	}
+	if err := json.Unmarshal(body, &doc); err != nil {
+		t.Fatal(err)
+	}
+	return doc.Servers["buggy"].Args
+}
+
+// --no-web also tells the bridge to leave research_fetch out.
+func TestClaudeMCPConfig_NoWebHidesResearchFetch(t *testing.T) {
+	stackHome(t)
+	off := bridgeArgs(t, false)
+	if i := slices.Index(off, "BUGGY_AGENT_WEB=off"); i < 1 || off[i-1] != "-e" {
+		t.Errorf("the bridge is not told to drop research_fetch: %v", off)
+	}
+	tail := []string{"operator", "python", "-m", "buggy.agent_bridge", "--engagement", "acme"}
+	if !slices.Equal(off[len(off)-len(tail):], tail) {
+		t.Errorf("args do not end with the bridge command: %v", off)
+	}
+	if on := bridgeArgs(t, true); slices.ContainsFunc(on, func(a string) bool { return strings.Contains(a, "BUGGY_AGENT_WEB") }) {
+		t.Errorf("web access is the default, yet the bridge is told otherwise: %v", on)
+	}
+}
+
 func TestClaudeMCPConfig_StartsTheBridgeInTheOperatorContainer(t *testing.T) {
 	stackHome(t)
-	body, err := claudeMCPConfig(dockerShaped(huntCompose(false)), "acme")
+	body, err := claudeMCPConfig(dockerShaped(huntCompose(false)), "acme", true)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -183,23 +249,31 @@ func TestClaudeAgentStage_FinalizesEvenWhenClaudeFails(t *testing.T) {
 	t.Cleanup(func() { runClaudeFn, finalizeHuntFn = prevRun, prevFinal })
 
 	var ran, finalized []string
-	runClaudeFn = func(_ *compose.Compose, slug string) error {
+	var webs []bool
+	runClaudeFn = func(_ *compose.Compose, slug string, web bool) error {
 		ran = append(ran, slug)
+		webs = append(webs, web)
 		return errors.New("exit status 1")
 	}
 	finalizeHuntFn = func(_ *compose.Compose, slug, failOn string, issues bool) error {
 		finalized = append(finalized, slug+"|"+failOn)
 		return nil
 	}
-	if err := claudeAgentStage(huntCompose(false), "acme", "high", false); err != nil {
+	if err := claudeAgentStage(huntCompose(false), "acme", "high", false, true); err != nil {
 		t.Fatalf("a Claude Code failure must not fail the run by itself: %v", err)
 	}
 	if !slices.Equal(ran, []string{"acme"}) || !slices.Equal(finalized, []string{"acme|high"}) {
 		t.Errorf("ran %v, finalized %v", ran, finalized)
 	}
+	if err := claudeAgentStage(huntCompose(false), "acme", "", false, false); err != nil {
+		t.Fatal(err)
+	}
+	if !slices.Equal(webs, []bool{true, false}) {
+		t.Errorf("--no-web did not reach Claude Code's start: %v", webs)
+	}
 
 	ran, finalized = nil, nil
-	if err := claudeAgentStage(huntCompose(false), "../x", "", false); err == nil {
+	if err := claudeAgentStage(huntCompose(false), "../x", "", false, true); err == nil {
 		t.Error("a path was accepted as an engagement name")
 	}
 	if len(ran)+len(finalized) != 0 {

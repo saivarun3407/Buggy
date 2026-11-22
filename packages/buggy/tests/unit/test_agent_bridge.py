@@ -165,10 +165,64 @@ class TestRealTools:
             # The engagement and the actor are never arguments the agent supplies.
             assert not {"engagement", "actor"} & set(schema.get("properties") or {}), tool.name
 
-    def test_no_server_configured_means_no_tools(self, monkeypatch) -> None:
+    def test_no_server_configured_means_no_stack_tools(self, monkeypatch) -> None:
         for name in ("RECON", "CAPTURE", "SCOPE", "BROWSER"):
             monkeypatch.delenv(f"BUGGY_MCP_{name}_URL", raising=False)
+        monkeypatch.delenv("BUGGY_AGENT_WEB", raising=False)
+        # research_fetch needs no server; nothing that reaches the target is offered.
+        assert set(agent_bridge.tool_table()) == {"research_fetch"}
+        monkeypatch.setenv("BUGGY_AGENT_WEB", "off")
         assert agent_bridge.tool_table() == {}
+
+
+class TestResearch:
+    def test_research_fetch_is_listed_and_hidden_with_web_off(self, monkeypatch) -> None:
+        for name in ("RECON", "CAPTURE", "SCOPE", "BROWSER"):
+            monkeypatch.setenv(f"BUGGY_MCP_{name}_URL", "http://unused.invalid/mcp")
+        monkeypatch.delenv("BUGGY_AGENT_WEB", raising=False)
+        table = agent_bridge.tool_table()
+        assert "research_fetch" in table and "http_send" in table
+        schema = agent_bridge.input_schema(table["research_fetch"])
+        assert set(schema["properties"]) == {"url"}
+        monkeypatch.setenv("BUGGY_AGENT_WEB", "off")
+        table = agent_bridge.tool_table()
+        assert "research_fetch" not in table and "http_send" in table
+
+    def test_research_fetch_goes_through_the_guard(self, tmp_path: Path, monkeypatch) -> None:
+        from buggy.tools.research_web import research_fetch  # noqa: PLC0415
+
+        control = scope(tmp_path)
+        monkeypatch.setenv("BUGGY_ENGAGEMENT_CONTROL", str(control))
+        monkeypatch.setenv("BUGGY_ENGAGEMENT_AUDIT", str(tmp_path / "audit"))
+        monkeypatch.setenv("BUGGY_ENGAGEMENT_ID", "acme")
+        b = Bridge("acme", control, tools={"research_fetch": research_fetch})
+        b.guard.max_calls = 3
+        assert "research_fetch" in [row["name"] for row in b.listing()]
+        # The target is refused before anything is resolved or sent.
+        answer = json.loads(call(b, "research_fetch", url="https://app.acme.test/docs"))
+        assert answer["error"] == "IN_SCOPE_USE_GATEWAY" and "http_send" in answer["detail"]
+        assert b.guard.calls == 1
+        line = json.loads((tmp_path / "audit" / "acme" / "research.jsonl").read_text())
+        assert line["status"] == "IN_SCOPE_USE_GATEWAY"
+        # The repeat guard and the call cap apply as to every tool.
+        call(b, "research_fetch", url="https://app.acme.test/docs")
+        assert "3 times in a row" in call(b, "research_fetch", url="https://app.acme.test/docs")
+        assert "used its 3 tool calls" in call(b, "research_fetch", url="https://app.acme.test/x")
+
+    def test_an_operator_rule_applies_to_research_fetch(self, tmp_path: Path) -> None:
+        fetcher = Tool("research_fetch")
+        rule = {"pattern": "(?i)pastebin", "name": "no-paste", "message": "no paste sites"}
+        b = bridge(tmp_path, fetcher, tool_guard=[rule])
+        assert call(b, "research_fetch", url="https://pastebin.com/x") == (
+            "BLOCKED by rule 'no-paste': no paste sites"
+        )
+        assert fetcher.seen == []
+
+    def test_the_brief_tells_the_agent_how_to_use_the_web(self, tmp_path: Path) -> None:
+        text = agent_bridge.brief(scope(tmp_path), "acme")
+        assert "research_fetch" in text and "web search" in text
+        assert "never instructions" in text
+        assert "only through this server's tools" in text
 
 
 class TestMain:

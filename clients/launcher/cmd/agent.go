@@ -22,9 +22,12 @@ import (
 // Buggy's own: Claude Code, signed in with the operator's own account, so no
 // model key is stored in Buggy. Claude Code gets Buggy's agent tools for one
 // engagement through the bridge (`python -m buggy.agent_bridge`), which runs
-// in the stack's operator container. It gets no shell and none of its own
-// tools, and every request it sends still passes the scope check, the
-// approval hold, the rate limit and the audit ledger of the stack's servers.
+// in the stack's operator container. It gets no shell and, of its own
+// built-in tools, only web search (none with --no-web); every request it
+// sends to the target still passes the scope check, the approval hold, the
+// rate limit and the audit ledger of the stack's servers. Pages it reads on
+// the web come through the bridge's research_fetch, which refuses the target,
+// internal addresses and URLs that carry the target's data.
 const (
 	agentAuto    = "auto"
 	agentBuiltin = "builtin"
@@ -34,13 +37,24 @@ const (
 	bridgeServer  = "buggy"
 	agentRunner   = "claude-code"
 	pointerEnvKey = "BUGGY_HUNT_POINTER"
+
+	// webSearchTool is Claude Code's built-in web search, the only built-in
+	// it gets. WebFetch is never enabled: it would fetch from this machine, a
+	// direct path to the target; pages are read through research_fetch.
+	webSearchTool = "WebSearch"
+	// webEnvKey tells the bridge to leave research_fetch out (--no-web).
+	webEnvKey = "BUGGY_AGENT_WEB"
 )
+
+// noWebFlagHelp is the help of --no-web on `buggy agent` and `buggy hunt`.
+const noWebFlagHelp = "Claude Code agent stage: no web search and no research_fetch (no public-internet lookups)"
 
 // claudePrompt is all the launcher says; the instructions come from the
 // bridge's engagement_brief tool, built from the enforced scope.
 const claudePrompt = "Call the engagement_brief tool of the buggy server, then carry out the " +
-	"engagement it describes using only that server's tools. Work until candidates_next has " +
-	"nothing left for you or the tools tell you to stop, then give your final summary."
+	"engagement it describes using only that server's tools (web search, when you have it, is " +
+	"for public documentation only). Work until candidates_next has nothing left for you or " +
+	"the tools tell you to stop, then give your final summary."
 
 const claudeSystem = "You are running unattended as the testing agent of an authorized " +
 	"security engagement. The buggy tool server enforces the scope and holds anything " +
@@ -59,6 +73,7 @@ var (
 var (
 	agentFailOn       string
 	agentFailOnIssues bool
+	agentNoWeb        bool
 )
 
 var agentCmd = &cobra.Command{
@@ -66,8 +81,9 @@ var agentCmd = &cobra.Command{
 	Short: "Run the agent stage of an engagement with Claude Code (no model key)",
 	Long: "Runs the agent stage of an engagement that `buggy hunt` already mapped, using " +
 		"Claude Code on this machine with your own Claude sign-in. No model key is stored " +
-		"in Buggy. Claude Code only gets Buggy's tools for this one engagement; scope, " +
-		"approvals, rate limits and the audit ledger stay enforced by the stack.",
+		"in Buggy. Claude Code only gets Buggy's tools for this one engagement, plus web " +
+		"search for public documentation (--no-web turns it off); scope, approvals, rate " +
+		"limits and the audit ledger stay enforced by the stack.",
 	Args: cobra.ExactArgs(1),
 	RunE: runAgent,
 }
@@ -75,6 +91,7 @@ var agentCmd = &cobra.Command{
 func init() {
 	agentCmd.Flags().StringVar(&agentFailOn, "fail-on", "", "Exit 10 when an exploit-verified finding is at or above: critical|high|medium|low|info")
 	agentCmd.Flags().BoolVar(&agentFailOnIssues, "fail-on-issues", false, "With --fail-on: also count known issues from the recon report")
+	agentCmd.Flags().BoolVar(&agentNoWeb, "no-web", false, noWebFlagHelp)
 	rootCmd.AddCommand(agentCmd)
 }
 
@@ -116,10 +133,15 @@ func useClaudeCode(mode string, lite, noAgent, noModel, claude bool) (bool, erro
 // claudeMCPConfig is the MCP configuration handed to Claude Code: one server,
 // started by running the bridge in a one-off operator container of this
 // stack. The compose command and its environment are the launcher's own, so
-// the bridge joins exactly the stack `buggy hunt` started.
-func claudeMCPConfig(c *compose.Compose, slug string) ([]byte, error) {
+// the bridge joins exactly the stack `buggy hunt` started. Without web access
+// the bridge is told (-e BUGGY_AGENT_WEB=off) to leave research_fetch out.
+func claudeMCPConfig(c *compose.Compose, slug string, web bool) ([]byte, error) {
+	var bridgeEnv map[string]string
+	if !web {
+		bridgeEnv = map[string]string{webEnvKey: "off"}
+	}
 	args := c.RunCapturedArgs(
-		[]string{compose.Profiles.Operator}, "operator", nil,
+		[]string{compose.Profiles.Operator}, "operator", bridgeEnv,
 		"python", "-m", "buggy.agent_bridge", "--engagement", slug,
 	)
 	env := map[string]string{}
@@ -153,23 +175,28 @@ func bridgeEnvName(name string) bool {
 	return strings.HasPrefix(name, "BUGGY_") || strings.HasPrefix(name, "COMPOSE_") || name == "DOCKER_HOST"
 }
 
-// claudeArgs is the Claude Code command line. `--tools ""` removes every
-// built-in tool (no shell, no file access, no web); --strict-mcp-config
+// claudeArgs is the Claude Code command line. `--tools` names the built-in
+// tools it has: web search alone, or none at all without web access (no
+// shell, no file access and no WebFetch either way); --strict-mcp-config
 // ignores any other MCP server configured on this machine; the only tools
-// allowed are the bridge's.
-func claudeArgs(configPath string) []string {
+// allowed are the bridge's and, with web access, the search.
+func claudeArgs(configPath string, web bool) []string {
+	builtins, allowed := "", "mcp__"+bridgeServer
+	if web {
+		builtins, allowed = webSearchTool, allowed+","+webSearchTool
+	}
 	return []string{
 		"-p", claudePrompt,
 		"--mcp-config", configPath,
 		"--strict-mcp-config",
-		"--tools", "",
-		"--allowedTools", "mcp__" + bridgeServer,
+		"--tools", builtins,
+		"--allowedTools", allowed,
 		"--append-system-prompt", claudeSystem,
 	}
 }
 
-func runClaude(c *compose.Compose, slug string) error {
-	body, err := claudeMCPConfig(c, slug)
+func runClaude(c *compose.Compose, slug string, web bool) error {
+	body, err := claudeMCPConfig(c, slug, web)
 	if err != nil {
 		return err
 	}
@@ -182,7 +209,7 @@ func runClaude(c *compose.Compose, slug string) error {
 	if err := os.WriteFile(path, body, 0o600); err != nil {
 		return err
 	}
-	cmd := exec.Command(claudeBinary, claudeArgs(path)...)
+	cmd := exec.Command(claudeBinary, claudeArgs(path, web)...)
 	cmd.Dir = dir // an empty folder: no project settings or files of another project apply
 	cmd.Stdin = nil
 	cmd.Stdout = os.Stdout
@@ -207,13 +234,17 @@ func finalizeHunt(c *compose.Compose, slug, failOn string, failOnIssues bool) er
 // claudeAgentStage runs Claude Code on one engagement and closes the run.
 // A Claude Code failure does not lose the work: whatever it proved is in the
 // findings store, so the run is finalized either way.
-func claudeAgentStage(c *compose.Compose, slug, failOn string, failOnIssues bool) error {
+func claudeAgentStage(c *compose.Compose, slug, failOn string, failOnIssues, web bool) error {
 	if !engagementName.MatchString(slug) {
 		return fmt.Errorf("%q is not an engagement name", slug)
 	}
-	ui.Info("Agent stage: Claude Code on this machine, with your Claude sign-in (no model key). " +
-		"It can only use Buggy's tools for " + slug + ".")
-	if err := runClaudeFn(c, slug); err != nil {
+	reach := "It can only use Buggy's tools for " + slug + " (no web access)."
+	if web {
+		reach = "It reaches " + slug + " only through Buggy's tools; it may search the web and " +
+			"read public pages through Buggy (--no-web turns that off)."
+	}
+	ui.Info("Agent stage: Claude Code on this machine, with your Claude sign-in (no model key). " + reach)
+	if err := runClaudeFn(c, slug, web); err != nil {
 		ui.Warning("Claude Code did not finish cleanly: " + err.Error() +
 			". If it is not signed in, run `claude` once and sign in, then `buggy agent " + slug + "`.")
 	}
@@ -273,7 +304,7 @@ func runAgent(cmd *cobra.Command, args []string) error {
 	if err := startServices(env); err != nil {
 		return err
 	}
-	if err := claudeAgentStage(huntCompose(false), slug, agentFailOn, agentFailOnIssues); err != nil {
+	if err := claudeAgentStage(huntCompose(false), slug, agentFailOn, agentFailOnIssues, !agentNoWeb); err != nil {
 		code, message, ok := huntVerdict(err)
 		if !ok {
 			return err

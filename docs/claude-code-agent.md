@@ -30,10 +30,12 @@ buggy agent <engagement>
 
 ## What Claude Code can and cannot do here
 
-Claude Code is started with **only** Buggy's tools:
+Claude Code is started with **only** Buggy's tools and web search:
 
-- Its built-in tools are turned off (`--tools ""`): no shell, no file access,
-  no web access.
+- Of its built-in tools it keeps web search alone (`--tools WebSearch`,
+  allowed with `--allowedTools mcp__buggy,WebSearch`): no shell, no file
+  access, and no `WebFetch`, which would fetch pages straight from your
+  machine and so be a path to the target that bypasses the gateway.
 - Other MCP servers configured on your machine are ignored
   (`--strict-mcp-config`).
 - It runs in an empty temporary folder, so no project settings apply.
@@ -62,6 +64,53 @@ bridge before a call is forwarded:
 1. your tool-call rules from the scope (`machine_enforcement.tool_guard`);
 2. the same call three times in a row is withheld;
 3. a cap on tool calls per run (`BUGGY_MAX_TOOL_CALLS`, default 300).
+
+## Looking things up on the public internet
+
+The agent can look up public reference material: the documentation of a
+framework it met, a CVE write-up, an API reference.
+
+- **Search** is Claude Code's own web search. The query goes from Claude Code
+  to Anthropic's search service, not through Buggy.
+- **Reading a page** goes through the bridge's `research_fetch` tool, which
+  runs in the operator container and counts against the call cap like every
+  other tool (the repeat guard and your tool-call rules apply too). It sends
+  a bare GET (fixed User-Agent `buggy-research/1`, no cookies, no
+  credentials), follows at most five redirects and re-checks every hop.
+  It refuses, before anything is sent:
+  - the target: a host the enforced scope allows, a host an out-of-scope
+    entry names, any host under an in-scope host's domain or its parent
+    (`app.acme.com` makes all of `acme.com` off limits), and a name that
+    resolves to one of the target's addresses (`IN_SCOPE_USE_GATEWAY`; the
+    target is reached only through `http_send`);
+  - internal addresses, by name and after DNS resolution, with the
+    gateway's rule; the name is resolved once and the connection goes to the
+    address that was checked (`INTERNAL_ADDRESS`);
+  - userinfo in the URL, a bare IP address, a port other than 80, 443, 8080
+    or 8443, or a URL over 2,000 characters (`BAD_URL`);
+  - a URL whose path or query contains an in-scope host name, an email
+    address or a long token-like value (`LOOKS_LIKE_TARGET_DATA`).
+
+  Only text, HTML (reduced to readable text with its links), JSON, XML and
+  PDF (size only, not parsed) are read. The result is marked as reference
+  material, not instructions. Each call adds one line (URL, final URL, status
+  or refusal, size; never the page) to `<audit>/<engagement>/research.jsonl`;
+  where the audit root is read-only, as in the operator container, the line
+  goes to the bridge's log instead.
+
+What is **not** enforced by code: a search query is typed by the model and
+sent by Claude Code, so Buggy never sees it. The rule against putting the
+target's host names, data or tokens into a query is an instruction in the
+brief, not a filter. If that is not acceptable for an engagement, turn the
+web off:
+
+```bash
+buggy hunt https://your-target.example --no-web
+buggy agent <engagement> --no-web
+```
+
+`--no-web` starts Claude Code with `--tools ""` (no built-in tool at all) and
+tells the bridge (`BUGGY_AGENT_WEB=off`) to leave `research_fetch` out.
 
 ## After the run
 
@@ -92,8 +141,11 @@ command, then start Claude Code with only that server:
 ```
 
 ```bash
-claude -p "Call the engagement_brief tool of the buggy server, then carry out the engagement it describes using only that server's tools." --mcp-config mcp.json --strict-mcp-config --tools "" --allowedTools mcp__buggy
+claude -p "Call the engagement_brief tool of the buggy server, then carry out the engagement it describes using only that server's tools." --mcp-config mcp.json --strict-mcp-config --tools WebSearch --allowedTools mcp__buggy,WebSearch
 ```
+
+For a run with no web access use `--tools "" --allowedTools mcp__buggy` and
+add `"-e", "BUGGY_AGENT_WEB=off"` after `"-T"` in the configuration's `args`.
 
 Run it from the repository root (where `docker-compose.yml` and `.env` are),
 then close the run:

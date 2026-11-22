@@ -41,6 +41,7 @@ var (
 	huntResume         string
 	huntFailOn         string
 	huntFailOnIssues   bool
+	huntNoWeb          bool
 )
 
 var huntCmd = &cobra.Command{
@@ -92,6 +93,7 @@ func init() {
 	huntCmd.Flags().StringVar(&huntResume, "resume", "", "Continue the named engagement with its stored targets and options (no TARGET needed)")
 	huntCmd.Flags().StringVar(&huntFailOn, "fail-on", "", "Exit 10 when an exploit-verified finding is at or above: critical|high|medium|low|info")
 	huntCmd.Flags().BoolVar(&huntFailOnIssues, "fail-on-issues", false, "With --fail-on: also count known issues from the recon report")
+	huntCmd.Flags().BoolVar(&huntNoWeb, "no-web", false, noWebFlagHelp)
 	rootCmd.AddCommand(huntCmd)
 }
 
@@ -134,6 +136,7 @@ type huntFlags struct {
 	resume         string
 	failOn         string
 	failOnIssues   bool
+	noWeb          bool // Claude Code agent stage: no web search, no research_fetch
 }
 
 func currentHuntFlags() huntFlags {
@@ -163,6 +166,7 @@ func currentHuntFlags() huntFlags {
 		resume:         huntResume,
 		failOn:         huntFailOn,
 		failOnIssues:   huntFailOnIssues,
+		noWeb:          huntNoWeb,
 	}
 }
 
@@ -352,7 +356,7 @@ func runHunt(cmd *cobra.Command, args []string) error {
 		// Recon finished (exit 0, or 10 when the gate already trips): the agent
 		// stage runs, and its finalize step gives the run's verdict.
 		if slug != "" && (runErr == nil || (known && code == huntExitGate)) {
-			runErr = claudeAgentStage(c, slug, flags.failOn, flags.failOnIssues)
+			runErr = claudeAgentStage(c, slug, flags.failOn, flags.failOnIssues, !flags.noWeb)
 		}
 	}
 	if runErr != nil {

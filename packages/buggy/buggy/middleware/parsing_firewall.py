@@ -133,6 +133,7 @@ _SOURCE_BY_TOOL: dict[str, str] = {
     "proxy_view_sitemap_entry": _HTTP,
     "web_fetch": _WEB,
     "web_search": _WEB,
+    "research_fetch": _WEB,
     "read_file": _FILE,
     "scan_shard": _FILE,
     "rank_candidates": _FILE,

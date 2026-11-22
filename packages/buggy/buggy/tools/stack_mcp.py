@@ -31,6 +31,7 @@ from typing import Any
 
 from langchain_core.tools import tool
 
+from buggy.tools.research_web import research_fetch, web_enabled
 from buggy_core.utils.engagement_scope import get_active_engagement
 from buggy_core.utils.logging import get_logger
 
@@ -817,7 +818,12 @@ _READER_CAPTURE_TOOLS: tuple[Any, ...] = (
 
 
 def stack_mcp_tools_for(role: str) -> list[Any]:
-    """The configured stack MCP tools appropriate for ``role`` (empty for other roles)."""
+    """The configured stack MCP tools appropriate for ``role`` (empty for other roles).
+
+    Roles that plan or test also get ``research_fetch`` (public reference pages,
+    never the target), which needs no server.
+    """
+    research = [research_fetch] if web_enabled() else []
     if role in _TESTERS:
         servers = ("recon", "scope", "capture", "browser")
     elif role in _READERS:
@@ -828,10 +834,10 @@ def stack_mcp_tools_for(role: str) -> list[Any]:
         ]
         if server_url("capture"):
             tools += list(_READER_CAPTURE_TOOLS)
-        return tools
+        return tools + research
     else:
         return []
-    return [t for server in servers if server_url(server) for t in _BY_SERVER[server]]
+    return [t for server in servers if server_url(server) for t in _BY_SERVER[server]] + research
 
 
 __all__ = [
