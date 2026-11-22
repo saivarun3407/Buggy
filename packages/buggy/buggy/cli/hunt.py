@@ -1094,8 +1094,13 @@ def run_signed_in(
     *,
     budget: int | None = None,
     state_budget: int | None = None,
+    defer: bool = False,
 ) -> dict[str, Any]:
     """Test what is behind the login, as the operator's declared test accounts. No LLM.
+
+    With ``defer`` the probe runs are planned but not sent: they are returned
+    under ``deferred`` and the hunt sends them class by class with the rest
+    (:func:`run_by_class`). The walk and the access-control comparison run now.
 
     For each account (three at most) the gateway signs in and the account
     uses the application like a person would (the user walk, GET only): the
@@ -1198,14 +1203,14 @@ def run_signed_in(
         planned = sweep.plan({"parameter": fresh}, budget=probe_budget)
         for step in planned["steps"]:
             step["params"]["identity"] = name
-        done = _run_steps(engagement, planned, known_issues)
-        probe_budget = max(0, probe_budget - done["planned"])
-        _add_counts(out["probes"], done)
-
         writes = sweep.plan_state_changing({"parameter": fresh}, budget=write_budget, identity=name)
-        done = _run_steps(engagement, writes, known_issues)
-        write_budget = max(0, write_budget - done["planned"])
-        _add_counts(out["state"], done)
+        probe_budget = max(0, probe_budget - len(planned["steps"]))
+        write_budget = max(0, write_budget - len(writes["steps"]))
+        if defer:
+            out.setdefault("deferred", []).extend([("probes", planned), ("state", writes)])
+            continue
+        _add_counts(out["probes"], _run_steps(engagement, planned, known_issues))
+        _add_counts(out["state"], _run_steps(engagement, writes, known_issues))
 
     if len(reached) >= 2:
         _inferred_access(engagement, reached, known_issues, out["inferred"], owned)
@@ -1861,41 +1866,6 @@ def write_result(control: Path, slug: str, result: dict[str, Any]) -> Path:
 # ── entry ────────────────────────────────────────────────────────────
 
 
-def _sweep_stage(
-    args: argparse.Namespace, slug: str, records: dict[str, list[dict[str, Any]]]
-) -> dict[str, Any] | None:
-    """Run the probe sweep unless it was turned off; print one summary. ``None`` when skipped."""
-    budget = getattr(args, "probe_budget", None)
-    if getattr(args, "no_probes", False) or (budget is not None and budget <= 0):
-        print("  probe sweep      skipped (--no-probes)", file=sys.stderr)
-        return None
-    probes = run_probe_sweep(slug, records, budget=budget)
-    line = (
-        f"{probes['ran']} of {probes['planned']} run, {probes['vulnerable']} positive, "
-        f"{probes['verified']} re-proven, {probes['submit']} graded submit"
-    )
-    if probes["held_for_approval"]:
-        line += (
-            f", {probes['held_for_approval']} waiting for your approval "
-            f"(buggy-cli approvals list {slug})"
-        )
-    if probes["left_out"]:
-        line += f" ({probes['left_out']} more left out by the budget; --probe-budget)"
-    if probes["error"]:
-        line += f"; stopped: {probes['error']}"
-    print(f"  probe sweep      {line}", file=sys.stderr)
-    for found in probes["findings"]:
-        print(
-            f"    {found['id']}  {found['probe']}  {found['status']}"
-            + (f"/{found['grade']}" if found["grade"] else "")
-            + f"  {found['url']}",
-            file=sys.stderr,
-        )
-    if args.non_interactive:
-        print(json.dumps({"type": "probe_sweep", **probes}))
-    return probes
-
-
 def _access_stage(
     args: argparse.Namespace, slug: str, records: dict[str, list[dict[str, Any]]]
 ) -> dict[str, Any] | None:
@@ -2081,9 +2051,17 @@ def _accounts_stage(
 
 
 def _signed_in_stage(
-    args: argparse.Namespace, slug: str, records: dict[str, list[dict[str, Any]]]
+    args: argparse.Namespace,
+    slug: str,
+    records: dict[str, list[dict[str, Any]]],
+    *,
+    defer: bool = False,
 ) -> dict[str, Any] | None:
-    """Test behind the login as the declared accounts; print what happened."""
+    """Test behind the login as the declared accounts; print what happened.
+
+    With ``defer`` the accounts walk the app and the access-control comparison
+    runs; their probe runs wait for :func:`_class_stage`.
+    """
     if getattr(args, "no_probes", False):
         return None
     result = run_signed_in(
@@ -2091,6 +2069,7 @@ def _signed_in_stage(
         records,
         budget=getattr(args, "probe_budget", None),
         state_budget=getattr(args, "state_probe_budget", None),
+        defer=defer,
     )
     if not result["ran"]:
         print(f"  signed-in        not run: {result['reason']}", file=sys.stderr)
@@ -2115,18 +2094,25 @@ def _signed_in_stage(
         for account in result["accounts"]:
             if "error" in account:
                 print(f"    {account['name']}: not usable ({account['error']})", file=sys.stderr)
-        print(
-            f"    read-only probes  {probes['ran']} run, {probes['vulnerable']} positive, "
-            f"{probes['verified']} re-proven, {probes['submit']} graded submit"
-            + _held(probes, slug),
-            file=sys.stderr,
-        )
-        print(
-            f"    write operations  {state['planned']} runs planned, "
-            f"{state['ran'] - state['refused']} sent, {state['vulnerable']} positive, "
-            f"{state['verified']} re-proven" + _held(state, slug),
-            file=sys.stderr,
-        )
+        if defer:
+            waiting = sum(len(planned["steps"]) for _kind, planned in result.get("deferred", []))
+            print(
+                f"    tests as these accounts  {waiting} planned; they run class by class below",
+                file=sys.stderr,
+            )
+        else:
+            print(
+                f"    read-only probes  {probes['ran']} run, {probes['vulnerable']} positive, "
+                f"{probes['verified']} re-proven, {probes['submit']} graded submit"
+                + _held(probes, slug),
+                file=sys.stderr,
+            )
+            print(
+                f"    write operations  {state['planned']} runs planned, "
+                f"{state['ran'] - state['refused']} sent, {state['vulnerable']} positive, "
+                f"{state['verified']} re-proven" + _held(state, slug),
+                file=sys.stderr,
+            )
         if inferred["objects"]:
             print(
                 f"    objects one account reached and another did not: {inferred['objects']} "
@@ -2150,38 +2136,153 @@ def _signed_in_stage(
                 file=sys.stderr,
             )
     if args.non_interactive:
-        print(json.dumps({"type": "signed_in", **result}))
+        shown = {k: v for k, v in result.items() if k != "deferred"}
+        print(json.dumps({"type": "signed_in", **shown}))
     return result
 
 
-def _state_stage(
+def run_by_class(
+    engagement: str,
+    groups: list[tuple[str, dict[str, Any], dict[str, Any]]],
+    known: str,
+    *,
+    report: Any = None,
+) -> list[dict[str, Any]]:
+    """Send every planned run one bug class at a time, in the order the owner set.
+
+    ``groups`` is ``(label, planned, counts)``: the plan (logged out, as an
+    account, state-changing) and the counts it adds to. For each class in
+    :data:`buggy.pipeline.sweep.CLASS_ORDER` the runs of that class are sent
+    from every group before the next class starts, so access control is done
+    before SQL injection, SQL injection before XSS, and so on. ``report`` is
+    called once per class with its row. Stops at the first class whose runs
+    could not reach the capture server.
+    """
+    from buggy.pipeline import sweep  # noqa: PLC0415
+
+    for _label, planned, counts in groups:
+        counts["left_out"] = int(counts.get("left_out") or 0) + int(planned.get("left_out") or 0)
+    rows: list[dict[str, Any]] = []
+    for cls in [*sweep.CLASS_ORDER, "other"]:
+        row = {"class": cls, **dict.fromkeys(_CLASS_COUNTS, 0)}
+        stopped = None
+        for _label, planned, counts in groups:
+            steps = [s for s in planned["steps"] if (sweep.class_of(s["probe"]) or "other") == cls]
+            if not steps:
+                continue
+            done = _run_steps(engagement, {"steps": steps, "left_out": 0}, known)
+            _add_counts(counts, done)
+            for key in _CLASS_COUNTS:
+                row[key] += int((done["by_class"].get(cls) or {}).get(key) or 0)
+            if done["error"]:
+                stopped = done["error"]
+                break
+        if row["checks"] or stopped:
+            rows.append(row)
+            if report is not None:
+                report(row)
+        if stopped:
+            break
+    return rows
+
+
+def _class_stage(
     args: argparse.Namespace,
     slug: str,
     records: dict[str, list[dict[str, Any]]],
     signed_in: dict[str, Any] | None,
-) -> dict[str, Any] | None:
-    """Hand the write operations recon knows to the gateway as state-changing runs."""
-    budget = getattr(args, "state_probe_budget", None)
-    if getattr(args, "no_probes", False) or (budget is not None and budget <= 0):
-        return None
-    usable = [a["name"] for a in (signed_in or {}).get("accounts") or [] if "error" not in a]
-    state = run_state_sweep(slug, records, budget=budget, identity=usable[0] if usable else "")
-    if state["planned"]:
+) -> tuple[dict[str, Any] | None, dict[str, Any] | None]:
+    """Every test, one bug class at a time: logged out, as each account, and the writes.
+
+    Returns ``(probes, state)``: the counts of the logged-out sweep and of the
+    state-changing runs from the API description. The runs planned as the
+    accounts add to ``signed_in``'s own counts.
+    """
+    from buggy.pipeline import sweep  # noqa: PLC0415
+
+    deferred = (signed_in or {}).pop("deferred", [])
+    if getattr(args, "no_probes", False):
+        print("  probe sweep      skipped (--no-probes)", file=sys.stderr)
+        return None, None
+    groups: list[tuple[str, dict[str, Any], dict[str, Any]]] = []
+    probes: dict[str, Any] | None = None
+    budget = getattr(args, "probe_budget", None)
+    if budget is None or budget > 0:
+        planned = sweep.plan(records, budget=sweep.DEFAULT_BUDGET if budget is None else budget)
+        probes = _empty_counts()
+        groups.append(("logged out", planned, probes))
+    else:
+        print("  logged out       skipped (--probe-budget 0)", file=sys.stderr)
+    for kind, planned in deferred:
+        if signed_in is not None:
+            groups.append((f"as accounts ({kind})", planned, signed_in[kind]))
+    state: dict[str, Any] | None = None
+    state_budget = getattr(args, "state_probe_budget", None)
+    if state_budget is None or state_budget > 0:
+        usable = [a["name"] for a in (signed_in or {}).get("accounts") or [] if "error" not in a]
+        planned = sweep.plan_state_changing(
+            records,
+            budget=sweep.DEFAULT_STATE_BUDGET if state_budget is None else state_budget,
+            identity=usable[0] if usable else "",
+        )
+        state = _empty_counts()
+        groups.append(("writes", planned, state))
+    total = sum(len(planned["steps"]) for _l, planned, _c in groups)
+    print(f"  tests by class   {total} runs planned; one class at a time:", file=sys.stderr)
+
+    def show(row: dict[str, Any]) -> None:
+        line = f"    {row['class']:<18} {row['checks']:>3} run, {row['positive']} positive, {row['proven']} re-proven"
+        if row["held"]:
+            line += f", {row['held']} waiting for you"
+        print(line, file=sys.stderr)
+
+    run_by_class(slug, groups, _known_issues(records), report=show)
+    for counts in (probes, state):
+        if counts is not None:
+            counts["planned"] = int(counts.get("planned") or 0)
+    if probes is not None:
+        line = (
+            f"{probes['ran']} of {probes['planned']} run, {probes['vulnerable']} positive, "
+            f"{probes['verified']} re-proven, {probes['submit']} graded submit"
+            + _held(probes, slug)
+        )
+        if probes["left_out"]:
+            line += f" ({probes['left_out']} more left out by the budget; --probe-budget)"
+        if probes["error"]:
+            line += f"; stopped: {probes['error']}"
+        print(f"  logged out       {line}", file=sys.stderr)
+    if signed_in is not None and deferred:
+        mine, writes = signed_in["probes"], signed_in["state"]
+        print(
+            f"  as the accounts  {mine['ran']} read-only run, {writes['planned']} writes planned: "
+            f"{mine['vulnerable'] + writes['vulnerable']} positive, "
+            f"{mine['verified'] + writes['verified']} re-proven" + _held(writes, slug),
+            file=sys.stderr,
+        )
+    if state is not None and state["planned"]:
         print(
             f"  write operations {state['planned']} state-changing runs planned from the API "
             f"description: {state['ran'] - state['refused']} sent, {state['vulnerable']} "
             f"positive, {state['verified']} re-proven" + _held(state, slug),
             file=sys.stderr,
         )
-        for found in state["findings"]:
-            print(
-                f"    {found['id']}  {found['probe']}  {found['status']}"
-                + (f"/{found['grade']}" if found["grade"] else ""),
-                file=sys.stderr,
-            )
+    found = [
+        *(probes or {}).get("findings", []),
+        *((signed_in or {}).get("probes") or {}).get("findings", []),
+        *((signed_in or {}).get("state") or {}).get("findings", []),
+        *(state or {}).get("findings", []),
+    ]
+    for entry in found:
+        print(
+            f"    {entry['id']}  {entry['probe']}  {entry['status']}"
+            + (f"/{entry['grade']}" if entry["grade"] else "")
+            + f"  {entry['url']}",
+            file=sys.stderr,
+        )
     if args.non_interactive:
-        print(json.dumps({"type": "state_sweep", **state}))
-    return state
+        print(json.dumps({"type": "probe_sweep", **(probes or {})}))
+        print(json.dumps({"type": "state_sweep", **(state or {})}))
+    return probes, state
 
 
 def class_coverage(outcome: dict[str, Any], slug: str) -> list[dict[str, Any]]:
@@ -2423,11 +2524,13 @@ def run_stages(  # noqa: PLR0912, PLR0915
                             f"{queued.get('unclassified', 0)} scanner hits without a class left out)",
                             file=sys.stderr,
                         )
-                    probes = _sweep_stage(args, slug, records)
+                    # 1 accounts, 2 use the app as each account and test access
+                    # control (BOLA/IDOR) on what they own, 3 every other test,
+                    # one bug class at a time.
                     accounts = _accounts_stage(args, slug, scope, records)
+                    signed_in = _signed_in_stage(args, slug, records, defer=True)
                     access = _access_stage(args, slug, records)
-                    signed_in = _signed_in_stage(args, slug, records)
-                    writes = _state_stage(args, slug, records, signed_in)
+                    probes, writes = _class_stage(args, slug, records, signed_in)
                 print(f"  knowledge graph  {project_graph(slug)}", file=sys.stderr)
                 if args.non_interactive:
                     print(json.dumps({"type": "recon_report", "path": str(path), **digest}))

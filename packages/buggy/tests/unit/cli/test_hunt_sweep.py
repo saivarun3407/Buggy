@@ -153,8 +153,10 @@ def test_a_read_only_check_sent_with_post_is_reported_as_waiting(monkeypatch, ca
     held = {"status": "refused", "code": "APPROVAL_REQUIRED", "request_id": "apr-1"}
     fake = Server(vulnerable={"sqli": False, "cors": held})
     monkeypatch.setattr(hunt, "_capture", fake)
-    args = argparse.Namespace(no_probes=False, probe_budget=None, non_interactive=False)
-    probes = hunt._sweep_stage(args, "acme", RECORDS)  # noqa: SLF001
+    args = argparse.Namespace(
+        no_probes=False, probe_budget=None, state_probe_budget=0, non_interactive=False
+    )
+    probes, _state = hunt._class_stage(args, "acme", RECORDS, None)  # noqa: SLF001
     assert probes is not None
     assert (probes["refused"], probes["held_for_approval"]) == (1, 1)
     assert "1 waiting for your approval (buggy-cli approvals list acme)" in capsys.readouterr().err
@@ -195,24 +197,31 @@ def test_budget_is_passed_to_the_plan(server: Server) -> None:
 
 class TestStage:
     def args(self, **overrides) -> argparse.Namespace:
-        values = {"no_probes": False, "probe_budget": None, "non_interactive": False}
+        values = {
+            "no_probes": False,
+            "probe_budget": None,
+            "state_probe_budget": 0,
+            "non_interactive": False,
+        }
         return argparse.Namespace(**{**values, **overrides})
 
     def test_prints_one_summary_and_each_finding(self, server: Server, capsys) -> None:
-        probes = hunt._sweep_stage(self.args(), "acme", RECORDS)  # noqa: SLF001
+        probes, _state = hunt._class_stage(self.args(), "acme", RECORDS, None)  # noqa: SLF001
         assert probes is not None and probes["verified"] == 1
         err = capsys.readouterr().err
-        assert "probe sweep      2 of 2 run, 1 positive, 1 re-proven, 1 graded submit" in err
+        assert "logged out       2 of 2 run, 1 positive, 1 re-proven, 1 graded submit" in err
         assert "F-sqli  sqli  exploit_verified/submit" in err
 
     @pytest.mark.parametrize("overrides", [{"no_probes": True}, {"probe_budget": 0}])
     def test_can_be_turned_off(self, server: Server, capsys, overrides: dict) -> None:
-        assert hunt._sweep_stage(self.args(**overrides), "acme", RECORDS) is None  # noqa: SLF001
+        probes, _state = hunt._class_stage(self.args(**overrides), "acme", RECORDS, None)  # noqa: SLF001
+        assert probes is None
         assert server.calls == [] and "skipped" in capsys.readouterr().err
 
     def test_non_interactive_emits_one_event(self, server: Server, capsys) -> None:
-        hunt._sweep_stage(self.args(non_interactive=True), "acme", RECORDS)  # noqa: SLF001
-        event = json.loads(capsys.readouterr().out.strip().splitlines()[-1])
+        hunt._class_stage(self.args(non_interactive=True), "acme", RECORDS, None)  # noqa: SLF001
+        events = [json.loads(line) for line in capsys.readouterr().out.strip().splitlines()]
+        (event,) = [e for e in events if e["type"] == "probe_sweep"]
         assert event["type"] == "probe_sweep" and event["submit"] == 1
 
 
@@ -237,3 +246,62 @@ def test_agents_are_told_what_the_sweep_already_covered() -> None:
         "acme", scope, recon_done=True, instruction="", probes={"ran": 0, "verified": 0}
     )
     assert skipped == plain
+
+
+class TestByClass:
+    """Every planned run is sent one bug class at a time, in the owner's order."""
+
+    def test_classes_run_in_order_across_logged_out_signed_in_and_writes(self, monkeypatch) -> None:
+        sent: list[tuple[str, str]] = []
+
+        def server(tool: str, _engagement: str, **arguments) -> dict:
+            if tool == "probe_run":
+                params = json.loads(arguments["params_json"])
+                sent.append((arguments["probe"], params.get("identity", "")))
+                return {"status": "ok", "vulnerable": False}
+            return {}
+
+        monkeypatch.setattr(hunt, "_capture", server)
+
+        def plan(*steps: tuple[str, str]) -> dict:
+            return {
+                "steps": [
+                    {"probe": probe, "params": {"url": "https://a.test/x", "identity": who}}
+                    for probe, who in steps
+                ],
+                "left_out": 0,
+            }
+
+        logged_out, as_alice, writes = (
+            hunt._empty_counts(),
+            hunt._empty_counts(),
+            hunt._empty_counts(),
+        )  # noqa: SLF001
+        rows = hunt.run_by_class(
+            "acme",
+            [
+                ("logged out", plan(("xss_reflected", ""), ("sqli", ""), ("cors", "")), logged_out),
+                ("as alice", plan(("sqli", "alice"), ("idor", "alice")), as_alice),
+                ("writes", plan(("csrf", "alice"), ("xss_stored", "alice")), writes),
+            ],
+            "[]",
+        )
+        assert [probe for probe, _who in sent] == [
+            "idor", "sqli", "sqli", "xss_reflected", "xss_stored", "cors", "csrf",
+        ]  # fmt: skip
+        assert [row["class"] for row in rows] == [
+            "access_control", "injection", "xss", "misconfiguration", "csrf",
+        ]  # fmt: skip
+        assert (logged_out["ran"], as_alice["ran"], writes["ran"]) == (3, 2, 2)
+
+    def test_it_stops_when_the_server_is_gone(self, monkeypatch) -> None:
+        monkeypatch.setattr(
+            hunt, "_capture", lambda *_a, **_k: {"error": "capture server call failed"}
+        )
+        steps = [{"probe": "sqli", "params": {"url": f"https://a.test/{i}"}} for i in range(6)]
+        steps += [{"probe": "xss_reflected", "params": {"url": "https://a.test/x"}}]
+        counts = hunt._empty_counts()  # noqa: SLF001
+        rows = hunt.run_by_class(
+            "acme", [("logged out", {"steps": steps, "left_out": 0}, counts)], "[]"
+        )
+        assert [row["class"] for row in rows] == ["injection"] and counts["error"]

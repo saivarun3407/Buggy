@@ -10,7 +10,8 @@ code: the model chooses what to test and judges results, nothing else.
 | Step | Who does it | What happens |
 |---|---|---|
 | 1. Leads are queued | code | After recon, `hunt` queues scanner hits and ranked recon leads. A positive `probe_run` and every access-control mismatch from `authz_matrix_run` are queued automatically. Duplicates merge into one row. |
-| 1b. Read-only probes run | code | `hunt` then runs the probe sweep (below): no model, nothing state-changing. What it finds is re-proven and graded in the same step. |
+| 1b. Accounts, then the user walk | code | `hunt` creates the test accounts (when switched on), walks the app as each one, and compares what they own: access control (BOLA/IDOR) is tested first. |
+| 1c. Every test, one class at a time | code | Then every planned run (logged out, as each account, and the state-changing ones) is sent one bug class at a time in this order: access control, injection (SQL, command, template), XSS (reflected, stored, blind), file handling (LFI, RFI), misconfiguration (clickjacking, CORS), CSRF, SSRF, open redirect, business logic, API, GraphQL, login and session. The run prints one line per class. What it finds is re-proven and graded in the same step. |
 | 2. An agent picks a lead | agent | `candidates_next` returns the best unproven leads and claims them for that agent for a while. |
 | 3. A claim is submitted | agent | `finding_submit` with assertions that cite capture ids. The submitter cannot set a status. |
 | 4. The claim is re-proven | code | `finding_verify`. Only this sets `exploit_verified`. |

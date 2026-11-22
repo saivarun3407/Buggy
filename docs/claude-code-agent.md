@@ -65,6 +65,27 @@ bridge before a call is forwarded:
 2. the same call three times in a row is withheld;
 3. a cap on tool calls per run (`BUGGY_MAX_TOOL_CALLS`, default 300).
 
+## Skill files
+
+The agent can read Buggy's skill files with two read-only tools (no network,
+no target, offered with or without `--no-web`):
+
+- `skill_list` finds skills by words (`sql injection`, `jwt`, `cache`);
+- `skill_get` returns one whole skill.
+
+89 of them, one per web bug, were written from HackTricks' `/pentesting-web`
+section and live under
+`packages/buggy/buggy/skills/standard/exploit/web/hacktricks/<slug>/SKILL.md`,
+named `web-<slug>`. Each says what the bug is, where to look (which recon
+records point to it), how to test it step by step (read-only first, writes
+marked "needs approval"), payloads and bypasses, how to prove it, false
+positives, which Buggy check covers it, what not to do, and the fix, with the
+HackTricks pages it came from. `web-web-vulnerabilities-methodology` is the
+index. The agent's rules tell it to read a bug's skill before testing it.
+
+HackTricks allows adapting its content with attribution; commercial use needs
+its author's permission.
+
 ## Looking things up on the public internet
 
 The agent can look up public reference material: the documentation of a

@@ -34,7 +34,8 @@ def _index() -> dict[str, dict[str, Any]]:
         name = str(meta.get("name") or "").strip()
         if not name or name in out:
             continue
-        metadata = meta.get("metadata") if isinstance(meta.get("metadata"), dict) else {}
+        raw_metadata = meta.get("metadata")
+        metadata: dict[str, Any] = raw_metadata if isinstance(raw_metadata, dict) else {}
         out[name] = {
             "path": path,
             "description": str(meta.get("description") or "")[:400],

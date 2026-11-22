@@ -214,6 +214,17 @@
     "The best part is no part"
    ],
    "we_build": "Remove every module, service, image, test and document that the URL-to-report path does not use. Anything deleted that turns out to be needed is added back with a reason."
+  },
+  {
+   "id": "E16",
+   "name": "Web bug skills from HackTricks",
+   "score_now": 3,
+   "score_target": 3,
+   "leaders": "HackTricks",
+   "they_do_right": [
+    "One page per bug, with payloads, bypasses and fixes"
+   ],
+   "we_build": "One skill file per web bug, written from HackTricks' /pentesting-web section, that any agent can read to find, test safely, prove and report that bug."
   }
  ],
  "tasks": [
@@ -1039,6 +1050,155 @@
    "tests": "10436 tests pass",
    "note": "two built-in stages: web (robots, sitemaps, security.txt, headers, cookie flags, sign-in pages) and api (API roots, OAuth discovery, one GET per endpoint); live on Juice Shop: flagged /rest/memories handing out password hashes and TOTP secrets with no login",
    "order": 52
+  },
+  {
+   "id": "H1",
+   "epic": "E16",
+   "lane": "F",
+   "title": "Skills: XSS family (5)",
+   "depends": [],
+   "status": "done",
+   "agent": "skills agent",
+   "branch": "",
+   "commit": "75d0f89",
+   "tests": "",
+   "note": "5 skills, 23 pages; XSS covers all 18 sub-pages; stealers/keyloggers left out, markers only",
+   "order": 60
+  },
+  {
+   "id": "H2",
+   "epic": "E16",
+   "lane": "F",
+   "title": "Skills: Deserialization and object injection (4)",
+   "depends": [],
+   "status": "done",
+   "agent": "skills agent",
+   "branch": "",
+   "commit": "75d0f89",
+   "tests": "",
+   "note": "4 skills, 23 pages; code execution and prototype-pollution writes need approval",
+   "order": 61
+  },
+  {
+   "id": "H3",
+   "epic": "E16",
+   "lane": "F",
+   "title": "Skills: SQL, NoSQL and query injections (7)",
+   "depends": [],
+   "status": "done",
+   "agent": "skills agent",
+   "branch": "",
+   "commit": "75d0f89",
+   "tests": "",
+   "note": "7 skills, 24 pages; RCE/file-write/NTLM tricks only under Do not; sqlmap dumps banned",
+   "order": 62
+  },
+  {
+   "id": "H4",
+   "epic": "E16",
+   "lane": "F",
+   "title": "Skills: Cross-site leaks, postMessage, extensions, framing (5)",
+   "depends": [],
+   "status": "done",
+   "agent": "skills agent",
+   "branch": "",
+   "commit": "75d0f89",
+   "tests": "",
+   "note": "5 skills, 23 pages; cookie bomb and connection-pool exhaustion detect-only",
+   "order": 63
+  },
+  {
+   "id": "H5",
+   "epic": "E16",
+   "lane": "F",
+   "title": "Skills: Server-side injection, files, SSRF, XML (10)",
+   "depends": [],
+   "status": "done",
+   "agent": "skills agent",
+   "branch": "",
+   "commit": "75d0f89",
+   "tests": "",
+   "note": "10 skills, 23 pages; harmless markers, no cloud credentials",
+   "order": 64
+  },
+  {
+   "id": "H6",
+   "epic": "E16",
+   "lane": "F",
+   "title": "Skills: HTTP layer: smuggling, caches, headers, cookies, CORS, CSP (16)",
+   "depends": [],
+   "status": "done",
+   "agent": "skills agent",
+   "branch": "",
+   "commit": "75d0f89",
+   "tests": "",
+   "note": "16 skills, 24 pages; raw smuggling tests are manual (the gateway frames requests itself)",
+   "order": 65
+  },
+  {
+   "id": "H7",
+   "epic": "E16",
+   "lane": "F",
+   "title": "Skills: Authentication, access control and business logic (19)",
+   "depends": [],
+   "status": "done",
+   "agent": "skills agent",
+   "branch": "",
+   "commit": "75d0f89",
+   "tests": "",
+   "note": "19 skills, 20 pages; lockout and parser-crash tests detect-only",
+   "order": 66
+  },
+  {
+   "id": "H8",
+   "epic": "E16",
+   "lane": "F",
+   "title": "Skills: Methodology, APIs and the rest (23)",
+   "depends": [],
+   "status": "done",
+   "agent": "skills agent",
+   "branch": "",
+   "commit": "75d0f89",
+   "tests": "",
+   "note": "23 skills, 25 pages; the methodology index names every other skill",
+   "order": 67
+  },
+  {
+   "id": "H9",
+   "epic": "E16",
+   "lane": "F",
+   "title": "Skills pass the audit, join the skill graph, and the agent can read them",
+   "depends": [
+    "H1",
+    "H2",
+    "H3",
+    "H4",
+    "H5",
+    "H6",
+    "H7",
+    "H8"
+   ],
+   "status": "done",
+   "agent": "",
+   "branch": "",
+   "commit": "75d0f89",
+   "tests": "",
+   "note": "skill audit: 255 files, 0 violations; skill graph rebuilt; skill_list / skill_get offered to the Claude Code agent",
+   "order": 68
+  },
+  {
+   "id": "T5",
+   "epic": "E14",
+   "lane": "E",
+   "title": "Hunt runs class by class: accounts, user walk, BOLA/IDOR first, then SQLi, XSS and the rest",
+   "depends": [],
+   "status": "in_progress",
+   "agent": "",
+   "branch": "",
+   "commit": "",
+   "tests": "",
+   "note": "new checks (stored/blind XSS, RFI, clickjacking, CSRF) and API sign-up + user walk merged; hunt order next",
+   "order": 53
   }
  ]
 }

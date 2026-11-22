@@ -95,7 +95,9 @@ def walk_plan(records: Any, services: Any = ()) -> dict[str, list[str]]:
             (templates if apirecon.is_template(url) else api).append(url)
     for record in records.get("endpoint") or []:
         url = _clean(record.get("value") if isinstance(record, dict) else None)
-        if url and apirecon.api_root(url):
+        # The script's own call names its method; the walk only GETs what the app GETs.
+        method = str(_attrs(record).get("method") or "GET").upper()
+        if url and apirecon.api_root(url) and method == "GET":
             (templates if apirecon.is_template(url) else api).append(url)
     seeds = [
         url

@@ -63,22 +63,46 @@ _TEMPLATE_QUERY_NAME = re.compile(r"^[A-Za-z0-9_\-.\[\]]{1,100}$")
 _MAX_TEMPLATE_PARAMETERS = 20
 
 
-def _template_path(body: str) -> str | None:
+_SEGMENT_INTERPOLATION = re.compile(r"(?<=/)\$\{[^{}`]{1,120}\}(?=/|$|\?)")
+# ``this.host = this.hostServer + "/api/BasketItems"``: a base URL variable and the
+# path it adds. A template that starts with ``${this.host}`` builds on that path.
+_BASE_ASSIGN = re.compile(
+    r"((?:this\.)?[A-Za-z_$][\w$]{0,60})\s*=\s*[A-Za-z_$][\w$.]{0,80}\s*\+\s*"
+    r"[\"'](/[A-Za-z0-9_\-./]{1,200})[\"']"
+)
+#: The placeholder a whole interpolated path segment becomes (``/basket/${e}``).
+PLACEHOLDER = "{id}"
+# ``http.post(`` / ``axios.put(`` / ``fetch(`` right before a literal: the call that sends it.
+_CALL_BEFORE = re.compile(r"\.(get|post|put|patch|delete|head)\s*\(\s*$", re.IGNORECASE)
+
+
+def _template_path(body: str, base: str = "") -> str | None:
     """The rooted path a template literal builds, or ``None`` when it cannot be told.
 
     Only what the text states is kept. A leading interpolation is the base URL
-    and is dropped (the result resolves against the script's own origin). A
-    query value that is interpolated is left empty, so the parameter's name is
-    known and no value is invented. A template that interpolates inside the
-    path itself is skipped: its real path is not in the text.
+    and is dropped (the result resolves against the script's own origin); when
+    the script set that variable to a base plus a path (``this.host =
+    this.hostServer + "/api/Users"``), ``base`` is that path and is put back. An
+    interpolation that is a whole path segment (``/rest/basket/${id}``) becomes
+    the placeholder ``{id}``: the path is a template for one object. A query
+    value that is interpolated is left empty, so the parameter's name is known
+    and no value is invented. Any other interpolation inside the path is
+    skipped: its real path is not in the text.
     """
     if "${" not in body:
         return None
     lead = _INTERPOLATION.match(body)
     if lead is not None:
-        body = body[lead.end() :]
+        body = base + body[lead.end() :]
+    elif base:
+        return None
+    head, mark, tail = body.partition("?")
+    head = _SEGMENT_INTERPOLATION.sub(PLACEHOLDER, head)
+    body = head + mark + tail
+    if not body.startswith("/"):
+        return None
     path, question, query = body.partition("?")
-    if "${" in path or not _TEMPLATE_PATH.match(path):
+    if "${" in path or not _TEMPLATE_PATH.match(path.replace(PLACEHOLDER, "id")):
         return None
     if not question:
         return path
@@ -94,6 +118,41 @@ def _template_path(body: str) -> str | None:
     return f"{path}?{'&'.join(pairs)}" if pairs else path
 
 
+def call_methods(script: str) -> dict[str, str]:
+    """``{literal: METHOD}`` for literals passed straight to ``x.get(`` / ``x.post(`` and the like.
+
+    A literal sent with more than one method keeps the first one seen that is
+    not GET, so a path the app also writes to is never taken for a plain read.
+    """
+    methods: dict[str, str] = {}
+    for pattern in (_LITERAL, _TEMPLATE):
+        for match in pattern.finditer(script):
+            call = _CALL_BEFORE.search(script[max(0, match.start() - 40) : match.start()])
+            if call is None:
+                continue
+            method = call.group(1).upper()
+            body = match.group("v") if pattern is _LITERAL else match.group(1)
+            values = [body] if pattern is _LITERAL else []
+            if pattern is _TEMPLATE:
+                lead = _INTERPOLATION.match(body)
+                values = [v for v in (_template_path(body),) if v]
+                if lead is not None:
+                    values += [v for v in _based_paths(script, body, match.start()) if v]
+            for value in values:
+                if methods.get(value, "GET") == "GET":
+                    methods[value] = method
+    return methods
+
+
+def _based_paths(script: str, body: str, at: int) -> list[str]:
+    lead = _INTERPOLATION.match(body)
+    if lead is None:
+        return []
+    name = lead.group(0)[2:-1].strip()
+    earlier = [m.group(2) for m in _BASE_ASSIGN.finditer(script[:at]) if m.group(1) == name]
+    return [p for p in (_template_path(body, earlier[-1]),) if p] if earlier else []
+
+
 def extract_literals(script: str, *, limit: int = 5000) -> list[str]:
     """Distinct path / URL literals in ``script``, in first-seen order.
 
@@ -103,7 +162,8 @@ def extract_literals(script: str, *, limit: int = 5000) -> list[str]:
     found: dict[str, None] = {}
 
     def keep(value: str) -> bool:
-        if _STATIC.search(value) or _NOISE.search(value) or _MIME.match(value):
+        plain = value.replace(PLACEHOLDER, "id")  # a template's placeholder is not noise
+        if _STATIC.search(plain) or _NOISE.search(plain) or _MIME.match(plain):
             return len(found) < limit
         if value.startswith("/") and not value.startswith("//") and len(value) < 3:
             return len(found) < limit
@@ -113,15 +173,31 @@ def extract_literals(script: str, *, limit: int = 5000) -> list[str]:
     for match in _LITERAL.finditer(script):
         if not keep(match.group("v")):
             return list(found)
+    assigned: dict[str, list[tuple[int, str]]] = {}
+    for match in _BASE_ASSIGN.finditer(script):
+        assigned.setdefault(match.group(1), []).append((match.start(), match.group(2)))
     for match in _TEMPLATE.finditer(script):
         value = _template_path(match.group(1))
+        lead = _INTERPOLATION.match(match.group(1))
+        if lead is not None:
+            name = lead.group(0)[2:-1].strip()
+            # The nearest assignment before this use: one script often has many
+            # classes, each with its own ``this.host``.
+            earlier = [path for at, path in assigned.get(name, []) if at < match.start()]
+            if earlier:
+                value = _template_path(match.group(1), earlier[-1]) or value
         if value is not None and not keep(value):
             break
     return list(found)
 
 
 def parse(script: str, *, js_url: str) -> Iterator[Record]:
-    """Endpoint records for every literal, resolved against the script's URL."""
+    """Endpoint records for every literal, resolved against the script's URL.
+
+    ``attrs.method`` is set when the literal is passed straight to a call that
+    names its method (``http.post(...)``).
+    """
+    methods = call_methods(script)
     for literal in extract_literals(script):
         resolved = urljoin(js_url, literal)
         if urlsplit(resolved).scheme not in ("http", "https"):
@@ -135,7 +211,11 @@ def parse(script: str, *, js_url: str) -> Iterator[Record]:
             asset=asset,
             value=url,
             source_tool=NAME,
-            attrs={"found_in": js_url, "literal": literal[:300]},
+            attrs={
+                "found_in": js_url,
+                "literal": literal[:300],
+                **({"method": methods[literal]} if literal in methods else {}),
+            },
         )
 
 
