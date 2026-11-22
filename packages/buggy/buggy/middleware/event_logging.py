@@ -122,8 +122,7 @@ def _redact_args(args: Any) -> dict[str, Any]:
 
 
 # Bash program capture is allowlist-only and lives in
-# ``buggy.runtime.programs`` — a neutral module shared with the
-# retrospective's diversity analysis so capture and analysis never drift.
+# ``buggy.runtime.programs``, outside the middleware package.
 # Re-exported here under the historical private names for existing callers.
 _SECURITY_PROGRAMS = SECURITY_PROGRAMS
 _GENERIC_PROGRAMS = GENERIC_PROGRAMS

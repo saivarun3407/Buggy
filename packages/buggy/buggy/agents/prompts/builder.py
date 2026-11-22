@@ -261,7 +261,6 @@ _OPERATIONAL_ROLES = {
 # NOT the attack-oriented cross-cutting prompts (_MISSION_DIRECTIVE,
 # _KALI_ENVIRONMENT) which contradict their agent-specific rules.
 _PASSIVE_ROLES = {
-    "retrospective",  # read-only post-engagement analysis, no bash
 }
 
 

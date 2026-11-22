@@ -1,19 +1,17 @@
 """Allowlisted bash-program capture for engagement analytics.
 
 The event log's arg redaction correctly strips command strings, but that
-also erased the answer to a question every retrospective asks: "was the
+also erased the answer to a question every engagement review asks: "was the
 security arsenal used, or was everything hand-rolled curl/python?" The
 recovery is an ALLOWLIST, not a parse: only basenames in this fixed set are
 ever written, so a command can never smuggle a target, path, or secret into
 ``events.jsonl``. The set deliberately includes the generic utilities —
 a ``curl``/``python3``-heavy log with zero dedicated tools is exactly the
-under-use signal the retrospective measures.
+under-use signal a review looks for.
 
-Neutral home shared by the capture side
-(:mod:`buggy.middleware.event_logging`) and the analysis side
-(:mod:`buggy.tools.research.retrospective`) so the two never drift
-apart — importing the middleware package from a tool module would pull in
-the agent registry, and duplicating the lists would silently fork them.
+Imported by the capture side (:mod:`buggy.middleware.event_logging`); kept
+out of the middleware package so a tool module can read the lists without
+pulling in the agent registry.
 """
 
 from __future__ import annotations

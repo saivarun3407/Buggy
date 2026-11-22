@@ -4,8 +4,7 @@ The privacy-preserving program capture (:mod:`buggy.runtime.programs`)
 only measures "was the arsenal used?" if every tool the sandbox actually
 ships is on the allowlist. These tests lock that — and the internal
 consistency of the allowlist subsets — so a future tool addition that
-forgets the telemetry side is caught in CI, not months later in a blind
-retrospective.
+forgets the telemetry side is caught in CI.
 """
 
 from __future__ import annotations

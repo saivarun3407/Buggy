@@ -7,7 +7,7 @@ The registry drives:
     from the registry, never hard-coded.
   * **Telemetry validation** — ``runtime/programs.py`` derives its
     ``SECURITY_PROGRAMS`` / ``GENERIC_PROGRAMS`` from the registry so
-    the event capture, retrospective analysis, and prompt never drift.
+    the event capture and prompt never drift.
   * **Sandbox image CI** — a test asserts that every ``base``-delivery
     capability has a matching ``apt-get install`` line in the Dockerfile
     and vice-versa.
