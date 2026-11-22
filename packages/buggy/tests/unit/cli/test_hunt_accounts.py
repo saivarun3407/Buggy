@@ -59,13 +59,12 @@ class TestSwitch:
         scope = hunt.build_scope(parsed)
         assert scope["enforcement_extra"]["account_creation"]["enabled"] is True
         shown = "\n".join(hunt._describe(scope, "enforce"))  # noqa: SLF001
-        assert (
-            "test accounts   Buggy may register up to 2 (emails like me+{tag}@corp.example)"
-            in shown
-        )
+        assert "Register up to 2 test accounts (emails like me+{tag}@corp.example)." in shown
         plain = hunt.build_scope(hunt._build_parser().parse_args(["https://app.acme.test"]))  # noqa: SLF001
         assert "account_creation" not in plain["enforcement_extra"]
-        assert "test accounts" not in "\n".join(hunt._describe(plain, "enforce"))  # noqa: SLF001
+        without = "\n".join(hunt._describe(plain, "enforce"))  # noqa: SLF001
+        assert "test accounts" not in without
+        assert "No account creation: only accounts you give it." in without
 
 
 RECORDS = {

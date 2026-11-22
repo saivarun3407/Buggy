@@ -1011,6 +1011,20 @@
    "tests": "10409 tests pass",
    "note": "merged and unit-tested; the live agent run did not fetch a page, so the fetcher has no live measurement yet",
    "order": 50
+  },
+  {
+   "id": "T3",
+   "epic": "E14",
+   "lane": "E",
+   "title": "Scope shown as four lists: in scope, out of scope, do, don't",
+   "depends": [],
+   "status": "done",
+   "agent": "",
+   "branch": "",
+   "commit": "",
+   "tests": "10418 tests pass",
+   "note": "every command that shows a scope prints the same four lists, built by rule from the stored scope; a switch moves its line between do and don't",
+   "order": 51
   }
  ]
 }

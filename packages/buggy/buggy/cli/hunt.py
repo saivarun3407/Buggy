@@ -448,34 +448,10 @@ def _confirm(scope: dict[str, Any], assume_yes: bool) -> bool:
 
 
 def _describe(scope: dict[str, Any], mode: str) -> list[str]:
-    extra, doc = scope["enforcement_extra"], scope["document_extra"]
-    lines = [
-        f"  mode            {mode}",
-        f"  in scope        {', '.join(scope['in_scope'])}",
-        f"  rate limit      {scope['rps']} requests/second",
-        "  approvals       "
-        + (
-            "none (lab)"
-            if doc["approvals"]["state_changing"] == "not_required"
-            else "every state-changing request waits for you"
-        ),
-        "  agent shell     "
-        + (
-            "no network path to the target (gateway, browser and pipeline only)"
-            if extra["sandbox_egress"] == "blocked"
-            else "can reach in-scope targets directly"
-        ),
-        f"  port scan       {'top 100 ports' if doc['pipeline']['port_scan'] else 'off'}",
-    ]
-    accounts = extra.get("account_creation")
-    if accounts:
-        lines.append(
-            f"  test accounts   Buggy may register up to {accounts['max_accounts']} "
-            f"(emails like {accounts['email_template']})"
-        )
-    if scope["out_of_scope"]:
-        lines.insert(2, f"  out of scope    {', '.join(scope['out_of_scope'])}")
-    return lines
+    """The scope this command line asks for, as four lists: in scope, out of scope, do, don't."""
+    from buggy.program import scope_card
+
+    return scope_card.render(scope_card.card(requested_blocks(scope, mode))).splitlines()
 
 
 # ── resume ───────────────────────────────────────────────────────────

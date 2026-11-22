@@ -3,6 +3,46 @@
 How Buggy keeps an agent inside the engagement's authorised scope, and what
 each layer does and does not guarantee.
 
+## The scope in four lists
+
+Wherever Buggy shows a scope (`buggy hunt`, `buggy-cli scope show`, `scope
+import`, `scope set`) it prints the same four lists and nothing else:
+
+```text
+  IN SCOPE
+    app.example.com
+  OUT OF SCOPE
+    admin.example.com
+    Everything not listed as in scope.
+  DO
+    Send at most 5 requests per second.
+    Read-only tests on every in-scope page and input.
+    Tests that change data, only after you approve each one.
+    Write the report. You submit it.
+  DON'T
+    No denial of service or load testing.
+    No social engineering.
+    No data taken beyond what proves a bug.
+    No port scanning.
+    No account creation: only accounts you give it.
+    No requests to internal addresses.
+    Never approves its own request and never submits a report.
+```
+
+The lists are built by rule from the stored scope
+(`packages/buggy/buggy/program/scope_card.py`); they are a view, and the
+layers below do the enforcing. A switch moves its line: `--port-scan` turns
+"No port scanning." into "Scan the top 100 ports.", and `--create-accounts`
+turns the account line into "Register up to 2 test accounts (...)". For an
+engagement imported from a bounty program, the DON'T list is the program's
+own banned techniques and the rate is the program's limit. A scope that is
+not in enforce mode starts with a `NOT ENFORCED` line.
+
+Not every DON'T line is enforced the same way: hosts, internal addresses, the
+rate limit, approvals and account creation are refused by code; "no social
+engineering" and "no data beyond what proves a bug" are rules given to the
+agent, and no code check ever does either.
+
 ## The three trees
 
 Every engagement has files at the same relative path under three roots. The

@@ -248,7 +248,10 @@ class TestScopeImportCommand:
         shown = capsys.readouterr().out
         assert "app.acme-bounty.example" in shown and "blog.acme-bounty.example" in shown
         assert "REJECTED from scope: *.example" in shown
-        assert "No denial of service" in shown and "every report before release" in shown
+        assert "No denial of service" in shown and "never submits a report" in shown
+        assert [
+            line.strip() for line in shown.splitlines() if line.startswith("  ") and line[2] != " "
+        ][:4] == ["IN SCOPE", "OUT OF SCOPE", "DO", "DON'T"]
         assert load_program(roots["control"], "hackerone-acme-bounty") == program
 
     def test_import_needs_the_operator_to_confirm(self, roots, monkeypatch) -> None:

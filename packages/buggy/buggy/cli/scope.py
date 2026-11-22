@@ -155,17 +155,7 @@ def _import_program(args: argparse.Namespace, control: Path) -> int:
     print(f"program:  {official.platform}/{official.handle}  {official.url}")
     print(f"source:   {official.source}")
     print(f"engagement {slug!r}:")
-    print(_summary(roe))
-    limit = program["rate_limit"]
-    print(f"  rate limit:    {limit['requests_per_second']} req/s ({limit['basis']})")
-    print(
-        f"  pipeline:      {'passive sources only' if roe['pipeline']['passive_only'] else 'active'}"
-        f", port scan {'on' if roe['pipeline']['port_scan'] else 'off'}"
-    )
-    print("  approvals:     every state-changing request; every report before release")
-    print("  banned:")
-    for entry in program["banned_techniques"]:
-        print(f"    - {entry['rule']}")
+    print(_summary(roe, program))
     if official.non_network_assets:
         print(f"  not network targets (ignored): {', '.join(official.non_network_assets)}")
     for item in rejected:
@@ -195,32 +185,11 @@ def _load(path: Path) -> dict[str, Any] | None:
     return document
 
 
-def _summary(document: dict[str, Any]) -> str:
-    block = document.get("machine_enforcement") or {}
+def _summary(document: dict[str, Any], program: dict[str, Any] | None = None) -> str:
+    """The scope as four lists: in scope, out of scope, do, don't."""
+    from buggy.program import scope_card
 
-    def _items(key: str) -> list[str]:
-        out = []
-        for entry in block.get(key) or []:
-            out.append(str(entry.get("target")) if isinstance(entry, dict) else str(entry))
-        return out
-
-    lines = [
-        f"  mode:          {block.get('mode', 'audit')}",
-        f"  in scope:      {', '.join(_items('in_scope')) or '(none - nothing is constrained)'}",
-        f"  out of scope:  {', '.join(_items('out_of_scope')) or '(none)'}",
-        f"  forbidden:     {', '.join(_items('forbidden_destinations')) or '(defaults)'}",
-    ]
-    if block.get("sandbox_egress") == "blocked":
-        lines.append(
-            "  agent shell:   no network path to targets (gateway, browser, pipeline only)"
-        )
-    if block.get("min_inter_request_delay_ms"):
-        lines.append(
-            f"  min delay:     {block['min_inter_request_delay_ms']} ms between gated calls"
-        )
-    if block.get("max_concurrent_connections"):
-        lines.append(f"  concurrency:   {block['max_concurrent_connections']}")
-    return "\n".join(lines)
+    return scope_card.render(scope_card.card(document, program))
 
 
 def _validate(document: dict[str, Any]) -> None:
@@ -273,8 +242,10 @@ def main(argv: list[str] | None = None) -> int:
     if args.command == "show":
         enforced = _load(enforced_path)
         if enforced is not None:
+            from buggy.program.record import load_program
+
             print(f"enforced scope ({enforced_path}):")
-            print(_summary(enforced))
+            print(_summary(enforced, load_program(control, slug)))
             return EXIT_OK
         draft = _load(draft_path)
         if draft is None:
@@ -332,7 +303,7 @@ def main(argv: list[str] | None = None) -> int:
             file=sys.stderr,
         )
     print(f"scope for {slug!r} (from {source}):")
-    print(_summary(document))
+    print(_summary(document, program))
     if not _confirm("Enforce this scope?", args.yes):
         print("not approved; nothing changed", file=sys.stderr)
         return EXIT_CONFIG
