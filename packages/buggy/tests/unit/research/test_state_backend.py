@@ -125,8 +125,8 @@ def test_transaction_saves_once_on_success(
 def test_kg_degrades_returns_graceful_message_when_store_unavailable() -> None:
     """kg_* tools must degrade (not raise) when Neo4j is unconfigured.
 
-    Agents such as osint_operator import the kg_* tools directly (bypassing
-    the KG middleware slot's guard), so a call would otherwise surface the
+    Agents that import the kg_* tools directly (bypassing
+    the KG middleware slot's guard) exist; a call would otherwise surface the
     ``KGStoreConfigError`` from ``get_store()`` as a hard tool error. The
     ``kg_degrades`` wrapper converts it into a message the agent can act on.
     """

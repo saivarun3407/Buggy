@@ -239,10 +239,10 @@ _OPERATIONAL_ROLES = {
     "cloud_hunter",
     "ad_operator",
     "phisher",
-    # NOTE: forensicator and osint_operator are in _PASSIVE_ROLES (below),
-    # not here. They get the 5 compatible cross-cutting prompts but NOT
+    # NOTE: forensicator is in _PASSIVE_ROLES (below),
+    # not here. It gets the 5 compatible cross-cutting prompts but NOT
     # _MISSION_DIRECTIVE or _KALI_ENVIRONMENT, which contradict their
-    # agent-specific read-only / passive-only rules.
+    # agent-specific read-only rules.
     "supply_chain_operator",
     # Bounty bundle (fork-only) — every appsec / bug-bounty specialist is
     # an operational hunter that produces findings, so each gets the
@@ -269,7 +269,6 @@ _OPERATIONAL_ROLES = {
 # _KALI_ENVIRONMENT) which contradict their agent-specific rules.
 _PASSIVE_ROLES = {
     "forensicator",  # "NEVER attack, modify a live host, or alter evidence"
-    "osint_operator",  # "NEVER send a packet to the target's infrastructure"
     "retrospective",  # read-only post-engagement analysis, no bash
 }
 

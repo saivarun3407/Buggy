@@ -297,8 +297,8 @@ def kg_degrades(fn: Callable[..., str]) -> Callable[..., str]:
     graceful message instead of raising.
 
     The KG middleware *slot* (:func:`buggy.agents.middleware_slots._make_kg`)
-    already degrades when ``BUGGY_NEO4J_*`` is unset, but agents such as
-    ``osint_operator`` import the ``kg_*`` tools DIRECTLY into their tool set,
+    already degrades when ``BUGGY_NEO4J_*`` is unset, but agents that
+    import the ``kg_*`` tools DIRECTLY into their tool set,
     bypassing that guard — so a call would raise ``KGStoreConfigError`` from
     ``get_store()`` and surface as a hard tool error. This mirrors the slot
     guard at the tool layer: the agent is told the KG is unavailable and to

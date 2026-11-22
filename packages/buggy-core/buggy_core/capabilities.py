@@ -1020,7 +1020,6 @@ class RoleCapabilityPolicy:
 # and no default risk ceiling (the agent sees the full supported set).
 ROLE_CAPABILITY_POLICY: dict[str, RoleCapabilityPolicy] = {
     "recon": RoleCapabilityPolicy(phases=("TA0043",), max_risk=RiskTier.BOUNDED_ACTIVE),
-    "osint_operator": RoleCapabilityPolicy(phases=("TA0043",), max_risk=RiskTier.PASSIVE),
     "exploit": RoleCapabilityPolicy(phases=("TA0001", "TA0002"), max_risk=RiskTier.INTRUSIVE),
     "postexploit": RoleCapabilityPolicy(
         phases=("TA0004", "TA0006", "TA0008", "TA0011"), max_risk=RiskTier.HIGH_IMPACT

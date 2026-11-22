@@ -77,7 +77,7 @@ def test_langgraph_manifest_covers_standard_graphs():
 
 @pytest.mark.parametrize(
     "role",
-    ["phisher", "osint_operator"],
+    ["phisher"],
 )
 def test_known_specialists_fully_wired(role):
     """Spot-check the specialists this guard was introduced for."""

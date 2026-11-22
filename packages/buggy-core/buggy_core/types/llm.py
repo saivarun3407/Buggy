@@ -562,7 +562,6 @@ AGENT_TIERS: dict[str, Tier] = {
     "soundwave": Tier.LOW,
     "recon": Tier.LOW,
     "scanner": Tier.LOW,
-    "osint_operator": Tier.LOW,
 }
 
 AGENT_TEMPERATURES: dict[str, float] = {
@@ -585,7 +584,6 @@ AGENT_TEMPERATURES: dict[str, float] = {
     "vulnresearch": 0.4,
     "recon": 0.3,
     "phisher": 0.4,
-    "osint_operator": 0.3,
     "forensicator": 0.2,
     "supply_chain_operator": 0.2,
     # Bounty bundle (fork-only). Low temperatures for deterministic

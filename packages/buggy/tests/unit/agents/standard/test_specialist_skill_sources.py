@@ -7,7 +7,6 @@ import pytest
 from buggy.agents.standard import (
     asvs_assessor,
     forensicator,
-    osint_operator,
     phisher,
     supply_chain_operator,
 )
@@ -21,7 +20,6 @@ _SKILLS_ROOT = Path(SKILLS_LOCAL_PATH)
 _EXPLICIT_SOURCE_AGENTS = [
     (asvs_assessor, "/skills/standard/analyst/"),
     (phisher, "/skills/standard/phisher/"),
-    (osint_operator, "/skills/standard/osint/"),
     (forensicator, "/skills/standard/dfir/"),
     (supply_chain_operator, "/skills/standard/supply-chain/"),
 ]
@@ -33,7 +31,6 @@ _EXPLICIT_SOURCE_AGENTS = [
 # its role name and skill dir intentionally coincide.
 _ROLE_NE_DIR_AGENTS = [
     asvs_assessor,
-    osint_operator,
     forensicator,
     supply_chain_operator,
 ]

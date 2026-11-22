@@ -14,7 +14,6 @@
     "ad_operator": "./packages/buggy/buggy/agents/standard/ad_operator.py:graph",
     "blue_cell": "./packages/buggy/buggy/agents/standard/blue_cell.py:graph",
     "phisher": "./packages/buggy/buggy/agents/standard/phisher.py:graph",
-    "osint_operator": "./packages/buggy/buggy/agents/standard/osint_operator.py:graph",
     "forensicator": "./packages/buggy/buggy/agents/standard/forensicator.py:graph",
     "supply_chain_operator": "./packages/buggy/buggy/agents/standard/supply_chain_operator.py:graph"
   },
