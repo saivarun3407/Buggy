@@ -4,10 +4,9 @@ Three independent registries must stay in lock-step or an agent silently
 half-wires: the ``buggy.subagents`` entry-point group (what the
 orchestrator can dispatch), the LangGraph manifests (what can be served
 as a standalone graph), and the role tables in ``buggy_core``
-(slots + model tiers). The ``phisher`` / ``mobile_operator`` /
-``wireless_operator`` agents shipped registered as subagents but absent
-from ``graph_registry`` / ``langgraph.json`` — these tests would have
-failed on that drift; keep them green.
+(slots + model tiers). A specialist registered as a subagent but absent
+from ``graph_registry`` / ``langgraph.json`` half-wires silently; these
+tests catch that drift.
 """
 
 from __future__ import annotations
@@ -77,7 +76,7 @@ def test_langgraph_manifest_covers_standard_graphs():
 
 @pytest.mark.parametrize(
     "role",
-    ["phisher"],
+    ["recon", "exploit", "analyst"],
 )
 def test_known_specialists_fully_wired(role):
     """Spot-check the specialists this guard was introduced for."""

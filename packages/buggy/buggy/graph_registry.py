@@ -42,7 +42,6 @@ STANDARD_GRAPHS: dict[str, str] = {
     "cloud_hunter": "./buggy/agents/standard/cloud_hunter.py:graph",
     "ad_operator": "./buggy/agents/standard/ad_operator.py:graph",
     "blue_cell": "./buggy/agents/standard/blue_cell.py:graph",
-    "phisher": "./buggy/agents/standard/phisher.py:graph",
 }
 
 # Plugins bundle — vulnresearch family (community-plugin shape demonstrated
