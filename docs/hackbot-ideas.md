@@ -14,18 +14,18 @@ card on the board (epic E17).
 
 | Card | Work | Ideas it closes |
 |---|---|---|
-| B1 | Evaluation: run the lab benchmark and the Juice Shop scoreboard with stage-level scores (recon, lead, proof, report), scope adherence reported apart from results, failure labels per run, and a plain-agent baseline at equal budget | 11, 12, 24, 27, 31, 55, 67, 74, 75, 78, 83 |
-| B2 | Halt switch and shared budget: an operator halt that every tool call checks, and a revocable lease per agent run | 28, 43, 65 |
-| B3 | Ruled-out ledger: every lead tried and dropped is kept with the reason (blocked, refused, no signal), shown to the next agent so it does not repeat it, and failed routes are kept per technique, not per attempt | 44, 54, 76 |
-| B4 | Keep going: when the agent says it is done with budget left, it gets the open leads again; restarts label earlier 'cannot be done' as unproven; several short attempts instead of one long one | 69, 80 |
-| B5 | Disprover pass: a separate skeptic (another model) argues each agent-made finding is false before it is graded; disagreement means undetermined | 30, 38, 45, 46, 59 |
-| B6 | Cost and overhead: tokens and time per agent run, per stage and spent on sign-in, next to the findings | 3, 23, 59, 63, 65 |
-| B7 | Trace review: a tool that samples agent traces and flags loops, dead ends, and claims made without a matching tool call; refusal counts per run as an injection sign | 17, 18, 34 |
-| B8 | Skill versions: a digest per skill in a lockfile, and a skill change used only after it passes a check run | 39 |
-| B9 | Recovered source: source maps found by recon are rebuilt and scanned with static rules; hits become leads that still need a live proof | 21, 33, 35 |
-| B10 | Fix breaking and variants: retest tries variants of the payload against a fix, and a proven bug seeds a search for its siblings elsewhere | 29, 70 |
-| B11 | Invariants and chaining: a finding cites the rule it breaks and its entry point; findings form a needs-and-gives graph that suggests chains | 42, 82 |
-| B12 | Expiring decisions: a held or discarded finding gets a review date and comes back | 15 |
+| J1 | Evaluation: run the lab benchmark and the Juice Shop scoreboard with stage-level scores (recon, lead, proof, report), scope adherence reported apart from results, failure labels per run, and a plain-agent baseline at equal budget | 11, 12, 24, 27, 31, 55, 67, 74, 75, 78, 83 |
+| J2 | Halt switch and shared budget: an operator halt that every tool call checks, and a revocable lease per agent run | 28, 43, 65 |
+| J3 | Ruled-out ledger: every lead tried and dropped is kept with the reason (blocked, refused, no signal), shown to the next agent so it does not repeat it, and failed routes are kept per technique, not per attempt | 44, 54, 76 |
+| J4 | Keep going: when the agent says it is done with budget left, it gets the open leads again; restarts label earlier 'cannot be done' as unproven; several short attempts instead of one long one | 69, 80 |
+| J5 | Disprover pass: a separate skeptic (another model) argues each agent-made finding is false before it is graded; disagreement means undetermined | 30, 38, 45, 46, 59 |
+| J6 | Cost and overhead: tokens and time per agent run, per stage and spent on sign-in, next to the findings | 3, 23, 59, 63, 65 |
+| J7 | Trace review: a tool that samples agent traces and flags loops, dead ends, and claims made without a matching tool call; refusal counts per run as an injection sign | 17, 18, 34 |
+| J8 | Skill versions: a digest per skill in a lockfile, and a skill change used only after it passes a check run | 39 |
+| J9 | Recovered source: source maps found by recon are rebuilt and scanned with static rules; hits become leads that still need a live proof | 21, 33, 35 |
+| J10 | Fix breaking and variants: retest tries variants of the payload against a fix, and a proven bug seeds a search for its siblings elsewhere | 29, 70 |
+| J11 | Invariants and chaining: a finding cites the rule it breaks and its entry point; findings form a needs-and-gives graph that suggests chains | 42, 82 |
+| J12 | Expiring decisions: a held or discarded finding gets a review date and comes back | 15 |
 
 ## Every idea
 

@@ -333,6 +333,100 @@
    "order": 5
   },
   {
+   "id": "B1",
+   "epic": "E02",
+   "lane": "B",
+   "title": "Coverage stamps: a missing result is never read as clean",
+   "depends": [],
+   "status": "done",
+   "agent": "",
+   "branch": "",
+   "commit": "d05d65e",
+   "tests": "148 pipeline tests pass",
+   "note": "merged; coverage stamps per asset and stage, report says what was not checked",
+   "order": 6
+  },
+  {
+   "id": "B2",
+   "epic": "E02",
+   "lane": "B",
+   "title": "Wildcard DNS filter",
+   "depends": [
+    "B1"
+   ],
+   "status": "done",
+   "agent": "",
+   "branch": "",
+   "commit": "cabc475",
+   "tests": "264 passed",
+   "note": "Wildcard DNS filter merged. 264 pipeline tests pass",
+   "order": 7
+  },
+  {
+   "id": "B3",
+   "epic": "E02",
+   "lane": "B",
+   "title": "Parameter records: every input the target accepts, as data",
+   "depends": [
+    "B2"
+   ],
+   "status": "done",
+   "agent": "",
+   "branch": "",
+   "commit": "a3cc816",
+   "tests": "958 passed",
+   "note": "Parameter records with hints merged; candidates use them. 958 unit tests pass on merged tree",
+   "order": 8
+  },
+  {
+   "id": "B4",
+   "epic": "E09",
+   "lane": "B",
+   "title": "Operator-supplied API contracts (OpenAPI, Postman)",
+   "depends": [
+    "B3"
+   ],
+   "status": "done",
+   "agent": "",
+   "branch": "",
+   "commit": "4430111",
+   "tests": "432 passed",
+   "note": "Operator OpenAPI/Swagger/Postman contracts merged; servers are scope-filtered, no requests made. 432 pipeline tests pass",
+   "order": 9
+  },
+  {
+   "id": "B5",
+   "epic": "E07",
+   "lane": "B",
+   "title": "Project the recon store into the knowledge graph",
+   "depends": [
+    "B4"
+   ],
+   "status": "done",
+   "agent": "",
+   "branch": "",
+   "commit": "6585e96",
+   "tests": "55 passed",
+   "note": "Recon store projected into the knowledge graph; idempotent, never overwrites agent nodes",
+   "order": 10
+  },
+  {
+   "id": "B6",
+   "epic": "E02",
+   "lane": "B",
+   "title": "JavaScript analysis: source maps, DOM sinks, dependency names",
+   "depends": [
+    "B5"
+   ],
+   "status": "done",
+   "agent": "",
+   "branch": "",
+   "commit": "502 passed:f39064f",
+   "tests": " source maps (scope-checked), DOM sinks, dependency names",
+   "note": "JavaScript analysis merged\\",
+   "order": 11
+  },
+  {
    "id": "C1",
    "epic": "E09",
    "lane": "C",
@@ -1232,7 +1326,7 @@
    "order": 77
   },
   {
-   "id": "B1",
+   "id": "J1",
    "epic": "E17",
    "lane": "F",
    "title": "Evaluation",
@@ -1246,7 +1340,7 @@
    "order": 80
   },
   {
-   "id": "B2",
+   "id": "J2",
    "epic": "E17",
    "lane": "F",
    "title": "Halt switch and shared budget",
@@ -1260,7 +1354,7 @@
    "order": 81
   },
   {
-   "id": "B3",
+   "id": "J3",
    "epic": "E17",
    "lane": "F",
    "title": "Ruled-out ledger",
@@ -1274,7 +1368,7 @@
    "order": 82
   },
   {
-   "id": "B4",
+   "id": "J4",
    "epic": "E17",
    "lane": "F",
    "title": "Keep going",
@@ -1288,7 +1382,7 @@
    "order": 83
   },
   {
-   "id": "B5",
+   "id": "J5",
    "epic": "E17",
    "lane": "F",
    "title": "Disprover pass",
@@ -1302,7 +1396,7 @@
    "order": 84
   },
   {
-   "id": "B6",
+   "id": "J6",
    "epic": "E17",
    "lane": "F",
    "title": "Cost and overhead",
@@ -1316,7 +1410,7 @@
    "order": 85
   },
   {
-   "id": "B7",
+   "id": "J7",
    "epic": "E17",
    "lane": "F",
    "title": "Trace review",
@@ -1330,7 +1424,7 @@
    "order": 86
   },
   {
-   "id": "B8",
+   "id": "J8",
    "epic": "E17",
    "lane": "F",
    "title": "Skill versions",
@@ -1344,7 +1438,7 @@
    "order": 87
   },
   {
-   "id": "B9",
+   "id": "J9",
    "epic": "E17",
    "lane": "F",
    "title": "Recovered source",
@@ -1358,7 +1452,7 @@
    "order": 88
   },
   {
-   "id": "B10",
+   "id": "J10",
    "epic": "E17",
    "lane": "F",
    "title": "Fix breaking and variants",
@@ -1372,7 +1466,7 @@
    "order": 89
   },
   {
-   "id": "B11",
+   "id": "J11",
    "epic": "E17",
    "lane": "F",
    "title": "Invariants and chaining",
@@ -1386,7 +1480,7 @@
    "order": 90
   },
   {
-   "id": "B12",
+   "id": "J12",
    "epic": "E17",
    "lane": "F",
    "title": "Expiring decisions",
