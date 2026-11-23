@@ -225,6 +225,19 @@
     "One page per bug, with payloads, bypasses and fixes"
    ],
    "we_build": "One skill file per web bug, written from HackTricks' /pentesting-web section, that any agent can read to find, test safely, prove and report that bug."
+  },
+  {
+   "id": "E17",
+   "name": "Ideas from how others build hackbots",
+   "score_now": 1,
+   "score_target": 3,
+   "leaders": "XBOW, ProjectDiscovery, Project Zero, Team Atlanta",
+   "they_do_right": [
+    "Evaluation by stage",
+    "Halt switches and budgets in code",
+    "Ruled-out ledgers"
+   ],
+   "we_build": "Close the missing ideas from secnotes.fyi/hackbot (docs/hackbot-ideas.md): evaluation, halting, ruled-out leads, keep-going, a disprover, cost, trace review."
   }
  ],
  "tasks": [
@@ -318,100 +331,6 @@
    "tests": "35 passed (agent run)",
    "note": "Dashboard run page merged (scope, recon stages, approvals with Allow/Deny, findings). Lint, type-check, build and 35 tests passed in the agent's tree",
    "order": 5
-  },
-  {
-   "id": "B1",
-   "epic": "E02",
-   "lane": "B",
-   "title": "Coverage stamps: a missing result is never read as clean",
-   "depends": [],
-   "status": "done",
-   "agent": "",
-   "branch": "",
-   "commit": "d05d65e",
-   "tests": "148 pipeline tests pass",
-   "note": "merged; coverage stamps per asset and stage, report says what was not checked",
-   "order": 6
-  },
-  {
-   "id": "B2",
-   "epic": "E02",
-   "lane": "B",
-   "title": "Wildcard DNS filter",
-   "depends": [
-    "B1"
-   ],
-   "status": "done",
-   "agent": "",
-   "branch": "",
-   "commit": "cabc475",
-   "tests": "264 passed",
-   "note": "Wildcard DNS filter merged. 264 pipeline tests pass",
-   "order": 7
-  },
-  {
-   "id": "B3",
-   "epic": "E02",
-   "lane": "B",
-   "title": "Parameter records: every input the target accepts, as data",
-   "depends": [
-    "B2"
-   ],
-   "status": "done",
-   "agent": "",
-   "branch": "",
-   "commit": "a3cc816",
-   "tests": "958 passed",
-   "note": "Parameter records with hints merged; candidates use them. 958 unit tests pass on merged tree",
-   "order": 8
-  },
-  {
-   "id": "B4",
-   "epic": "E09",
-   "lane": "B",
-   "title": "Operator-supplied API contracts (OpenAPI, Postman)",
-   "depends": [
-    "B3"
-   ],
-   "status": "done",
-   "agent": "",
-   "branch": "",
-   "commit": "4430111",
-   "tests": "432 passed",
-   "note": "Operator OpenAPI/Swagger/Postman contracts merged; servers are scope-filtered, no requests made. 432 pipeline tests pass",
-   "order": 9
-  },
-  {
-   "id": "B5",
-   "epic": "E07",
-   "lane": "B",
-   "title": "Project the recon store into the knowledge graph",
-   "depends": [
-    "B4"
-   ],
-   "status": "done",
-   "agent": "",
-   "branch": "",
-   "commit": "6585e96",
-   "tests": "55 passed",
-   "note": "Recon store projected into the knowledge graph; idempotent, never overwrites agent nodes",
-   "order": 10
-  },
-  {
-   "id": "B6",
-   "epic": "E02",
-   "lane": "B",
-   "title": "JavaScript analysis: source maps, DOM sinks, dependency names",
-   "depends": [
-    "B5"
-   ],
-   "status": "done",
-   "agent": "",
-   "branch": "",
-   "commit": "502 passed:f39064f",
-   "tests": " source maps (scope-checked), DOM sinks, dependency names",
-   "note": "JavaScript analysis merged\\",
-   "order": 11
   },
   {
    "id": "C1",
@@ -1311,6 +1230,174 @@
    "tests": "1536 tests in the affected suites pass",
    "note": "leads carry skills (probe, words, class); brief lists technology skills from recon; skill_get section=; finding_submit refused until a class skill is read; test: every check a skill names exists",
    "order": 77
+  },
+  {
+   "id": "B1",
+   "epic": "E17",
+   "lane": "F",
+   "title": "Evaluation",
+   "depends": [],
+   "status": "backlog",
+   "agent": "",
+   "branch": "",
+   "commit": "",
+   "tests": "",
+   "note": "Evaluation: run the lab benchmark and the Juice Shop scoreboard with stage-level scores (recon, lead, proof, report), scope adherence reported apart from results, failure labels per run, and a plain-agent baseline at equal budget (ideas 11, 12, 24, 27, 31, 55, 67, 74, 75, 78, 83)",
+   "order": 80
+  },
+  {
+   "id": "B2",
+   "epic": "E17",
+   "lane": "F",
+   "title": "Halt switch and shared budget",
+   "depends": [],
+   "status": "backlog",
+   "agent": "",
+   "branch": "",
+   "commit": "",
+   "tests": "",
+   "note": "Halt switch and shared budget: an operator halt that every tool call checks, and a revocable lease per agent run (ideas 28, 43, 65)",
+   "order": 81
+  },
+  {
+   "id": "B3",
+   "epic": "E17",
+   "lane": "F",
+   "title": "Ruled-out ledger",
+   "depends": [],
+   "status": "backlog",
+   "agent": "",
+   "branch": "",
+   "commit": "",
+   "tests": "",
+   "note": "Ruled-out ledger: every lead tried and dropped is kept with the reason (blocked, refused, no signal), shown to the next agent so it does not repeat it, and failed routes are kept per technique, not per attempt (ideas 44, 54, 76)",
+   "order": 82
+  },
+  {
+   "id": "B4",
+   "epic": "E17",
+   "lane": "F",
+   "title": "Keep going",
+   "depends": [],
+   "status": "backlog",
+   "agent": "",
+   "branch": "",
+   "commit": "",
+   "tests": "",
+   "note": "Keep going: when the agent says it is done with budget left, it gets the open leads again; restarts label earlier 'cannot be done' as unproven; several short attempts instead of one long one (ideas 69, 80)",
+   "order": 83
+  },
+  {
+   "id": "B5",
+   "epic": "E17",
+   "lane": "F",
+   "title": "Disprover pass",
+   "depends": [],
+   "status": "backlog",
+   "agent": "",
+   "branch": "",
+   "commit": "",
+   "tests": "",
+   "note": "Disprover pass: a separate skeptic (another model) argues each agent-made finding is false before it is graded; disagreement means undetermined (ideas 30, 38, 45, 46, 59)",
+   "order": 84
+  },
+  {
+   "id": "B6",
+   "epic": "E17",
+   "lane": "F",
+   "title": "Cost and overhead",
+   "depends": [],
+   "status": "backlog",
+   "agent": "",
+   "branch": "",
+   "commit": "",
+   "tests": "",
+   "note": "Cost and overhead: tokens and time per agent run, per stage and spent on sign-in, next to the findings (ideas 3, 23, 59, 63, 65)",
+   "order": 85
+  },
+  {
+   "id": "B7",
+   "epic": "E17",
+   "lane": "F",
+   "title": "Trace review",
+   "depends": [],
+   "status": "backlog",
+   "agent": "",
+   "branch": "",
+   "commit": "",
+   "tests": "",
+   "note": "Trace review: a tool that samples agent traces and flags loops, dead ends, and claims made without a matching tool call; refusal counts per run as an injection sign (ideas 17, 18, 34)",
+   "order": 86
+  },
+  {
+   "id": "B8",
+   "epic": "E17",
+   "lane": "F",
+   "title": "Skill versions",
+   "depends": [],
+   "status": "backlog",
+   "agent": "",
+   "branch": "",
+   "commit": "",
+   "tests": "",
+   "note": "Skill versions: a digest per skill in a lockfile, and a skill change used only after it passes a check run (ideas 39)",
+   "order": 87
+  },
+  {
+   "id": "B9",
+   "epic": "E17",
+   "lane": "F",
+   "title": "Recovered source",
+   "depends": [],
+   "status": "backlog",
+   "agent": "",
+   "branch": "",
+   "commit": "",
+   "tests": "",
+   "note": "Recovered source: source maps found by recon are rebuilt and scanned with static rules; hits become leads that still need a live proof (ideas 21, 33, 35)",
+   "order": 88
+  },
+  {
+   "id": "B10",
+   "epic": "E17",
+   "lane": "F",
+   "title": "Fix breaking and variants",
+   "depends": [],
+   "status": "backlog",
+   "agent": "",
+   "branch": "",
+   "commit": "",
+   "tests": "",
+   "note": "Fix breaking and variants: retest tries variants of the payload against a fix, and a proven bug seeds a search for its siblings elsewhere (ideas 29, 70)",
+   "order": 89
+  },
+  {
+   "id": "B11",
+   "epic": "E17",
+   "lane": "F",
+   "title": "Invariants and chaining",
+   "depends": [],
+   "status": "backlog",
+   "agent": "",
+   "branch": "",
+   "commit": "",
+   "tests": "",
+   "note": "Invariants and chaining: a finding cites the rule it breaks and its entry point; findings form a needs-and-gives graph that suggests chains (ideas 42, 82)",
+   "order": 90
+  },
+  {
+   "id": "B12",
+   "epic": "E17",
+   "lane": "F",
+   "title": "Expiring decisions",
+   "depends": [],
+   "status": "backlog",
+   "agent": "",
+   "branch": "",
+   "commit": "",
+   "tests": "",
+   "note": "Expiring decisions: a held or discarded finding gets a review date and comes back (ideas 15)",
+   "order": 91
   }
  ]
 }
