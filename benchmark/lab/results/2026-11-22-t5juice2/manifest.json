@@ -1,0 +1,22 @@
+{
+  "apps": [
+    "juice-shop"
+  ],
+  "engagement": "t5juice2",
+  "generated_at": "2026-11-23T02:04:36Z",
+  "hunt_finished": "2026-11-22T22:39:26Z",
+  "inputs": {
+    "audit/t5juice2/captures.jsonl": "5124872fc7baaefb2c2d7cd8fd1630991545da8d5b0e69dfa9241035463581bf",
+    "control/t5juice2/hunt-result.json": "f30753bac6e96f4637734c9850a5f3edda08a6bff98e24c4d2cb9c57caf7f15e",
+    "control/t5juice2/report.json": "1484b3c893472eeb649afea9e9c536c04259bb178c6a6d329cbdf7bc322ff6da",
+    "control/t5juice2/roe.json": "85747dd57cc3552d5537c5218de9f2d153b981f4f2ec34314e2355a7ad8328f1",
+    "data/captures.sqlite3": "8fa3a47fc8b5290c15895b0763e543e92bd249426b303f58aa80cf2ef8af10f3",
+    "data/findings.sqlite3": "506827a84b4da6bd75ec2bd44f8921da6b1f09eebb87097d7aaf035a408a415a",
+    "data/recipes.sqlite3": "48ec624afcd4d82765b6bc5d0a115bc8d161ce455aee670923d0bcdb38c3a72b",
+    "data/recon.sqlite3": "d1ec6740e7bb2e6e4d2da7f96b50054c34e93c03ae0e236606e3955025fb4657"
+  },
+  "kind": "lab-stage-eval",
+  "revision": "3a253db",
+  "run_id": "2026-11-22-t5juice2",
+  "schema_version": 1
+}

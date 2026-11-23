@@ -1,0 +1,14 @@
+{
+  "kind": "lab-stage-comparison",
+  "runs": [
+    {
+      "evaluation_sha256": "ea89cea92814288e52d7403c59dbecd4d97c638d5535432ef7476de2beae015a",
+      "run_id": "2026-11-22-t5juice2"
+    },
+    {
+      "evaluation_sha256": "6108dab783f3a168d8a55bd9febdb99026eab9c79dcb4824d0569f725285af41",
+      "run_id": "2026-11-22-agent1"
+    }
+  ],
+  "schema_version": 1
+}

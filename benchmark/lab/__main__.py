@@ -6,6 +6,12 @@ agent-run         --engagement lab-a --arm with-pipeline      run one agent arm
 report            [--results DIR]                             build the table
 ground-truth                                                   list known entries
 coverage          [--apps ...] [--write]                      one verdict per known bug
+evaluate          --engagement E --control-root C --audit-root A --data-root D
+                                                              stage scores of one hunt run
+verify            DIR                                          re-check a stage-eval directory
+compare           DIR_A DIR_B [--write DIR]                    two evaluated runs side by side
+plain-agent       --engagement E --apps ... --tool-budget N   plain-agent baseline (prints
+                                                              the plan; --execute runs it)
 """
 
 from __future__ import annotations
@@ -13,6 +19,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import subprocess
 import sys
 import time
 from pathlib import Path
@@ -67,6 +74,47 @@ def _parser() -> argparse.ArgumentParser:
         "--apps", default=None, help="Comma-separated; default: every app with ground truth."
     )
     coverage_cmd.add_argument("--write", action="store_true", help="Also save results/coverage.md.")
+
+    ev = sub.add_parser("evaluate", help="Stage-level scores of one finished hunt run.")
+    ev.add_argument("--engagement", required=True)
+    ev.add_argument("--control-root", type=Path, required=True)
+    ev.add_argument("--audit-root", type=Path, required=True)
+    ev.add_argument(
+        "--data-root",
+        type=Path,
+        required=True,
+        help="Folder with recon.sqlite3 and findings.sqlite3 (and captures.sqlite3 if present).",
+    )
+    ev.add_argument("--apps", default=None, help="Default: the lab apps the scope names.")
+    ev.add_argument("--run-id", default=None, help="Default: <hunt date>-<engagement>.")
+    ev.add_argument("--results", type=Path, default=RESULTS)
+    ev.add_argument("--bridge-log", type=Path, default=None, help="Agent bridge call log (JSONL).")
+    ev.add_argument("--arm", default="", help="Label of this arm, e.g. buggy or plain-agent.")
+    ev.add_argument("--model", default="", help="Model the agent stage used, as you state it.")
+    ev.add_argument("--tool-budget", type=int, default=None, help="Agent tool-call cap.")
+    ev.add_argument(
+        "--scoreboard",
+        default="auto",
+        help="Juice Shop scoreboard: auto (the lab host, if it runs), off, or a base URL.",
+    )
+    vf = sub.add_parser("verify", help="Re-check a stage-evaluation or comparison directory.")
+    vf.add_argument("directory", type=Path)
+    cmp = sub.add_parser("compare", help="Two evaluated runs side by side.")
+    cmp.add_argument("first", type=Path)
+    cmp.add_argument("second", type=Path)
+    cmp.add_argument("--write", type=Path, default=None, help="Save COMPARISON.md in this folder.")
+    pa = sub.add_parser("plain-agent", help="The plain-agent baseline arm (prints its plan).")
+    pa.add_argument("--engagement", required=True)
+    pa.add_argument("--apps", default="juice-shop")
+    pa.add_argument("--tool-budget", type=int, required=True, help="Same cap as the Buggy arm.")
+    pa.add_argument("--model", default="")
+    pa.add_argument("--compose", default=None, help="Compose command the stack was started with.")
+    pa.add_argument("--control-root", type=Path, default=None)
+    pa.add_argument("--audit-root", type=Path, default=None)
+    pa.add_argument("--data-root", type=Path, default=None)
+    pa.add_argument(
+        "--execute", action="store_true", help="Write the scope and run Claude Code now."
+    )
     return p
 
 
@@ -75,6 +123,118 @@ def _write(result: dict, out: Path | None, default_name: str) -> Path:
     target.parent.mkdir(parents=True, exist_ok=True)
     target.write_text(json.dumps(result, indent=2, sort_keys=True) + "\n")
     return target
+
+
+def _revision() -> str:
+    """Short HEAD of this checkout, marked when the evaluator's files differ from it."""
+    root = Path(__file__).resolve().parents[2]
+
+    def git(*args: str) -> str:
+        done = subprocess.run(  # noqa: S603
+            ["git", *args],  # noqa: S607
+            cwd=root,
+            capture_output=True,
+            text=True,
+            check=True,
+        )
+        return done.stdout.strip()
+
+    try:
+        head = git("rev-parse", "--short", "HEAD")
+        dirty = git(
+            "status", "--porcelain", "--", "benchmark/lab/*.py", "benchmark/lab/ground_truth"
+        )
+    except (OSError, subprocess.CalledProcessError):
+        return "unknown"
+    return f"{head} (with uncommitted changes)" if dirty else head
+
+
+def _stage_commands(args: argparse.Namespace) -> int:
+    from benchmark.lab import baseline, evaluate  # noqa: PLC0415
+
+    if args.command == "verify":
+        problems = evaluate.verify_run(args.directory)
+        for problem in problems:
+            print(f"FAIL {problem}")
+        if problems:
+            return 1
+        print(f"OK {args.directory}")
+        return 0
+
+    if args.command == "compare":
+        try:
+            if args.write:
+                path = evaluate.write_comparison(args.write, args.first, args.second)
+                print(path.read_text(encoding="utf-8"), end="")
+                print(f"\nwrote {path}")
+                return 0
+            pairs = [
+                (
+                    json.loads((d / evaluate.EVALUATION_FILE).read_text(encoding="utf-8")),
+                    json.loads((d / evaluate.MANIFEST_FILE).read_text(encoding="utf-8")),
+                )
+                for d in (args.first, args.second)
+            ]
+            print(evaluate.render_comparison(*pairs), end="")
+        except (evaluate.EvaluationError, OSError, ValueError) as exc:
+            print(f"compare failed: {exc}", file=sys.stderr)
+            return 2
+        return 0
+
+    if args.command == "plain-agent":
+        apps = _apps(args.apps)
+        home = _home()
+        control = args.control_root or home / "control"
+        steps = baseline.plan(
+            args.engagement,
+            apps,
+            tool_budget=args.tool_budget,
+            control_root=control,
+            audit_root=args.audit_root or home / "audit",
+            data_root=args.data_root or Path("<recon and capture data folder>"),
+            compose=args.compose or baseline.DEFAULT_COMPOSE,
+            model=args.model,
+        )
+        print(baseline.render_plan(steps), end="")
+        if not args.execute:
+            print("# Not run: pass --execute to write the scope and start Claude Code.")
+            return 0
+        return baseline.run(steps, control_root=control)
+
+    # evaluate
+    apps = _apps(args.apps) if args.apps else None
+    try:
+        inputs, files = evaluate.collect(
+            args.engagement,
+            control_root=args.control_root,
+            audit_root=args.audit_root,
+            data_root=args.data_root,
+            apps=apps,
+            bridge_log=args.bridge_log,
+            arm=args.arm,
+            model=args.model,
+            tool_budget=args.tool_budget,
+            scoreboard=args.scoreboard,
+        )
+        finished = inputs["hunt"].get("finished_at")
+        day = time.strftime(
+            "%Y-%m-%d", time.gmtime(finished if isinstance(finished, int | float) else None)
+        )
+        run_id = args.run_id or f"{day}-{args.engagement}"
+        path = evaluate.write_run(
+            Path(args.results) / run_id,
+            inputs,
+            files,
+            run_id=run_id,
+            generated_at=time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+            revision=_revision(),
+        )
+    except evaluate.EvaluationError as exc:
+        print(f"evaluate failed: {exc}", file=sys.stderr)
+        return 2
+    print(path.read_text(encoding="utf-8"), end="")
+    print(f"\nwrote {path.parent}")
+    return 0
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -114,6 +274,9 @@ def main(argv: list[str] | None = None) -> int:
             coverage.COVERAGE_MD.write_text(text, encoding="utf-8")
             print(f"\nwrote {coverage.COVERAGE_MD}")
         return 0
+
+    if args.command in ("evaluate", "verify", "compare", "plain-agent"):
+        return _stage_commands(args)
 
     if args.command == "report":
         apps = _apps(args.apps)

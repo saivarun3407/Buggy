@@ -65,6 +65,11 @@ bridge before a call is forwarded:
 2. the same call three times in a row is withheld;
 3. a cap on tool calls per run (`BUGGY_MAX_TOOL_CALLS`, default 300).
 
+For the lab benchmark's plain-agent baseline, `BUGGY_AGENT_PROFILE=plain`
+gives the bridge a smaller set: `http_send`, `http_capture` and the finding
+tools, and a brief with the rules, the budget and the targets only. See
+`benchmark/lab/README.md`.
+
 ## Skill files
 
 The agent can read Buggy's skill files with two read-only tools (no network,

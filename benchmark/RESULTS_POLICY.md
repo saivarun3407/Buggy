@@ -34,6 +34,22 @@ it from the files next to it.
 
 5. No run directory, no number. "Not run" is a valid entry; an estimate is not.
 
+## Lab stage evaluations
+
+A stage evaluation of a `buggy hunt` lab run (`benchmark/lab/results/<run-id>/`,
+written by `python -m benchmark.lab evaluate`) follows the same rules with its
+own check. Its numbers come from its `SCORECARD.md`, and the directory must pass:
+
+```bash
+uv run python -m benchmark.lab verify benchmark/lab/results/<run-id>
+```
+
+It holds `inputs.json` (what was read from the run, reduced), `evaluation.json`,
+`manifest.json` (sha256 of every input file) and `SCORECARD.md`. `verify`
+re-evaluates the inputs and re-renders the scorecard. It shows the numbers
+follow from the inputs; like `benchmark.evidence verify`, it cannot show the
+inputs came from a real run.
+
 ## What a run directory contains
 
 | File | Content |

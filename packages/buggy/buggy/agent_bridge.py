@@ -27,6 +27,10 @@ Another, ``research_fetch``, reads a public reference page (never the target,
 never an internal address, never a URL carrying the target's data; see
 :mod:`buggy.research`). It is guarded like every other tool and is left out
 when ``BUGGY_AGENT_WEB=off``.
+
+``BUGGY_AGENT_PROFILE=plain`` is the lab benchmark's plain-agent baseline
+(``benchmark/lab/baseline.py``): ``http_send`` and the finding tools only (no
+recon, probes, recipes, browser, skills or web) and a brief without leads.
 """
 
 from __future__ import annotations
@@ -49,6 +53,19 @@ RESEARCH_TOOL = "research_fetch"
 #: The same call this many times in a row is withheld (the built-in loop guard's rule).
 REPEAT_LIMIT = 3
 ROLE = "claude_code"
+#: Which tool set and brief the run gets; ``plain`` is the lab's plain-agent baseline.
+PROFILE_ENV = "BUGGY_AGENT_PROFILE"
+PLAIN_PROFILE = "plain"
+PLAIN_TOOLS = frozenset(
+    {
+        "http_send",
+        "http_capture",
+        "finding_submit",
+        "finding_verify",
+        "finding_get",
+        "findings_list",
+    }
+)
 
 _RULES = (
     "You are the testing agent of an authorized security engagement. Everything you do to the "
@@ -77,6 +94,25 @@ _RULES = (
     "until you have read one of its skills. A skill's safety rules and 'Do not' list bind you as "
     "much as these rules."
 )
+
+
+_PLAIN_RULES = (
+    "You are the testing agent of an authorized security engagement against the targets "
+    "below. You reach them only through http_send; you have no shell. The scope is enforced "
+    "by the tool: a refusal (OUT_OF_SCOPE, APPROVAL_REQUIRED, RATE_LIMITED, BLOCKED) is final "
+    "for that call, never something to work around. Only the operator approves a held "
+    "request; you never approve, and you never ask for a credential. No denial of service, "
+    "no data beyond what proves an issue. A claim is not a finding: submit it with "
+    "finding_submit, then finding_verify; report only what came back exploit_verified, each "
+    "with the fix the owner should make. Submit and verify each issue as soon as you hold its "
+    "capture, because the run has a fixed budget of tool calls. Finish with a short summary: "
+    "verified findings and what you could not test and why."
+)
+
+
+def plain_profile() -> bool:
+    """Whether this run is the plain-agent baseline (``BUGGY_AGENT_PROFILE=plain``)."""
+    return (os.environ.get(PROFILE_ENV) or "").strip().lower() == PLAIN_PROFILE
 
 
 class Guard:
@@ -144,20 +180,37 @@ def scope_rules(control: Path, engagement: str) -> tuple[Any, ...]:
     return (*legacy, *parsed.tool_guard)
 
 
+def _section(source: Any, name: str) -> dict[str, Any]:
+    value = source.get(name) if isinstance(source, dict) else None
+    return value if isinstance(value, dict) else {}
+
+
+def _targets(document: dict[str, Any]) -> list[str]:
+    stored = _section(document, "hunt")
+    in_scope = _section(document, "machine_enforcement").get("in_scope")
+    return [str(t) for t in stored.get("targets") or in_scope or [] if t]
+
+
+def plain_brief(control: Path, engagement: str) -> str:
+    """The plain-agent baseline's instructions: rules, budget and targets; no leads or skills."""
+    from buggy.middleware.loop_guard import resolve_max_tool_calls  # noqa: PLC0415
+
+    document = json.loads((control / engagement / "roe.json").read_text(encoding="utf-8"))
+    budget = f"This run may make {resolve_max_tool_calls(ROLE)} tool calls in total."
+    targets = ", ".join(_targets(document)) or "none"
+    return f"{_PLAIN_RULES} {budget}\n\nEngagement: {engagement}. Targets: {targets}."
+
+
 def brief(control: Path, engagement: str) -> str:
     """The run's instructions: the built-in agents' kickoff, adapted to an agent with no shell."""
     from buggy.cli.hunt import kickoff_text  # noqa: PLC0415
 
+    if plain_profile():
+        return plain_brief(control, engagement)
     document = json.loads((control / engagement / "roe.json").read_text(encoding="utf-8"))
-
-    def section(source: Any, name: str) -> dict[str, Any]:
-        value = source.get(name) if isinstance(source, dict) else None
-        return value if isinstance(value, dict) else {}
-
-    stored = section(document, "hunt")
-    in_scope = section(document, "machine_enforcement").get("in_scope")
-    targets = [str(t) for t in stored.get("targets") or in_scope or [] if t]
-    options = section(stored, "options")
+    stored = _section(document, "hunt")
+    targets = _targets(document)
+    options = _section(stored, "options")
     text = kickoff_text(
         engagement,
         {"targets": targets, "enforcement_extra": {"sandbox_egress": "blocked"}},
@@ -210,6 +263,8 @@ def tool_table() -> dict[str, Any]:
     table[skill_get.name] = skill_get
     if web_enabled():
         table[research_fetch.name] = research_fetch
+    if plain_profile():
+        return {name: tool for name, tool in table.items() if name in PLAIN_TOOLS}
     return table
 
 

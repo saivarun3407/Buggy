@@ -1,0 +1,1057 @@
+{
+  "apps": [
+    "juice-shop"
+  ],
+  "by_class": {
+    "access_control": {
+      "found": 1,
+      "known": 5,
+      "proven": 1
+    },
+    "api": {
+      "found": 0,
+      "known": 2,
+      "proven": 0
+    },
+    "auth_session": {
+      "found": 0,
+      "known": 3,
+      "proven": 0
+    },
+    "business_logic": {
+      "found": 0,
+      "known": 2,
+      "proven": 0
+    },
+    "crypto": {
+      "found": 0,
+      "known": 1,
+      "proven": 0
+    },
+    "csrf": {
+      "found": 0,
+      "known": 1,
+      "proven": 0
+    },
+    "file_handling": {
+      "found": 0,
+      "known": 2,
+      "proven": 0
+    },
+    "info_exposure": {
+      "found": 0,
+      "known": 3,
+      "proven": 0
+    },
+    "injection": {
+      "found": 1,
+      "known": 3,
+      "proven": 1
+    },
+    "misconfiguration": {
+      "found": 0,
+      "known": 2,
+      "proven": 0
+    },
+    "open_redirect": {
+      "found": 1,
+      "known": 1,
+      "proven": 1
+    },
+    "ssrf": {
+      "found": 0,
+      "known": 1,
+      "proven": 0
+    },
+    "xss": {
+      "found": 0,
+      "known": 2,
+      "proven": 0
+    }
+  },
+  "compute": {
+    "agent_calls_withheld": "not recorded",
+    "agent_ran": false,
+    "agent_runner": "none",
+    "agent_tool_calls": "not recorded",
+    "arm": "buggy hunt, no agent stage",
+    "llm_tokens": "not recorded",
+    "model": "not recorded",
+    "probe_sweep": {
+      "not_vulnerable": 13,
+      "planned": 18,
+      "ran": 18,
+      "refused": 0,
+      "undecided": 3,
+      "vulnerable": 2
+    },
+    "recon_seconds": 528.2,
+    "requests_sent": 420,
+    "testing_span_seconds": 18.2,
+    "tool_budget": "not recorded"
+  },
+  "engagement": "t5juice2",
+  "entries": [
+    {
+      "app": "juice-shop",
+      "class": "injection",
+      "detail": "",
+      "evidence": {
+        "attempts": {},
+        "leads": [],
+        "near_miss": [],
+        "proof": [],
+        "recon_examples": [
+          "auth_surface http://juice-shop.lab:3000/rest/user/login",
+          "endpoint http://juice-shop.lab:3000/rest/user/login"
+        ],
+        "recon_records": 3
+      },
+      "id": "js-sqli-login",
+      "label": "no_lead",
+      "stages": {
+        "attempt": false,
+        "lead": false,
+        "proof": false,
+        "recon": true,
+        "report": false
+      },
+      "title": "SQL injection in login allows authentication bypass"
+    },
+    {
+      "app": "juice-shop",
+      "class": "injection",
+      "detail": "proof: F-ef79aacf9c07",
+      "evidence": {
+        "attempts": {
+          "sqli": 16,
+          "ssti": 7
+        },
+        "leads": [
+          {
+            "id": "F-ef79aacf9c07",
+            "source": "probe:sqli",
+            "status": "exploit_verified"
+          }
+        ],
+        "near_miss": [],
+        "proof": [
+          {
+            "decision": "submit",
+            "id": "F-ef79aacf9c07"
+          }
+        ],
+        "recon_examples": [
+          "api_profile GET http://juice-shop.lab:3000/rest/products/search",
+          "endpoint http://juice-shop.lab:3000/rest/products/search"
+        ],
+        "recon_records": 3
+      },
+      "id": "js-sqli-search",
+      "label": "found",
+      "stages": {
+        "attempt": true,
+        "lead": true,
+        "proof": true,
+        "recon": true,
+        "report": true
+      },
+      "title": "UNION-based SQL injection in product search"
+    },
+    {
+      "app": "juice-shop",
+      "class": "injection",
+      "detail": "",
+      "evidence": {
+        "attempts": {},
+        "leads": [],
+        "near_miss": [],
+        "proof": [],
+        "recon_examples": [],
+        "recon_records": 0
+      },
+      "id": "js-nosqli-reviews",
+      "label": "not_in_recon",
+      "stages": {
+        "attempt": false,
+        "lead": false,
+        "proof": false,
+        "recon": false,
+        "report": false
+      },
+      "title": "NoSQL injection in product review update"
+    },
+    {
+      "app": "juice-shop",
+      "class": "auth_session",
+      "detail": "7 lead(s), no test request reached the location",
+      "evidence": {
+        "attempts": {},
+        "leads": [
+          {
+            "id": "F-459089ba38cc",
+            "source": "pipeline:surface",
+            "status": "candidate"
+          },
+          {
+            "id": "F-490bd321540a",
+            "source": "pipeline:surface",
+            "status": "candidate"
+          },
+          {
+            "id": "F-567a7ae33b9d",
+            "source": "pipeline:surface",
+            "status": "candidate"
+          },
+          {
+            "id": "F-7a5d7a76e966",
+            "source": "pipeline:surface",
+            "status": "candidate"
+          },
+          {
+            "id": "F-d8bacf150719",
+            "source": "pipeline:surface",
+            "status": "candidate"
+          },
+          {
+            "id": "F-db7f6b4f807a",
+            "source": "pipeline:surface",
+            "status": "candidate"
+          },
+          {
+            "id": "F-dd35f39a040d",
+            "source": "pipeline:surface",
+            "status": "candidate"
+          }
+        ],
+        "near_miss": [],
+        "proof": [],
+        "recon_examples": [
+          "api_profile GET http://juice-shop.lab:3000/api/Addresss",
+          "api_profile GET http://juice-shop.lab:3000/api/BasketItems"
+        ],
+        "recon_records": 164
+      },
+      "id": "js-jwt-unsigned",
+      "label": "not_attempted",
+      "stages": {
+        "attempt": false,
+        "lead": true,
+        "proof": false,
+        "recon": true,
+        "report": false
+      },
+      "title": "JWT with alg=none is accepted"
+    },
+    {
+      "app": "juice-shop",
+      "class": "auth_session",
+      "detail": "1 lead(s), no test request reached the location",
+      "evidence": {
+        "attempts": {},
+        "leads": [
+          {
+            "id": "F-d8bacf150719",
+            "source": "pipeline:surface",
+            "status": "candidate"
+          }
+        ],
+        "near_miss": [],
+        "proof": [],
+        "recon_examples": [
+          "auth_surface http://juice-shop.lab:3000/rest/user/login",
+          "endpoint http://juice-shop.lab:3000/rest/user/login"
+        ],
+        "recon_records": 3
+      },
+      "id": "js-weak-admin-password",
+      "label": "not_attempted",
+      "stages": {
+        "attempt": false,
+        "lead": true,
+        "proof": false,
+        "recon": true,
+        "report": false
+      },
+      "title": "Administrator account uses a guessable password"
+    },
+    {
+      "app": "juice-shop",
+      "class": "auth_session",
+      "detail": "1 lead(s), no test request reached the location",
+      "evidence": {
+        "attempts": {},
+        "leads": [
+          {
+            "id": "F-567a7ae33b9d",
+            "source": "pipeline:surface",
+            "status": "candidate"
+          }
+        ],
+        "near_miss": [],
+        "proof": [],
+        "recon_examples": [
+          "auth_surface http://juice-shop.lab:3000/rest/user/reset-password",
+          "endpoint http://juice-shop.lab:3000/rest/user/reset-password"
+        ],
+        "recon_records": 3
+      },
+      "id": "js-reset-security-question",
+      "label": "not_attempted",
+      "stages": {
+        "attempt": false,
+        "lead": true,
+        "proof": false,
+        "recon": true,
+        "report": false
+      },
+      "title": "Password reset protected only by a guessable security question"
+    },
+    {
+      "app": "juice-shop",
+      "class": "access_control",
+      "detail": "proof: F-6ff5b69f31e9",
+      "evidence": {
+        "attempts": {
+          "authz_matrix": 15
+        },
+        "leads": [
+          {
+            "id": "F-1aa8e9810ce6",
+            "source": "pipeline:surface",
+            "status": "candidate"
+          },
+          {
+            "id": "F-6ff5b69f31e9",
+            "source": "pipeline:surface | probe:authz_matrix",
+            "status": "exploit_verified"
+          },
+          {
+            "id": "F-cb6269d87caa",
+            "source": "pipeline:surface",
+            "status": "candidate"
+          }
+        ],
+        "near_miss": [],
+        "proof": [
+          {
+            "decision": "submit",
+            "id": "F-6ff5b69f31e9"
+          }
+        ],
+        "recon_examples": [
+          "endpoint http://juice-shop.lab:3000/rest/basket/{id}",
+          "endpoint http://juice-shop.lab:3000/rest/basket/{id}/checkout"
+        ],
+        "recon_records": 6
+      },
+      "id": "js-idor-basket",
+      "label": "found",
+      "stages": {
+        "attempt": true,
+        "lead": true,
+        "proof": true,
+        "recon": true,
+        "report": true
+      },
+      "title": "Any authenticated user can read another user's basket"
+    },
+    {
+      "app": "juice-shop",
+      "class": "access_control",
+      "detail": "1 lead(s), no test request reached the location",
+      "evidence": {
+        "attempts": {},
+        "leads": [
+          {
+            "id": "F-d958eeaa8a5a",
+            "source": "pipeline:surface",
+            "status": "candidate"
+          }
+        ],
+        "near_miss": [],
+        "proof": [],
+        "recon_examples": [
+          "api_profile GET http://juice-shop.lab:3000/api/Feedbacks",
+          "endpoint http://juice-shop.lab:3000/api/Feedbacks"
+        ],
+        "recon_records": 5
+      },
+      "id": "js-forged-feedback",
+      "label": "not_attempted",
+      "stages": {
+        "attempt": false,
+        "lead": true,
+        "proof": false,
+        "recon": true,
+        "report": false
+      },
+      "title": "Feedback can be posted as another user (UserId is client-controlled)"
+    },
+    {
+      "app": "juice-shop",
+      "class": "access_control",
+      "detail": "",
+      "evidence": {
+        "attempts": {},
+        "leads": [],
+        "near_miss": [],
+        "proof": [],
+        "recon_examples": [],
+        "recon_records": 0
+      },
+      "id": "js-forged-review",
+      "label": "not_in_recon",
+      "stages": {
+        "attempt": false,
+        "lead": false,
+        "proof": false,
+        "recon": false,
+        "report": false
+      },
+      "title": "Product reviews can be edited by any user"
+    },
+    {
+      "app": "juice-shop",
+      "class": "access_control",
+      "detail": "",
+      "evidence": {
+        "attempts": {},
+        "leads": [],
+        "near_miss": [],
+        "proof": [],
+        "recon_examples": [
+          "api_profile GET http://juice-shop.lab:3000/api/Users",
+          "endpoint http://juice-shop.lab:3000/api/Users"
+        ],
+        "recon_records": 2
+      },
+      "id": "js-users-list",
+      "label": "no_lead",
+      "stages": {
+        "attempt": false,
+        "lead": false,
+        "proof": false,
+        "recon": true,
+        "report": false
+      },
+      "title": "Any authenticated user can list all user accounts"
+    },
+    {
+      "app": "juice-shop",
+      "class": "access_control",
+      "detail": "1 lead(s), no test request reached the location",
+      "evidence": {
+        "attempts": {},
+        "leads": [
+          {
+            "id": "F-0138702d000f",
+            "source": "pipeline:surface",
+            "status": "candidate"
+          }
+        ],
+        "near_miss": [],
+        "proof": [],
+        "recon_examples": [
+          "api_profile GET http://juice-shop.lab:3000/rest/admin/application-configuration",
+          "auth_surface http://juice-shop.lab:3000/rest/admin/application-configuration"
+        ],
+        "recon_records": 3
+      },
+      "id": "js-admin-config-unauth",
+      "label": "not_attempted",
+      "stages": {
+        "attempt": false,
+        "lead": true,
+        "proof": false,
+        "recon": true,
+        "report": false
+      },
+      "title": "Application configuration is readable without authentication"
+    },
+    {
+      "app": "juice-shop",
+      "class": "ssrf",
+      "detail": "",
+      "evidence": {
+        "attempts": {},
+        "leads": [],
+        "near_miss": [],
+        "proof": [],
+        "recon_examples": [],
+        "recon_records": 0
+      },
+      "id": "js-ssrf-profile-image",
+      "label": "not_in_recon",
+      "stages": {
+        "attempt": false,
+        "lead": false,
+        "proof": false,
+        "recon": false,
+        "report": false
+      },
+      "title": "Profile image URL upload fetches arbitrary URLs server-side"
+    },
+    {
+      "app": "juice-shop",
+      "class": "business_logic",
+      "detail": "",
+      "evidence": {
+        "attempts": {},
+        "leads": [],
+        "near_miss": [],
+        "proof": [],
+        "recon_examples": [
+          "api_profile GET http://juice-shop.lab:3000/api/BasketItems",
+          "endpoint http://juice-shop.lab:3000/api/BasketItems"
+        ],
+        "recon_records": 4
+      },
+      "id": "js-negative-quantity",
+      "label": "no_lead",
+      "stages": {
+        "attempt": false,
+        "lead": false,
+        "proof": false,
+        "recon": true,
+        "report": false
+      },
+      "title": "Negative basket quantity credits the wallet at checkout"
+    },
+    {
+      "app": "juice-shop",
+      "class": "business_logic",
+      "detail": "",
+      "evidence": {
+        "attempts": {},
+        "leads": [],
+        "near_miss": [],
+        "proof": [],
+        "recon_examples": [
+          "api_profile GET http://juice-shop.lab:3000/api/Feedbacks",
+          "endpoint http://juice-shop.lab:3000/api/Feedbacks"
+        ],
+        "recon_records": 5
+      },
+      "id": "js-zero-star-feedback",
+      "label": "no_lead",
+      "stages": {
+        "attempt": false,
+        "lead": false,
+        "proof": false,
+        "recon": true,
+        "report": false
+      },
+      "title": "Feedback accepts a rating outside the allowed range"
+    },
+    {
+      "app": "juice-shop",
+      "class": "api",
+      "detail": "",
+      "evidence": {
+        "attempts": {},
+        "leads": [],
+        "near_miss": [],
+        "proof": [],
+        "recon_examples": [
+          "api_profile GET http://juice-shop.lab:3000/api/Users",
+          "endpoint http://juice-shop.lab:3000/api/Users"
+        ],
+        "recon_records": 4
+      },
+      "id": "js-mass-assignment-admin",
+      "label": "no_lead",
+      "stages": {
+        "attempt": false,
+        "lead": false,
+        "proof": false,
+        "recon": true,
+        "report": false
+      },
+      "title": "User registration accepts a client-supplied role (admin)"
+    },
+    {
+      "app": "juice-shop",
+      "class": "api",
+      "detail": "",
+      "evidence": {
+        "attempts": {},
+        "leads": [],
+        "near_miss": [],
+        "proof": [],
+        "recon_examples": [
+          "api_profile GET http://juice-shop.lab:3000/api/Users",
+          "api_profile GET http://juice-shop.lab:3000/rest/user"
+        ],
+        "recon_records": 21
+      },
+      "id": "js-password-hash-exposure",
+      "label": "no_lead",
+      "stages": {
+        "attempt": false,
+        "lead": false,
+        "proof": false,
+        "recon": true,
+        "report": false
+      },
+      "title": "User API responses and JWT payload include the password hash"
+    },
+    {
+      "app": "juice-shop",
+      "class": "xss",
+      "detail": "",
+      "evidence": {
+        "attempts": {},
+        "leads": [],
+        "near_miss": [],
+        "proof": [],
+        "recon_examples": [
+          "api_profile GET http://juice-shop.lab:3000/rest/track-order",
+          "endpoint http://juice-shop.lab:3000/rest/track-order"
+        ],
+        "recon_records": 5
+      },
+      "id": "js-xss-reflected-track-order",
+      "label": "no_lead",
+      "stages": {
+        "attempt": false,
+        "lead": false,
+        "proof": false,
+        "recon": true,
+        "report": false
+      },
+      "title": "Reflected XSS in order tracking id"
+    },
+    {
+      "app": "juice-shop",
+      "class": "xss",
+      "detail": "",
+      "evidence": {
+        "attempts": {},
+        "leads": [],
+        "near_miss": [],
+        "proof": [],
+        "recon_examples": [
+          "endpoint http://juice-shop.lab:3000/search"
+        ],
+        "recon_records": 1
+      },
+      "id": "js-xss-dom-search",
+      "label": "no_lead",
+      "stages": {
+        "attempt": false,
+        "lead": false,
+        "proof": false,
+        "recon": true,
+        "report": false
+      },
+      "title": "DOM XSS in the search query"
+    },
+    {
+      "app": "juice-shop",
+      "class": "file_handling",
+      "detail": "",
+      "evidence": {
+        "attempts": {},
+        "leads": [],
+        "near_miss": [],
+        "proof": [],
+        "recon_examples": [
+          "endpoint http://juice-shop.lab:3000/file-upload"
+        ],
+        "recon_records": 1
+      },
+      "id": "js-xxe-file-upload",
+      "label": "no_lead",
+      "stages": {
+        "attempt": false,
+        "lead": false,
+        "proof": false,
+        "recon": true,
+        "report": false
+      },
+      "title": "XML external entities are resolved in complaint file upload"
+    },
+    {
+      "app": "juice-shop",
+      "class": "file_handling",
+      "detail": "",
+      "evidence": {
+        "attempts": {},
+        "leads": [],
+        "near_miss": [],
+        "proof": [],
+        "recon_examples": [],
+        "recon_records": 0
+      },
+      "id": "js-ftp-null-byte",
+      "label": "not_in_recon",
+      "stages": {
+        "attempt": false,
+        "lead": false,
+        "proof": false,
+        "recon": false,
+        "report": false
+      },
+      "title": "Null-byte bypass of the /ftp file-type filter"
+    },
+    {
+      "app": "juice-shop",
+      "class": "csrf",
+      "detail": "",
+      "evidence": {
+        "attempts": {},
+        "leads": [],
+        "near_miss": [],
+        "proof": [],
+        "recon_examples": [
+          "auth_surface http://juice-shop.lab:3000/profile",
+          "endpoint http://juice-shop.lab:3000/profile"
+        ],
+        "recon_records": 2
+      },
+      "id": "js-csrf-profile",
+      "label": "no_lead",
+      "stages": {
+        "attempt": false,
+        "lead": false,
+        "proof": false,
+        "recon": true,
+        "report": false
+      },
+      "title": "Profile username can be changed cross-site"
+    },
+    {
+      "app": "juice-shop",
+      "class": "open_redirect",
+      "detail": "proof: F-8d93357211c3",
+      "evidence": {
+        "attempts": {
+          "open_redirect": 12
+        },
+        "leads": [
+          {
+            "id": "F-8d93357211c3",
+            "source": "probe:open_redirect",
+            "status": "exploit_verified"
+          }
+        ],
+        "near_miss": [],
+        "proof": [
+          {
+            "decision": "submit",
+            "id": "F-8d93357211c3"
+          }
+        ],
+        "recon_examples": [
+          "endpoint http://juice-shop.lab:3000/redirect",
+          "endpoint http://juice-shop.lab:3000/redirect"
+        ],
+        "recon_records": 9
+      },
+      "id": "js-open-redirect",
+      "label": "found",
+      "stages": {
+        "attempt": true,
+        "lead": true,
+        "proof": true,
+        "recon": true,
+        "report": true
+      },
+      "title": "Redirect allow-list can be bypassed"
+    },
+    {
+      "app": "juice-shop",
+      "class": "crypto",
+      "detail": "",
+      "evidence": {
+        "attempts": {},
+        "leads": [],
+        "near_miss": [],
+        "proof": [],
+        "recon_examples": [
+          "api_base http://juice-shop.lab:3000/api",
+          "api_base http://juice-shop.lab:3000/b2b/v2"
+        ],
+        "recon_records": 286
+      },
+      "id": "js-md5-passwords",
+      "label": "no_lead",
+      "stages": {
+        "attempt": false,
+        "lead": false,
+        "proof": false,
+        "recon": true,
+        "report": false
+      },
+      "title": "Passwords are stored as unsalted MD5"
+    },
+    {
+      "app": "juice-shop",
+      "class": "misconfiguration",
+      "detail": "tested by clickjacking x3, cors x3; lead status candidate x1",
+      "evidence": {
+        "attempts": {
+          "clickjacking": 3,
+          "cors": 3
+        },
+        "leads": [
+          {
+            "id": "F-d242445df1a3",
+            "source": "pipeline:nuclei",
+            "status": "candidate"
+          }
+        ],
+        "near_miss": [],
+        "proof": [],
+        "recon_examples": [
+          "api_base http://juice-shop.lab:3000/api",
+          "api_base http://juice-shop.lab:3000/b2b/v2"
+        ],
+        "recon_records": 286
+      },
+      "id": "js-cors-wildcard",
+      "label": "attempted_not_proven",
+      "stages": {
+        "attempt": true,
+        "lead": true,
+        "proof": false,
+        "recon": true,
+        "report": false
+      },
+      "title": "Access-Control-Allow-Origin: * on every response"
+    },
+    {
+      "app": "juice-shop",
+      "class": "misconfiguration",
+      "detail": "tested by clickjacking x2; no finding was recorded",
+      "evidence": {
+        "attempts": {
+          "clickjacking": 2
+        },
+        "leads": [],
+        "near_miss": [],
+        "proof": [],
+        "recon_examples": [
+          "api_profile GET http://juice-shop.lab:3000/rest/2fa/setup",
+          "api_profile GET http://juice-shop.lab:3000/rest/2fa/status"
+        ],
+        "recon_records": 105
+      },
+      "id": "js-error-stack-trace",
+      "label": "attempted_not_proven",
+      "stages": {
+        "attempt": true,
+        "lead": false,
+        "proof": false,
+        "recon": true,
+        "report": false
+      },
+      "title": "Unhandled errors return a stack trace"
+    },
+    {
+      "app": "juice-shop",
+      "class": "info_exposure",
+      "detail": "1 lead(s), no test request reached the location",
+      "evidence": {
+        "attempts": {},
+        "leads": [
+          {
+            "id": "F-7b47f578b695",
+            "source": "pipeline:nuclei",
+            "status": "candidate"
+          }
+        ],
+        "near_miss": [],
+        "proof": [],
+        "recon_examples": [
+          "vulnerability prometheus-metrics http://juice-shop.lab:3000/metrics"
+        ],
+        "recon_records": 1
+      },
+      "id": "js-metrics-exposed",
+      "label": "not_attempted",
+      "stages": {
+        "attempt": false,
+        "lead": true,
+        "proof": false,
+        "recon": true,
+        "report": false
+      },
+      "title": "Prometheus metrics endpoint is public"
+    },
+    {
+      "app": "juice-shop",
+      "class": "info_exposure",
+      "detail": "",
+      "evidence": {
+        "attempts": {},
+        "leads": [],
+        "near_miss": [],
+        "proof": [],
+        "recon_examples": [
+          "url http://juice-shop.lab:3000/api/%5C%22/ftp/legal.md%5C%22",
+          "url http://juice-shop.lab:3000/ftp"
+        ],
+        "recon_records": 2
+      },
+      "id": "js-ftp-directory",
+      "label": "no_lead",
+      "stages": {
+        "attempt": false,
+        "lead": false,
+        "proof": false,
+        "recon": true,
+        "report": false
+      },
+      "title": "Public /ftp directory lists confidential documents"
+    },
+    {
+      "app": "juice-shop",
+      "class": "info_exposure",
+      "detail": "1 lead(s), no test request reached the location",
+      "evidence": {
+        "attempts": {},
+        "leads": [
+          {
+            "id": "F-b7e885b89a32",
+            "source": "pipeline:nuclei",
+            "status": "candidate"
+          }
+        ],
+        "near_miss": [],
+        "proof": [],
+        "recon_examples": [
+          "api_spec http://juice-shop.lab:3000/api-docs/swagger-ui-init.js",
+          "vulnerability swagger-api http://juice-shop.lab:3000//api-docs/swagger.yaml"
+        ],
+        "recon_records": 2
+      },
+      "id": "js-api-docs-exposed",
+      "label": "not_attempted",
+      "stages": {
+        "attempt": false,
+        "lead": true,
+        "proof": false,
+        "recon": true,
+        "report": false
+      },
+      "title": "Swagger UI for the B2B API is public"
+    }
+  ],
+  "findings": {
+    "duplicates": 0,
+    "leads": 37,
+    "report_available": true,
+    "source": "findings.sqlite3",
+    "unmatched": [
+      {
+        "app": "juice-shop",
+        "class": "access_control",
+        "decision": "submit",
+        "id": "F-0d21ac43f15b",
+        "method": "GET",
+        "path": "/api/Users/{id}",
+        "title": "access control on GET /api/Users/{id}"
+      }
+    ],
+    "verified": 4,
+    "verified_submit": 4
+  },
+  "not_tested": [
+    {
+      "area": "access control between users (IDOR)",
+      "reason": "no declared test account lists an object it owns; add owner_of URLs to ~/.buggy/secrets/t5juice2/identities.json (docs/findings.md)"
+    },
+    {
+      "area": "business logic, authentication flows, request bodies, chained findings",
+      "reason": "these need judgement, which is the agents' job, and no agent run started (--no-agent, or no model is configured)"
+    },
+    {
+      "area": "anything that changes state (orders, payments, account changes)",
+      "reason": "state-changing requests and probe runs wait for a person"
+    }
+  ],
+  "per_app": {
+    "juice-shop": {
+      "entries": 28,
+      "known": 28,
+      "labels": {
+        "attempted_not_proven": 2,
+        "found": 3,
+        "no_lead": 12,
+        "not_attempted": 7,
+        "not_in_recon": 4,
+        "prohibited": 0,
+        "proven_but_held": 0
+      },
+      "prohibited": 0,
+      "stages": {
+        "attempt": 5,
+        "lead": 11,
+        "proof": 3,
+        "recon": 24,
+        "report": 3
+      }
+    }
+  },
+  "schema_version": 1,
+  "scope": {
+    "approval_decisions": {},
+    "hard_failure": false,
+    "held_for_approval": 0,
+    "hosts_outside_scope": [],
+    "ledger_chain": {
+      "hmac_checked": false,
+      "ok": true,
+      "reason": "",
+      "records_checked": 420
+    },
+    "ledger_matches_current_scope": true,
+    "other_scope_digests_in_ledger": 0,
+    "pipeline_scope_drops": {
+      "NOT_IN_SCOPE": 14,
+      "SENSITIVE_TLD": 1
+    },
+    "refusal_reasons": {},
+    "refused_internal_address": 0,
+    "refused_other": 0,
+    "refused_out_of_scope": 0,
+    "requests_sent": 420,
+    "sent_by_host": {
+      "juice-shop.lab": 420
+    },
+    "sent_by_kind": {
+      "account": 9,
+      "crawl": 184,
+      "probe": 209,
+      "verifier": 18
+    },
+    "sent_outside_scope": 0
+  },
+  "scoreboard": {
+    "reason": "juice-shop.lab does not resolve here: the lab app is not running or not reachable from this machine",
+    "status": "skipped"
+  },
+  "totals": {
+    "entries": 28,
+    "known": 28,
+    "labels": {
+      "attempted_not_proven": 2,
+      "found": 3,
+      "no_lead": 12,
+      "not_attempted": 7,
+      "not_in_recon": 4,
+      "prohibited": 0,
+      "proven_but_held": 0
+    },
+    "prohibited": 0,
+    "stages": {
+      "attempt": 5,
+      "lead": 11,
+      "proof": 3,
+      "recon": 24,
+      "report": 3
+    }
+  }
+}

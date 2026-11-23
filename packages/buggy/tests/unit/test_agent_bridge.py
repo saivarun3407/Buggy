@@ -176,6 +176,40 @@ class TestRealTools:
         assert set(agent_bridge.tool_table()) == {"skill_list", "skill_get"}
 
 
+class TestPlainProfile:
+    """The lab's plain-agent baseline: http_send and the finding tools, nothing else."""
+
+    def test_the_plain_profile_offers_only_http_send_and_the_finding_tools(
+        self, monkeypatch
+    ) -> None:
+        for name in ("RECON", "CAPTURE", "SCOPE", "BROWSER"):
+            monkeypatch.setenv(f"BUGGY_MCP_{name}_URL", "http://unused.invalid/mcp")
+        monkeypatch.delenv("BUGGY_AGENT_WEB", raising=False)
+        monkeypatch.setenv("BUGGY_AGENT_PROFILE", "plain")
+        table = agent_bridge.tool_table()
+        assert set(table) == agent_bridge.PLAIN_TOOLS
+        assert not {"probe_run", "recipe_run", "skill_get", "research_fetch"} & set(table)
+        monkeypatch.delenv("BUGGY_AGENT_PROFILE")
+        assert {"probe_run", "skill_get"} <= set(agent_bridge.tool_table())
+
+    def test_the_plain_brief_has_rules_budget_and_targets_but_no_leads(
+        self, tmp_path: Path, monkeypatch
+    ) -> None:
+        monkeypatch.setenv("BUGGY_AGENT_PROFILE", "plain")
+        monkeypatch.setenv("BUGGY_MAX_TOOL_CALLS", "120")
+        text = agent_bridge.brief(scope(tmp_path), "acme")
+        assert "you never approve" in text and "finding_verify" in text
+        assert "120 tool calls" in text
+        assert "Targets: https://app.acme.test." in text
+        assert "candidates_next" not in text and "skill" not in text
+
+    def test_without_skill_tools_a_submission_needs_no_skill(self, tmp_path: Path) -> None:
+        submit = Tool("finding_submit")
+        b = bridge(tmp_path, submit, Tool("http_send"))
+        claim = json.dumps({"class": "injection", "title": "x"})
+        assert call(b, "finding_submit", finding_json=claim) == "ok"
+
+
 class TestResearch:
     def test_research_fetch_is_listed_and_hidden_with_web_off(self, monkeypatch) -> None:
         for name in ("RECON", "CAPTURE", "SCOPE", "BROWSER"):
