@@ -473,6 +473,7 @@ def _base(finding: dict[str, Any]) -> dict[str, Any]:
         "method": _s(finding.get("method")),
         "parameter": _s(finding.get("parameter")),
         "source": _s(finding.get("source")),
+        **{key: _s(finding.get(key)) for key in ("invariant", "entry_point") if finding.get(key)},
     }
 
 
@@ -489,6 +490,8 @@ def build(
     captures: CaptureLookup,
     generated_at: Any,
     complete: bool = False,
+    chains: dict[str, Any] | None = None,
+    due: list[dict[str, Any]] | None = None,
 ) -> Report:
     """The report as a JSON-serialisable dict.
 
@@ -497,6 +500,10 @@ def build(
     this engagement (a ``Capture`` or its redacted ``detail()`` dict) or
     ``None``. ``generated_at`` is an epoch timestamp or a string; the clock is
     never read. ``complete`` says whether the engagement's testing finished.
+
+    ``chains`` is :func:`buggy.findings.chains.chains` (possible chains, listed
+    as leads to test) and ``due`` the ledger's decisions past their review
+    date (:meth:`buggy.findings.ruled_out.Ledger.due`); both are optional.
     """
     verified: list[dict[str, Any]] = []
     unverified: list[dict[str, Any]] = []
@@ -578,7 +585,59 @@ def build(
         "findings": verified,
         "unverified": unverified,
         "leads": leads,
+        "chains": _chains(chains),
+        "open_needs": _open_needs(chains),
+        "due_for_review": _due(due),
     }
+
+
+def _chains(chains: dict[str, Any] | None) -> list[dict[str, Any]]:
+    rows = (chains or {}).get("chains") if isinstance(chains, dict) else None
+    return [
+        {
+            "from": _s(row.get("from")),
+            "to": _s(row.get("to")),
+            "capability": _s(row.get("capability")),
+            "text": _s(row.get("text")),
+            "proven": False,
+        }
+        for row in rows or []
+        if isinstance(row, dict)
+    ]
+
+
+def _open_needs(chains: dict[str, Any] | None) -> list[dict[str, Any]]:
+    rows = (chains or {}).get("open_needs") if isinstance(chains, dict) else None
+    return [
+        {
+            "capability": _s(row.get("capability")),
+            "means": _s(row.get("means")),
+            "needed_by": [_s(item) for item in row.get("needed_by") or []],
+            "classes_that_give_it": [_s(item) for item in row.get("classes_that_give_it") or []],
+        }
+        for row in rows or []
+        if isinstance(row, dict)
+    ]
+
+
+def _due(due: list[dict[str, Any]] | None) -> list[dict[str, Any]]:
+    keys = ("id", "kind", "technique", "endpoint", "parameter", "finding_id", "reason", "code")
+    out = []
+    for row in due or []:
+        if not isinstance(row, dict):
+            continue
+        item = {key: _s(row.get(key)) for key in keys}
+        item["why"] = _s(row.get("why"))
+        item["review_at"] = _timestamp(row.get("review_at")) if row.get("review_at") else ""
+        out.append(item)
+    return out
+
+
+def _due_what(item: dict[str, Any]) -> str:
+    where = f"{item['technique']} on {item['endpoint']}"
+    if item["parameter"]:
+        where += f" ({item['parameter']})"
+    return f"{item['finding_id']}: {where}" if item["finding_id"] else where
 
 
 # ── JSON ────────────────────────────────────────────────────────────
@@ -647,6 +706,10 @@ def _md_fields(item: dict[str, Any]) -> list[str]:
         ("Parameter", item["parameter"] or "none"),
         ("Source", item["source"]),
     ]
+    if item.get("invariant"):
+        pairs.append(("Invariant broken", item["invariant"]))
+    if item.get("entry_point"):
+        pairs.append(("Entry point", item["entry_point"]))
     if item.get("retest"):
         pairs.append(("Retest", _retest_words(item["retest"])))
     return [f"- **{name}:** {md_inline(value)}" for name, value in pairs]
@@ -768,6 +831,42 @@ def to_markdown(report: Report) -> str:
         )
     else:
         out.append("None.")
+    if report.get("chains") or report.get("open_needs"):
+        out.extend(["", "## Possible chains (leads to test, not proven)", ""])
+        out.append(
+            "One proven finding gives what another needs. Each line is a lead to test; "
+            "none of them is a finding."
+        )
+        out.append("")
+        out.extend(f"- {md_inline(chain['text'])}" for chain in report.get("chains") or [])
+        for need in report.get("open_needs") or []:
+            out.append(
+                f"- Open need: {md_inline(need['means'])} (needed by "
+                f"{md_inline(', '.join(need['needed_by']))}; given by "
+                f"{md_inline(', '.join(need['classes_that_give_it']) or 'no known class')})"
+            )
+    if report.get("due_for_review"):
+        out.extend(["", "## Due for review", ""])
+        out.append(
+            "These decisions passed their review date: look at them again, then extend or "
+            "close them (`buggy-cli findings`)."
+        )
+        out.append("")
+        out.extend(
+            _md_table(
+                ["Entry", "What", "Reason", "Why", "Review date"],
+                [
+                    [
+                        md_inline(item["id"]),
+                        md_inline(_due_what(item)),
+                        md_inline(f"{item['reason']} {item['code']}".strip()),
+                        md_inline(item["why"]),
+                        md_inline(item["review_at"]),
+                    ]
+                    for item in report["due_for_review"]
+                ],
+            )
+        )
     out.extend(["", "## Discarded", ""])
     out.append(
         f"{summary['discarded']} claim(s) were discarded by the verifier and are not listed."
@@ -824,6 +923,10 @@ def _h_fields(item: dict[str, Any]) -> str:
         ("Parameter", item["parameter"] or "none"),
         ("Source", item["source"]),
     ]
+    if item.get("invariant"):
+        pairs.append(("Invariant broken", item["invariant"]))
+    if item.get("entry_point"):
+        pairs.append(("Entry point", item["entry_point"]))
     if item.get("retest"):
         pairs.append(("Retest", _retest_words(item["retest"])))
     return "<dl>" + "".join(f"<dt>{_h(k)}</dt><dd>{_h(v)}</dd>" for k, v in pairs) + "</dl>"
@@ -967,6 +1070,40 @@ def to_html(report: Report) -> str:
         )
     else:
         parts.append("<p>None.</p>")
+    if report.get("chains") or report.get("open_needs"):
+        parts.append("<h2>Possible chains (leads to test, not proven)</h2>")
+        parts.append(
+            "<p>One proven finding gives what another needs. Each line is a lead to test; "
+            "none of them is a finding.</p>"
+        )
+        items = [f"<li>{_h(chain['text'])}</li>" for chain in report.get("chains") or []]
+        items += [
+            f"<li>Open need: {_h(need['means'])} (needed by {_h(', '.join(need['needed_by']))}; "
+            f"given by {_h(', '.join(need['classes_that_give_it']) or 'no known class')})</li>"
+            for need in report.get("open_needs") or []
+        ]
+        parts.append("<ul>" + "".join(items) + "</ul>")
+    if report.get("due_for_review"):
+        parts.append("<h2>Due for review</h2>")
+        parts.append(
+            "<p>These decisions passed their review date: look at them again, then extend or "
+            "close them (buggy-cli findings).</p>"
+        )
+        parts.append(
+            _h_table(
+                ["Entry", "What", "Reason", "Why", "Review date"],
+                [
+                    [
+                        item["id"],
+                        _due_what(item),
+                        f"{item['reason']} {item['code']}".strip(),
+                        item["why"],
+                        item["review_at"],
+                    ]
+                    for item in report["due_for_review"]
+                ],
+            )
+        )
     parts.append("<h2>Discarded</h2>")
     parts.append(
         f"<p>{summary['discarded']} claim(s) were discarded by the verifier and are not listed.</p>"

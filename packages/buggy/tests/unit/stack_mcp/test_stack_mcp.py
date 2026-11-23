@@ -334,6 +334,8 @@ def test_a_claim_becomes_a_finding_only_through_the_verifier(stack) -> None:
         "parameter": "",
         "description": "The endpoint answers anyone.",
         "remediation": "Require an authenticated session before returning the greeting.",
+        "invariant": "only a signed-in user can read the greeting",
+        "entry_point": f"GET {url}",
         "source": "agent:test",
         "status": "exploit_verified",  # a submitter cannot grant itself this
         "assertions": [
@@ -374,6 +376,15 @@ def test_a_claim_becomes_a_finding_only_through_the_verifier(stack) -> None:
         assert built["ok"] and built["report"].lstrip().lower().startswith(marker)
     report = json.loads(_call(stack_mcp.report_build, fmt="json")["report"])
     assert [row["id"] for row in report["findings"]] == [finding_id]  # only the proven one
+
+    # The inconclusive claim is in the ruled-out ledger, with the verifier's reason.
+    ruled = _call(stack_mcp.leads_ruled_out, query="admin")
+    assert [(r["finding_id"], r["reason"]) for r in ruled["ruled_out"]] == [
+        (other_id, "inconclusive")
+    ]
+    chained = _call(stack_mcp.findings_chains)
+    assert [node["id"] for node in chained["nodes"]] == [finding_id]
+    assert _call(stack_mcp.findings_due)["count"] == 0
 
     bundle = _call(stack_mcp.evidence_export, finding_id=finding_id)
     assert bundle["ok"] and "curl" in bundle["files"]["reproduce.sh"]

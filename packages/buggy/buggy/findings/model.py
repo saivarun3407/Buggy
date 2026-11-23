@@ -70,6 +70,16 @@ MAX_TEXT = 20000
 MAX_ENDPOINT = 2048
 MAX_SHORT = 500
 MAX_EXPECT_STRINGS = 20
+MAX_INVARIANT = 300
+MIN_INVARIANT = 12
+
+#: Classes whose agent-made findings must name the invariant they break and the
+#: entry point a user reaches first (``buggy.findings.service``). A probe's
+#: finding gets both from a fixed table (``buggy.findings.candidates``).
+CONTEXT_REQUIRED_CLASSES: frozenset[str] = frozenset(
+    {"access_control", "business_logic", "auth_session"}
+)
+_PLACEHOLDERS = frozenset({"n/a", "na", "none", "todo", "tbd", "unknown", "-", "?", "x"})
 
 _UUID = re.compile(r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$", re.IGNORECASE)
 _CWE = re.compile(r"^(?:CWE-)?(\d{1,7})$", re.IGNORECASE)
@@ -216,6 +226,10 @@ class Finding:
     grade_reasons: tuple[str, ...] = ()
     created_at: float = 0.0
     updated_at: float = 0.0
+    #: The rule the finding breaks ("a user can read only their own basket"). Optional.
+    invariant: str = ""
+    #: The request a user can reach first on the way to the bug. Optional.
+    entry_point: str = ""
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -242,7 +256,47 @@ class Finding:
             "grade_reasons": list(self.grade_reasons),
             "created_at": self.created_at,
             "updated_at": self.updated_at,
+            "invariant": self.invariant,
+            "entry_point": self.entry_point,
         }
+
+
+def context_errors(invariant: str, entry_point: str) -> list[dict[str, str]]:
+    """Why an invariant / entry point pair is not usable; empty when both are.
+
+    Deliberately light: the invariant is a short sentence that is not a
+    placeholder, the entry point names a URL or a path (``GET /api/basket/1``).
+    """
+    errors: list[dict[str, str]] = []
+    text = " ".join((invariant or "").split())
+    if not text:
+        errors.append(
+            {
+                "field": "invariant",
+                "message": "is required for this class: name the rule the finding breaks, "
+                "e.g. 'a user can read only their own basket'",
+            }
+        )
+    elif text.lower() in _PLACEHOLDERS or len(text) < MIN_INVARIANT or " " not in text:
+        errors.append(
+            {
+                "field": "invariant",
+                "message": f"must be a short sentence of at least {MIN_INVARIANT} characters "
+                "stating the rule that is broken",
+            }
+        )
+    point = (entry_point or "").strip()
+    if not point:
+        errors.append(
+            {
+                "field": "entry_point",
+                "message": "is required for this class: the request a user can reach first, "
+                "e.g. 'GET https://app.example/api/basket/1'",
+            }
+        )
+    elif "/" not in point:
+        errors.append({"field": "entry_point", "message": "must name a URL or a path"})
+    return errors
 
 
 # ── validation ──────────────────────────────────────────────────────
@@ -499,6 +553,8 @@ def validate(data: Any) -> Finding:
     source = _text(data, "source", errors, required=True)
     description = _text(data, "description", errors, limit=MAX_TEXT)
     remediation = _text(data, "remediation", errors, limit=MAX_TEXT)
+    invariant = " ".join(_text(data, "invariant", errors, limit=MAX_INVARIANT).split())
+    entry_point = _text(data, "entry_point", errors, limit=MAX_SHORT)
     assertions = _assertions(data.get("assertions"), errors)
 
     status = _text(data, "status", errors, default=Status.CANDIDATE.value).lower()
@@ -554,12 +610,15 @@ def validate(data: Any) -> Finding:
         grade_reasons=grade_reasons,
         created_at=created_at,
         updated_at=updated_at,
+        invariant=invariant,
+        entry_point=entry_point,
     )
 
 
 __all__ = [
     "ASSERTION_KEYS",
     "CLASSES",
+    "CONTEXT_REQUIRED_CLASSES",
     "EXPECT_KEYS",
     "GRADES",
     "MAX_ASSERTIONS",
@@ -572,6 +631,7 @@ __all__ = [
     "Status",
     "ValidationError",
     "VulnClass",
+    "context_errors",
     "empty_verification",
     "finding_id",
     "normalize_endpoint",

@@ -123,6 +123,8 @@ class TestProbeResultsAreProvenByRunningTheProbeAgain:
             "method": "GET",
             "source": "agent:hunter",
             "remediation": "Require a session before serving profile images.",
+            "invariant": "only a signed-in user can read profile images",
+            "entry_point": f"GET {URL}",
             "assertions": [{"capture_id": capture["capture_id"], "expect": {"status": 200}}],
         }
         finding_id = wb.finding_submit("acme", json.dumps(claim), "hunter:t1")["finding"]["id"]

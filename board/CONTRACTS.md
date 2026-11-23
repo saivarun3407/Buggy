@@ -36,9 +36,15 @@ Per engagement everything lives under `<root>/<engagement>/`.
   "verification": {"at": 0.0, "replay_capture_ids": [], "reasons": []},
   "grade": "submit | hold | discard | null",
   "grade_reasons": [],
-  "created_at": 0.0, "updated_at": 0.0
+  "created_at": 0.0, "updated_at": 0.0,
+  "invariant": "a user can read only the objects they own",
+  "entry_point": "GET https://app.acme.test/api/orders/1001"
 }
 ```
+
+`invariant` and `entry_point` are optional strings ("" in older rows). An agent's own
+submission of an `access_control`, `business_logic` or `auth_session` finding must set
+both; a probe's finding gets them from a fixed table (`buggy/findings/chains.py`).
 
 `class` is one of `benchmark/lab/taxonomy.py::CLASSES`. `severity` is one of
 `critical, high, medium, low, info`. Only `exploit_verified` findings are "findings" in

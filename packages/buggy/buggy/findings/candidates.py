@@ -52,6 +52,7 @@ from typing import Any
 from urllib.parse import urlsplit
 
 from buggy.capture.gateway import ALLOWED_METHODS
+from buggy.findings.chains import invariant_for, probe_of
 from buggy.findings.grade import known_issue_class, known_issue_endpoint, known_issue_template
 from buggy.findings.model import (
     CLASSES,
@@ -68,6 +69,7 @@ from buggy.findings.model import (
     normalize_endpoint,
     severity_rank,
 )
+from buggy.findings.ruled_out import Ledger
 from buggy.findings.store import FindingStore
 from buggy.findings.verifier import SAME_AS_MIN
 from buggy.pipeline.report import remediation_for
@@ -184,10 +186,14 @@ def _candidate(
     description: str = "",
     remediation: str = "",
     assertions: list[dict[str, Any]] | None = None,
+    invariant: str = "",
+    entry_point: str = "",
 ) -> dict[str, Any]:
     """A candidate in the contract's shape. The service validates it on submission."""
     endpoint = normalize_endpoint(endpoint)
     return {
+        "invariant": invariant,
+        "entry_point": entry_point,
         "id": finding_id(engagement, vuln_class, endpoint, parameter),
         "engagement": engagement,
         "title": title[:MAX_TITLE],
@@ -483,6 +489,8 @@ def from_probe(result: dict, engagement: str, url: str, parameter: str = "") -> 
         ),
         remediation=_text(result.get("remediation")),
         assertions=probe_assertions(result),
+        invariant=invariant_for(probe, vuln_class),
+        entry_point=f"{method} {_text(url)}"[:MAX_SHORT],
     )
 
 
@@ -518,6 +526,8 @@ def from_recipe(result: dict, engagement: str, recipe: dict) -> dict | None:
     method = _text((on_endpoint or steps or [{}])[0].get("method")).upper()
     if method not in ALLOWED_METHODS:
         method = "GET"
+    first = steps[0] if steps else {}
+    entry_point = f"{_text(first.get('method')).upper() or 'GET'} {_text(first.get('url'))}"
     captures = [_text(v) for v in _as_list(result.get("evidence_capture_ids")) if _text(v)]
     summary = (
         _text(result.get("summary")).rstrip(".") or "the recipe reported the target vulnerable"
@@ -536,6 +546,8 @@ def from_recipe(result: dict, engagement: str, recipe: dict) -> dict | None:
             f"gateway): {summary}." + (f" Captures: {', '.join(captures)}." if captures else "")
         ),
         remediation=_text(recipe.get("remediation")),
+        invariant=_text(recipe.get("invariant")) or invariant_for("", vuln_class),
+        entry_point=entry_point[:MAX_SHORT] if _text(first.get("url")) else "",
     )
 
 
@@ -612,6 +624,17 @@ def enqueue(service: Any, items: Iterable[Any], actor: str) -> dict[str, Any]:
                 }
             )
             continue
+        probe = probe_of(_text(item.get("source")))
+        if probe and not _text(item.get("invariant")):
+            # A probe's finding breaks the probe's fixed invariant (buggy.findings.chains).
+            item = {
+                **item,
+                "invariant": invariant_for(probe, _text(item.get("class")).lower()),
+                "entry_point": _text(item.get("entry_point"))
+                or f"{_text(item.get('method')).upper() or 'GET'} {_text(item.get('endpoint'))}"[
+                    :MAX_SHORT
+                ],
+            }
         out = service.submit(engagement, item, actor)
         if not out.get("ok"):
             error = {"index": index, "code": out.get("code"), "detail": out.get("detail")}
@@ -648,13 +671,26 @@ def queue_order(finding: Finding) -> tuple[int, int, int, float, str]:
 
 
 def next_candidates(
-    store: FindingStore, engagement: str, *, limit: int = 5, claimed_by: str = ""
+    store: FindingStore,
+    engagement: str,
+    *,
+    limit: int = 5,
+    claimed_by: str = "",
+    ledger: Ledger | None = None,
+    skipped: dict[str, list[dict]] | None = None,
 ) -> list[dict]:
     """The next ``limit`` candidates of the engagement, most valuable first.
 
     Order: candidates with assertions (they can be verified now), then by
     severity, then by ``CLASS_PRIORITY``, then oldest first. Only findings
     whose status is ``candidate`` are in the queue.
+
+    A lead whose techniques were all ruled out at its endpoint and parameter,
+    for a reason that still holds (``buggy.findings.ruled_out``), is not
+    handed out; ``skipped`` (when given) collects those ids with the entries
+    that rule them out. A lead whose ruling passed its review date is handed
+    out again with ``ruled_out_before`` saying why it was out. ``ledger``
+    defaults to one over ``store``.
 
     With ``claimed_by``, every returned candidate is claimed for that name for
     ``LEASE_SECONDS`` (asking again renews it). A candidate somebody else
@@ -667,9 +703,19 @@ def next_candidates(
     out: list[dict] = []
     if not wanted:
         return out
+    ledger = ledger or Ledger(store)
+    holding = ledger.holding(engagement)
     queue = sorted(store.list(engagement, status=Status.CANDIDATE.value), key=queue_order)
     held = {} if who else store.claims(engagement, lease_seconds=LEASE_SECONDS)
     for finding in queue:
+        blocking = ledger.blocking(finding, holding) if holding else []
+        if blocking:
+            if skipped is not None:
+                skipped[finding.id] = [
+                    {"id": e["id"], "technique": e["technique"], "reason": e["reason"]}
+                    for e in blocking
+                ]
+            continue
         claimed_at = 0.0
         if who:
             taken = store.claim(engagement, finding.id, who, lease_seconds=LEASE_SECONDS)
@@ -678,14 +724,16 @@ def next_candidates(
             claimed_at = taken
         elif finding.id in held:
             continue
-        out.append(
-            {
-                **finding.to_dict(),
-                "claimed_by": who,
-                "claimed_at": claimed_at,
-                "claim_expires_at": claimed_at + LEASE_SECONDS if who else 0.0,
-            }
-        )
+        row = {
+            **finding.to_dict(),
+            "claimed_by": who,
+            "claimed_at": claimed_at,
+            "claim_expires_at": claimed_at + LEASE_SECONDS if who else 0.0,
+        }
+        earlier = ledger.earlier(finding)
+        if earlier:
+            row["ruled_out_before"] = earlier
+        out.append(row)
         if len(out) >= wanted:
             break
     return out

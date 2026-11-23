@@ -218,6 +218,78 @@ Worked example: can a second account read the first account's order?
 Every reason names its rule. A grade can go stale: re-grade after a new
 verification. Reports and gates require `exploit_verified` **and** `submit`.
 
+## What was ruled out, and why
+
+Every lead that was tried and dropped keeps why, in the ruled-out ledger
+(`lead_ledger` in `findings.sqlite3`, `buggy/findings/ruled_out.py`). Each
+entry has a reason code, a short text, when, and who or which probe. It is
+keyed by the technique and where it was tried: `probe:sqli` (or
+`recipe:<name>`, or `claim` for an agent's captures) on this endpoint and
+parameter.
+
+| Reason | Written by | Retires the technique there |
+|---|---|---|
+| `not_vulnerable` | `probe_run`, `recipe_run`: the check saw the safe behaviour | yes |
+| `blocked` | the gateway refused it (`OUT_OF_SCOPE`, `INTERNAL_ADDRESS`, ...; the code is kept) | yes |
+| `approval_denied` | the operator refused the approval | yes |
+| `inconclusive` | `finding_verify` could not re-prove it (its reasons are kept) | yes |
+| `verifier_discarded` | `finding_verify` rejected the cited evidence | yes |
+| `graded_discard` | `finding_grade` (the rule is kept) | yes |
+| `graded_hold` | `finding_grade` (the rule is kept) | no, it waits for a review |
+| `delivery_failed` | a timeout, no answer, 408/429/502/503/504, a failed login, an approval used up, a replay that needed approval | no, only that attempt |
+| `undecided` | the check ran but could not decide | no, only that attempt |
+
+- `candidates_next` does not hand back a lead whose techniques are all ruled
+  out at its endpoint and parameter. A lead with no parameter counts as ruled
+  out by an entry for any parameter of that endpoint. A recon lead stands for
+  the probe it suggests.
+- `leads_ruled_out(query?)` lists what is ruled out, with the reasons, and the
+  recent failed attempts (which may be retried).
+- A later positive run of the same technique, new assertions on the finding, a
+  verification or a new grade supersede the entry.
+- `hunt` counts `ruled_out` and `failed_attempts` for its probe runs.
+
+## Invariants and chains
+
+A finding may name `invariant` (the rule it breaks, "a user can only read
+their own basket") and `entry_point` (the request a user can reach first,
+`GET https://app/api/basket/1`). An agent's own `finding_submit` must give
+both for `access_control`, `business_logic` and `auth_session`; the check is
+light (a short sentence, a URL or path). A probe's finding gets a fixed
+invariant per probe; a recipe may set `invariant`, else its class's is used
+(`buggy/findings/chains.py`).
+
+Each proven finding (verified, not graded `discard`) also gives and needs
+things from a fixed vocabulary, by probe, else by class: `sqli` gives "read
+the database"; an IDOR needs "a logged-in user" and "other users' ids" and
+gives "read another user's data"; `jwt_alg_none` gives "another user's
+session" and "the admin role". A proof sent as a test account also needs a
+logged-in user, and as an admin account the admin role.
+`findings_chains` lists the pairs where one finding gives what another needs,
+and the needs no finding gives yet (`open_needs`, with the classes that would
+give them). The report has a section "Possible chains (leads to test, not
+proven)". A chain is never a finding: it has to be tested and proven like any
+other lead.
+
+## Decisions expire
+
+A ruled-out entry, and a finding graded `hold` or `discard`, get a review date:
+30 days by default, `BUGGY_REVIEW_DAYS` on the capture service to change it.
+When the date passes, a ruled-out lead goes back to `candidates_next` (with
+`ruled_out_before` saying why it was out), and the decision is listed under
+"Due for review" in the report, by `findings_due` and by:
+
+```bash
+buggy-cli findings due <engagement>
+buggy-cli findings extend <engagement> L-12 --days 14
+buggy-cli findings close <engagement> L-12 --note "tested by hand, not exploitable"
+buggy-cli findings reopen <engagement> L-12
+```
+
+`close` keeps the decision for good, `reopen` lifts it now, `extend` sets a
+new date. `buggy-cli findings ruled-out <engagement>` prints the ledger. Like
+`retest`, these run where the capture data is (the operator container).
+
 ## Test accounts (identities)
 
 Access-control bugs are found by asking the same question as two users. The

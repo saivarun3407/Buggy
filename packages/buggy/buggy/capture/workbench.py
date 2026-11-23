@@ -40,8 +40,9 @@ from buggy.capture.probes.registry import REGISTRY
 from buggy.coordination import DB_FILENAME as BOARD_DB
 from buggy.coordination import Board
 from buggy.coordination.board import BoardError
-from buggy.findings import candidates, report, skill_map, verifier
+from buggy.findings import candidates, chains, report, skill_map, verifier
 from buggy.findings.model import Finding, Status
+from buggy.findings.ruled_out import review_days_from_env
 from buggy.findings.service import FindingService
 from buggy.findings.store import FindingStore
 from buggy.memory import DB_FILENAME as LESSONS_DB
@@ -69,6 +70,9 @@ WORKBENCH_TOOL_NAMES = (
     "finding_grade",
     "candidates_next",
     "candidates_add",
+    "leads_ruled_out",
+    "findings_chains",
+    "findings_due",
     "report_build",
     "evidence_export",
     "identities_list",
@@ -109,6 +113,16 @@ def _json(raw: str, name: str, kind: type, default: Any) -> Any:
     if not isinstance(value, kind):
         raise _refuse("BAD_ARGUMENT", f"{name} must be a JSON {kind.__name__}")
     return value
+
+
+def _ledger_note(entry: dict[str, Any]) -> dict[str, Any]:
+    """What a run's result says about the ledger entry it produced."""
+    return {
+        "id": entry.get("id"),
+        "kind": entry.get("kind"),
+        "reason": entry.get("reason"),
+        "retires_technique": entry.get("kind") == "ruled_out",
+    }
 
 
 def _actor(actor: str) -> str:
@@ -264,7 +278,10 @@ class Workbench:
         self._on_verified = on_verified
         self.roots = roots
         self.findings = FindingService(
-            FindingStore(roots.data / FINDINGS_DB), gateway, sessions=gateway.sessions
+            FindingStore(roots.data / FINDINGS_DB),
+            gateway,
+            sessions=gateway.sessions,
+            review_days=review_days_from_env(),
         )
         self.probe_runs = ProbeRuns(roots.data / PROBE_RUNS_DB)
         self.recipes = RecipeStore(roots.data / RECIPES_DB)
@@ -302,6 +319,25 @@ class Workbench:
         _scope, document = self.gateway.scope_for(engagement)
         return document if isinstance(document, dict) else {}
 
+    def _captures(self, engagement: str) -> Callable[[str], Any]:
+        return lambda capture_id: self.gateway.store.get(engagement, capture_id)
+
+    @staticmethod
+    def _record(fn: Callable[[], dict[str, Any] | None]) -> dict[str, Any] | None:
+        """Write to the ruled-out ledger; a ledger problem never fails the run it follows."""
+        try:
+            return fn()
+        except (sqlite3.Error, ValueError, LookupError):
+            log.warning("the ruled-out ledger could not be written", exc_info=True)
+            return None
+
+    def _roles(self, engagement: str) -> dict[str, str]:
+        try:
+            rows = self.gateway.identities.public(engagement)
+        except (IdentityError, OSError, ValueError):
+            return {}
+        return {str(row.get("name")): str(row.get("role") or "") for row in rows}
+
     # ── probes feed the queue ────────────────────────────────────────
 
     def after_probe(
@@ -310,9 +346,19 @@ class Workbench:
         """Queue a positive probe result and remember how to run it again.
 
         Returns ``result`` with ``finding_id`` added when it was queued. A probe
-        that did not report ``vulnerable: true`` queues nothing.
+        that did not report ``vulnerable: true`` queues nothing; why it did not
+        (not vulnerable, blocked by the gateway, refused approval, a failed
+        delivery) goes into the ruled-out ledger, and ``ledger`` in the result
+        names the entry.
         """
         url = str(params.get("url") or "")
+        entry = self._record(
+            lambda: self.findings.ledger.after_probe(
+                engagement, probe, params, result, lookup=self._captures(engagement)
+            )
+        )
+        if entry:
+            result = {**result, "ledger": _ledger_note(entry)}
         candidate = candidates.from_probe(
             result, engagement, url, str(params.get("parameter") or "")
         )
@@ -406,6 +452,13 @@ class Workbench:
             result = recipes.execute(self.gateway, name, loaded)
             outcome = str(result.get("outcome") or result.get("code") or "")
             self.recipes.record_outcome(name, loaded, outcome)
+            entry = self._record(
+                lambda: self.findings.ledger.after_recipe(
+                    name, loaded.data, result, actor=author, lookup=self._captures(name)
+                )
+            )
+            if entry:
+                result = {**result, "ledger": _ledger_note(entry)}
             return self.after_recipe(name, loaded, result, author)
 
         return self._guard(run)
@@ -487,7 +540,10 @@ class Workbench:
         def run() -> dict[str, Any]:
             data = _json(finding_json, "finding_json", dict, {})
             name = self._engagement(engagement)
-            return self.findings.submit(name, {**data, "engagement": name}, _actor(actor))
+            # An agent's own claim names the invariant it breaks and its entry point.
+            return self.findings.submit(
+                name, {**data, "engagement": name}, _actor(actor), require_context=True
+            )
 
         return self._guard(run)
 
@@ -545,16 +601,53 @@ class Workbench:
 
     def candidates_next(self, engagement: str, actor: str, limit: int = 5) -> dict[str, Any]:
         def run() -> dict[str, Any]:
+            skipped: dict[str, list[dict[str, Any]]] = {}
             rows = candidates.next_candidates(
                 self.findings.store,
                 self._engagement(engagement),
                 limit=max(1, min(int(limit), 20)),
                 claimed_by=_actor(actor),
+                ledger=self.findings.ledger,
+                skipped=skipped,
             )
             # The skill files to read before working each lead (skill_get), by fixed rules.
             for row in rows:
                 row["skills"] = skill_map.for_lead(row)
-            return {"ok": True, "candidates": rows, "count": len(rows)}
+            out: dict[str, Any] = {"ok": True, "candidates": rows, "count": len(rows)}
+            if skipped:
+                out["ruled_out_skipped"] = len(skipped)
+                out["note"] = (
+                    "Leads whose techniques were already ruled out there are not handed out; "
+                    "leads_ruled_out lists them with the reasons."
+                )
+            return out
+
+        return self._guard(run)
+
+    def leads_ruled_out(self, engagement: str, query: str = "") -> dict[str, Any]:
+        """What was tried and dropped, why, when and by whom; and recent failed attempts."""
+
+        def run() -> dict[str, Any]:
+            return self.findings.ledger.listed(self._engagement(engagement), str(query or "")[:200])
+
+        return self._guard(run)
+
+    def findings_chains(self, engagement: str) -> dict[str, Any]:
+        """What each proven finding gives and needs, and the chains to test (never findings)."""
+
+        def run() -> dict[str, Any]:
+            name = self._engagement(engagement)
+            rows = self.findings.list(name).get("findings") or []
+            return chains.chains(rows, roles=self._roles(name))
+
+        return self._guard(run)
+
+    def findings_due(self, engagement: str) -> dict[str, Any]:
+        """Decisions whose review date has passed: ruled-out leads, held and discarded findings."""
+
+        def run() -> dict[str, Any]:
+            rows = self.findings.ledger.due(self._engagement(engagement))
+            return {"ok": True, "due": rows[:MAX_LIST], "count": len(rows)}
 
         return self._guard(run)
 
@@ -596,14 +689,17 @@ class Workbench:
                 raise _refuse("BAD_ARGUMENT", f"format must be one of {', '.join(REPORT_FORMATS)}")
             enforcement = self._scope_document(name).get("machine_enforcement")
             in_scope = enforcement.get("in_scope") if isinstance(enforcement, dict) else None
+            rows = self.findings.list(name).get("findings") or []
             built = report.build(
                 name,
-                self.findings.list(name).get("findings") or [],
+                rows,
                 recon_summary=_json(recon_summary_json, "recon_summary_json", dict, None),
                 scope=[str(entry) for entry in in_scope or []],
                 captures=lambda capture_id: self.gateway.store.get(name, capture_id),
                 generated_at=self._clock(),
                 complete=bool(complete),
+                chains=chains.chains(rows, roles=self._roles(name)),
+                due=self.findings.ledger.due(name),
             )
             render = {
                 "markdown": report.to_markdown,
@@ -1022,9 +1118,12 @@ def register_workbench(mcp: Any, bench: Workbench) -> None:
     @mcp.tool()
     def finding_submit(engagement: str, finding_json: str, actor: str) -> dict[str, Any]:
         """Record a claim as a candidate finding. finding_json: title, class, severity,
-        endpoint, method, parameter, description, remediation, source, and assertions
+        endpoint, method, parameter, description, remediation, source, invariant (the rule
+        it breaks), entry_point (the request a user reaches first), and assertions
         [{capture_id, identity, expect{status, body_contains, body_not_contains,
-        differs_from, same_as}}]. A claim is not a finding until finding_verify proves it."""
+        differs_from, same_as}}]. invariant and entry_point are required for access_control,
+        business_logic and auth_session. A claim is not a finding until finding_verify
+        proves it."""
         return bench.finding_submit(engagement, finding_json, actor)
 
     @mcp.tool()
@@ -1059,6 +1158,26 @@ def register_workbench(mcp: Any, bench: Workbench) -> None:
     def candidates_add(engagement: str, items_json: str, actor: str) -> dict[str, Any]:
         """Queue scanner hits and ranked recon leads (used by the recon stage)."""
         return bench.candidates_add(engagement, items_json, actor)
+
+    @mcp.tool()
+    def leads_ruled_out(engagement: str, query: str = "") -> dict[str, Any]:
+        """Techniques already tried and dropped here, with the reason, when and by whom
+        (not vulnerable, blocked by the gateway, approval refused, verifier inconclusive,
+        discarded by the grader), and recent failed attempts that retired nothing. query
+        filters by words in the technique, endpoint, parameter or reason."""
+        return bench.leads_ruled_out(engagement, query)
+
+    @mcp.tool()
+    def findings_chains(engagement: str) -> dict[str, Any]:
+        """What each proven finding gives an attacker and needs first, and the possible chains
+        (A gives what B needs). A chain is a lead to test, never a proven finding."""
+        return bench.findings_chains(engagement)
+
+    @mcp.tool()
+    def findings_due(engagement: str) -> dict[str, Any]:
+        """Decisions whose review date has passed: ruled-out leads and findings graded hold or
+        discard. The operator extends or closes them with buggy-cli findings."""
+        return bench.findings_due(engagement)
 
     @mcp.tool()
     def report_build(

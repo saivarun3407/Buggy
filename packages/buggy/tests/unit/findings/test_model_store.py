@@ -55,6 +55,8 @@ CONTRACT_KEYS = [
     "grade_reasons",
     "created_at",
     "updated_at",
+    "invariant",
+    "entry_point",
 ]
 
 

@@ -951,6 +951,12 @@ def _run_steps(engagement: str, planned: dict[str, Any], known: str) -> dict[str
         failures = 0
         out["ran"] += 1
         cls["checks"] += 1
+        # The capture server recorded why a run found nothing (buggy.findings.ruled_out).
+        ledger = result.get("ledger") if isinstance(result.get("ledger"), dict) else {}
+        if ledger.get("kind") == "ruled_out":
+            out["ruled_out"] += 1
+        elif ledger.get("kind") == "attempt":
+            out["failed_attempts"] += 1
         if result.get("status") == "refused":
             out["refused"] += 1
             if result.get("code") == "APPROVAL_REQUIRED":
@@ -1112,6 +1118,7 @@ def _empty_counts() -> dict[str, Any]:
     return {
         "planned": 0, "left_out": 0, "ran": 0, "vulnerable": 0, "not_vulnerable": 0,
         "undecided": 0, "refused": 0, "held_for_approval": 0, "verified": 0, "submit": 0,
+        "ruled_out": 0, "failed_attempts": 0,
         "findings": [], "error": None, "by_class": {},
     }  # fmt: skip
 
@@ -1645,7 +1652,10 @@ def kickoff_text(
         "(scanner hits, recon leads, probe results), already deduplicated and claimed for you. "
         "Read facts_list before starting and record what you learn with fact_add so other "
         "agents do not repeat it; memory_search returns lessons from earlier engagements on "
-        "the same technology. recon_coverage shows what recon did not check.",
+        "the same technology. recon_coverage shows what recon did not check. leads_ruled_out "
+        "lists what was already tried and dropped, and why: do not repeat a ruled-out technique "
+        "at the same endpoint and parameter (a failed attempt such as a timeout may be retried). "
+        "findings_chains shows which proven findings could chain; test those as leads.",
         "Spend your effort on what needs judgement: choose what to test, run the deterministic "
         "probes (probe_list, probe_run) on the best candidates, and chain confirmed results into "
         "impact. Priorities: access control and IDOR, authentication and session, SSRF, business "
@@ -1662,7 +1672,8 @@ def kickoff_text(
             else "Prefer http_send, probe_run and browser_* for anything that counts as evidence."
         ),
         "A claim is not a finding. Submit it with finding_submit (cite capture_ids as "
-        "assertions against the endpoint you name, and say what the owner should change), then "
+        "assertions against the endpoint you name, say what the owner should change, and name "
+        "the invariant it breaks and the entry point a user reaches first), then "
         "call finding_verify: only the independent verifier makes it exploit_verified. Fix or "
         "drop what comes back inconclusive, then finding_grade. Also record verified findings "
         "with report_record_finding. No denial of service, no social engineering, no data "

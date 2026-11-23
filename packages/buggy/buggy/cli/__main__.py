@@ -23,6 +23,7 @@ def _print_help() -> int:
         "  pipeline           Run / inspect the deterministic recon pipeline\n"
         "  scope              Show / approve the enforced scope (operator only)\n"
         "  approvals          List and answer the agent's approval requests\n"
+        "  findings           Decisions due for review; extend, close or reopen them\n"
         "  audit              Verify engagement audit ledgers\n"
         "  zip                Export/import engagement workspaces as ZIP archives\n\n"
         "  export-transcript  Render an engagement event log as Markdown\n\n"

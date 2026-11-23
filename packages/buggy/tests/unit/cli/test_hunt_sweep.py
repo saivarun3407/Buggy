@@ -97,6 +97,8 @@ def test_a_positive_probe_is_verified_and_graded(server: Server) -> None:
         "held_for_approval": 0,
         "verified": 1,
         "submit": 1,
+        "ruled_out": 0,
+        "failed_attempts": 0,
         "findings": [
             {
                 "id": "F-sqli",
@@ -147,6 +149,20 @@ def test_refusals_and_undecided_runs_are_counted_not_followed(monkeypatch) -> No
     assert fake.tools() == ["probe_run", "probe_run"]
     assert (out["ran"], out["refused"], out["undecided"], out["vulnerable"]) == (2, 1, 1, 0)
     assert out["held_for_approval"] == 0
+
+
+def test_what_the_server_ruled_out_is_counted(monkeypatch) -> None:
+    ruled = {"kind": "ruled_out", "reason": "not_vulnerable", "id": "L-1"}
+    attempt = {"kind": "attempt", "reason": "delivery_failed", "id": "L-2"}
+    fake = Server(
+        vulnerable={
+            "sqli": {"status": "completed", "vulnerable": False, "ledger": ruled},
+            "cors": {"status": "completed", "vulnerable": None, "ledger": attempt},
+        }
+    )
+    monkeypatch.setattr(hunt, "_capture", fake)
+    out = hunt.run_probe_sweep("acme", RECORDS)
+    assert (out["ruled_out"], out["failed_attempts"]) == (1, 1)
 
 
 def test_a_read_only_check_sent_with_post_is_reported_as_waiting(monkeypatch, capsys) -> None:

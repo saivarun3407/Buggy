@@ -508,12 +508,43 @@ async def candidates_next(limit: int = 5) -> str:
 
 
 @tool
+async def leads_ruled_out(query: str = "") -> str:
+    """What was already tried here and dropped, with the reason, when and by whom: the probe
+    said not vulnerable, the gateway blocked it (its code), the operator refused the
+    approval, the verifier could not re-prove it (its reasons), the grader discarded it
+    (the rule). Do not repeat a ruled-out technique at the same endpoint and parameter.
+    failed_attempts (timeouts, rate limits, a lost login) retired nothing and may be
+    retried. query filters by words in the technique, endpoint, parameter or reason."""
+    return await _engagement_call("capture", "leads_ruled_out", query=query)
+
+
+@tool
+async def findings_chains() -> str:
+    """What each proven finding gives an attacker (another user's session, the admin role,
+    any file, SSRF to internal hosts...) and what it needs first (a logged-in user, other
+    users' ids...), and the possible chains where one gives what another needs. A chain is
+    a lead to test, never a proven finding; open_needs says what no finding gives yet."""
+    return await _engagement_call("capture", "findings_chains")
+
+
+@tool
+async def findings_due() -> str:
+    """Decisions whose review date has passed: leads ruled out a while ago (they are back in
+    candidates_next) and findings graded hold or discard. Worth a fresh look; only the
+    operator extends or closes them."""
+    return await _engagement_call("capture", "findings_due")
+
+
+@tool
 async def finding_submit(finding_json: str) -> str:
     """Record a claim. finding_json: title, class, severity, endpoint, method, parameter,
-    description, remediation (what the owner should change), source, and assertions:
+    description, remediation (what the owner should change), source, invariant (the rule it
+    breaks, e.g. "a user can only read their own basket"), entry_point (the request a user
+    can reach first, e.g. "GET https://app/api/basket/1"), and assertions:
     [{capture_id, identity, expect: {status, body_contains, body_not_contains, differs_from,
-    same_as}}]. Cite captures made against the endpoint you name. A claim is a candidate
-    until finding_verify proves it."""
+    same_as}}]. invariant and entry_point are required for access_control, business_logic
+    and auth_session. Cite captures made against the endpoint you name. A claim is a
+    candidate until finding_verify proves it."""
     return await _actor_call("finding_submit", finding_json=finding_json)
 
 
@@ -748,11 +779,14 @@ _BY_SERVER: dict[str, list[Any]] = {
         recipe_list,
         recipe_get,
         candidates_next,
+        leads_ruled_out,
         finding_submit,
         finding_verify,
         finding_get,
         findings_list,
         finding_grade,
+        findings_chains,
+        findings_due,
         report_build,
         evidence_export,
         identities_list,
@@ -811,6 +845,9 @@ _TESTERS = frozenset(
 _READER_CAPTURE_TOOLS: tuple[Any, ...] = (
     findings_list,
     finding_get,
+    leads_ruled_out,
+    findings_chains,
+    findings_due,
     report_build,
     identities_list,
     memory_search,

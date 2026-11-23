@@ -13,6 +13,12 @@ capture_ids}``) and the time a retest first showed it fixed (``fixed_at``,
 ``0`` when not fixed). Like the claim, they are not part of the finding's
 schema, :meth:`FindingStore.upsert` never touches them, and only
 :meth:`FindingStore.record_retest` writes them.
+
+A third table, ``lead_ledger``, keeps what was tried and dropped, and why
+(``buggy.findings.ruled_out`` decides what goes in it). Unlike the history its
+rows change: an entry is merged with a repeat of the same outcome, and its
+review date and state are set by the operator. Columns and tables added after
+the first release are created on open, so an older store still loads.
 """
 
 from __future__ import annotations
@@ -62,9 +68,38 @@ CREATE TABLE IF NOT EXISTS findings (
     claimed_by TEXT NOT NULL DEFAULT '',
     claimed_at REAL NOT NULL DEFAULT 0,
     retest TEXT NOT NULL DEFAULT '{}',
-    fixed_at REAL NOT NULL DEFAULT 0
+    fixed_at REAL NOT NULL DEFAULT 0,
+    invariant TEXT NOT NULL DEFAULT '',
+    entry_point TEXT NOT NULL DEFAULT ''
 );
 CREATE INDEX IF NOT EXISTS findings_engagement ON findings (engagement, status);
+CREATE TABLE IF NOT EXISTS lead_ledger (
+    seq INTEGER PRIMARY KEY AUTOINCREMENT,
+    engagement TEXT NOT NULL,
+    key TEXT NOT NULL,
+    technique TEXT NOT NULL,
+    endpoint TEXT NOT NULL DEFAULT '',
+    parameter TEXT NOT NULL DEFAULT '',
+    method TEXT NOT NULL DEFAULT '',
+    identity TEXT NOT NULL DEFAULT '',
+    finding_id TEXT NOT NULL DEFAULT '',
+    class TEXT NOT NULL DEFAULT '',
+    kind TEXT NOT NULL,
+    reason TEXT NOT NULL,
+    code TEXT NOT NULL DEFAULT '',
+    detail TEXT NOT NULL DEFAULT '',
+    actor TEXT NOT NULL,
+    first_at REAL NOT NULL,
+    at REAL NOT NULL,
+    count INTEGER NOT NULL DEFAULT 1,
+    review_at REAL NOT NULL DEFAULT 0,
+    state TEXT NOT NULL DEFAULT 'open',
+    state_at REAL NOT NULL DEFAULT 0,
+    state_by TEXT NOT NULL DEFAULT '',
+    state_note TEXT NOT NULL DEFAULT ''
+);
+CREATE INDEX IF NOT EXISTS lead_ledger_key ON lead_ledger (engagement, key, state);
+CREATE INDEX IF NOT EXISTS lead_ledger_finding ON lead_ledger (engagement, finding_id);
 CREATE TABLE IF NOT EXISTS finding_events (
     seq INTEGER PRIMARY KEY AUTOINCREMENT,
     id TEXT NOT NULL,
@@ -91,9 +126,36 @@ _MIGRATIONS = {
     "claimed_at": "ALTER TABLE findings ADD COLUMN claimed_at REAL NOT NULL DEFAULT 0",
     "retest": "ALTER TABLE findings ADD COLUMN retest TEXT NOT NULL DEFAULT '{}'",
     "fixed_at": "ALTER TABLE findings ADD COLUMN fixed_at REAL NOT NULL DEFAULT 0",
+    "invariant": "ALTER TABLE findings ADD COLUMN invariant TEXT NOT NULL DEFAULT ''",
+    "entry_point": "ALTER TABLE findings ADD COLUMN entry_point TEXT NOT NULL DEFAULT ''",
 }
 _CLAIM_COLUMNS = frozenset({"claimed_by", "claimed_at"})
 _RETEST_COLUMNS = frozenset({"retest", "fixed_at"})
+
+# The ledger of leads tried and dropped (``buggy.findings.ruled_out``).
+LEDGER_RULED_OUT = "ruled_out"  # retires the technique on that endpoint/parameter
+LEDGER_ATTEMPT = "attempt"  # one attempt failed (delivery, undecided); retires nothing
+LEDGER_HELD = "held"  # a finding graded hold: it waits for a review
+LEDGER_KINDS = (LEDGER_RULED_OUT, LEDGER_ATTEMPT, LEDGER_HELD)
+STATE_OPEN = "open"  # in force; due for review once review_at has passed
+STATE_CLOSED = "closed"  # the operator confirmed it for good: no more review
+STATE_REOPENED = "reopened"  # the operator lifted it: the lead is back
+STATE_SUPERSEDED = "superseded"  # later evidence contradicts it (a positive, a new grade)
+LEDGER_STATES = (STATE_OPEN, STATE_CLOSED, STATE_REOPENED, STATE_SUPERSEDED)
+_LEDGER_FIELDS = (
+    "key",
+    "technique",
+    "endpoint",
+    "parameter",
+    "method",
+    "identity",
+    "finding_id",
+    "class",
+    "kind",
+    "reason",
+    "code",
+    "detail",
+)
 
 # Retest outcomes (decided by ``buggy.findings.retest``; recorded here).
 RETEST_FIXED = "fixed"
@@ -152,6 +214,12 @@ class FindingStore:
             present = {row[1] for row in self._db.execute("PRAGMA table_info(findings)")}
             self._has_claims = _CLAIM_COLUMNS <= present
             self._has_retest = _RETEST_COLUMNS <= present
+            self._has_ledger = (
+                self._db.execute(
+                    "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'lead_ledger'"
+                ).fetchone()
+                is not None
+            )
         else:
             self.path.parent.mkdir(parents=True, exist_ok=True)
             self._db = sqlite3.connect(
@@ -167,11 +235,16 @@ class FindingStore:
                         cur.execute(statement)
             self._has_claims = True
             self._has_retest = True
+            self._has_ledger = True
         self._db.row_factory = sqlite3.Row
 
     def close(self) -> None:
         with self._lock:
             self._db.close()
+
+    def now(self) -> float:
+        """The store's clock (epoch seconds): what its timestamps are written with."""
+        return self._clock()
 
     @contextmanager
     def _tx(self) -> Iterator[sqlite3.Cursor]:
@@ -222,6 +295,9 @@ class FindingStore:
             grade_reasons=tuple(json.loads(row["grade_reasons"] or "[]")),
             created_at=row["created_at"],
             updated_at=row["updated_at"],
+            # A read-only store written before these columns existed has none.
+            invariant=str(row["invariant"] or "") if "invariant" in row.keys() else "",
+            entry_point=str(row["entry_point"] or "") if "entry_point" in row.keys() else "",
         )
 
     @staticmethod
@@ -296,8 +372,9 @@ class FindingStore:
             cur.execute(
                 "INSERT INTO findings (id, engagement, title, class, cwe, severity, endpoint, "
                 "method, parameter, source, description, remediation, assertions, status, "
-                "verification, grade, grade_reasons, created_at, updated_at) "
-                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) "
+                "verification, grade, grade_reasons, created_at, updated_at, invariant, "
+                "entry_point) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) "
                 "ON CONFLICT(id) DO UPDATE SET title = excluded.title, class = excluded.class, "
                 "cwe = excluded.cwe, severity = excluded.severity, endpoint = excluded.endpoint, "
                 "method = excluded.method, parameter = excluded.parameter, "
@@ -305,7 +382,9 @@ class FindingStore:
                 "remediation = excluded.remediation, assertions = excluded.assertions, "
                 "status = excluded.status, verification = excluded.verification, "
                 "grade = excluded.grade, grade_reasons = excluded.grade_reasons, "
-                "updated_at = excluded.updated_at WHERE findings.engagement = excluded.engagement",
+                "updated_at = excluded.updated_at, invariant = excluded.invariant, "
+                "entry_point = excluded.entry_point "
+                "WHERE findings.engagement = excluded.engagement",
                 (
                     finding.id,
                     finding.engagement,
@@ -326,6 +405,8 @@ class FindingStore:
                     json.dumps(list(finding.grade_reasons)),
                     created_at,
                     now,
+                    finding.invariant,
+                    finding.entry_point,
                 ),
             )
             if cur.rowcount != 1:
@@ -551,6 +632,237 @@ class FindingStore:
             "fixed_at": float(row["fixed_at"]) if row["fixed_at"] else None,
         }
 
+    # ── the ledger of leads tried and dropped ───────────────────────
+
+    @staticmethod
+    def _ledger_row(row: sqlite3.Row) -> dict[str, Any]:
+        out = {key: row[key] for key in row.keys()}
+        out["id"] = f"L-{row['seq']}"
+        return out
+
+    def record_ledger(self, entry: dict[str, Any], actor: str) -> dict[str, Any]:
+        """Record one outcome; a repeat of an open entry is merged into it.
+
+        ``entry`` carries ``engagement`` and the fields of ``_LEDGER_FIELDS``
+        plus ``review_at``. An open entry with the same engagement, key,
+        finding id, kind and reason is updated (time, actor, detail, review
+        date, ``count + 1``) instead of a new row. When the entry names a
+        finding of this engagement, a history line is appended to it.
+        """
+        who = self._actor(actor)
+        engagement = str(entry.get("engagement") or "")
+        if not engagement:
+            raise ValueError("engagement is required")
+        if entry.get("kind") not in LEDGER_KINDS:
+            raise ValueError(f"unknown ledger kind {entry.get('kind')!r}")
+        values = {name: str(entry.get(name) or "") for name in _LEDGER_FIELDS}
+        if not values["key"] or not values["reason"]:
+            raise ValueError("a ledger entry needs a key and a reason")
+        review_at = float(entry.get("review_at") or 0.0)
+        now = self._clock()
+        with self._tx() as cur:
+            row = cur.execute(
+                "SELECT seq FROM lead_ledger WHERE engagement = ? AND key = ? AND finding_id = ? "
+                "AND kind = ? AND reason = ? AND state = ? ORDER BY seq DESC LIMIT 1",
+                (
+                    engagement,
+                    values["key"],
+                    values["finding_id"],
+                    values["kind"],
+                    values["reason"],
+                    STATE_OPEN,
+                ),
+            ).fetchone()
+            if row is not None:
+                seq = int(row[0])
+                cur.execute(
+                    "UPDATE lead_ledger SET at = ?, actor = ?, code = ?, detail = ?, method = ?, "
+                    "identity = ?, review_at = ?, count = count + 1 WHERE seq = ?",
+                    (
+                        now,
+                        who,
+                        values["code"],
+                        values["detail"],
+                        values["method"],
+                        values["identity"],
+                        review_at,
+                        seq,
+                    ),
+                )
+            else:
+                cur.execute(
+                    "INSERT INTO lead_ledger (engagement, key, technique, endpoint, parameter, "
+                    "method, identity, finding_id, class, kind, reason, code, detail, actor, "
+                    "first_at, at, review_at) "
+                    "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                    (
+                        engagement,
+                        *(values[name] for name in _LEDGER_FIELDS),
+                        who,
+                        now,
+                        now,
+                        review_at,
+                    ),
+                )
+                seq = int(cur.lastrowid or 0)
+            if values["finding_id"] and self._select(cur, engagement, values["finding_id"]):
+                self._append_event(
+                    cur,
+                    engagement,
+                    values["finding_id"],
+                    now,
+                    who,
+                    values["kind"],
+                    {
+                        "ledger_id": f"L-{seq}",
+                        "technique": values["technique"],
+                        "reason": values["reason"],
+                        "code": values["code"],
+                        "detail": values["detail"],
+                        "review_at": review_at or None,
+                    },
+                )
+            stored = cur.execute("SELECT * FROM lead_ledger WHERE seq = ?", (seq,)).fetchone()
+        return self._ledger_row(stored)
+
+    def ledger(
+        self,
+        engagement: str,
+        *,
+        kinds: tuple[str, ...] | None = None,
+        states: tuple[str, ...] | None = None,
+        finding_id: str | None = None,
+        key: str | None = None,
+    ) -> list[dict[str, Any]]:
+        """Ledger entries of one engagement, newest first, optionally filtered."""
+        if not self._has_ledger:
+            return []
+        clauses = ["engagement = ?"]
+        params: list[Any] = [engagement]
+        for column, wanted in (("kind", kinds), ("state", states)):
+            if wanted:
+                clauses.append(f"{column} IN ({', '.join('?' for _ in wanted)})")
+                params.extend(wanted)
+        if finding_id is not None:
+            clauses.append("finding_id = ?")
+            params.append(finding_id)
+        if key is not None:
+            clauses.append("key = ?")
+            params.append(key)
+        with self._lock:
+            rows = self._db.execute(
+                f"SELECT * FROM lead_ledger WHERE {' AND '.join(clauses)} "  # noqa: S608
+                "ORDER BY at DESC, seq DESC",
+                params,
+            ).fetchall()
+        return [self._ledger_row(row) for row in rows]
+
+    @staticmethod
+    def _ledger_seq(entry_id: str) -> int | None:
+        text = str(entry_id or "").strip().upper().removeprefix("L-")
+        return int(text) if text.isdigit() else None
+
+    def ledger_get(self, engagement: str, entry_id: str) -> dict[str, Any] | None:
+        seq = self._ledger_seq(entry_id)
+        if seq is None or not self._has_ledger:
+            return None
+        with self._lock:
+            row = self._db.execute(
+                "SELECT * FROM lead_ledger WHERE seq = ? AND engagement = ?", (seq, engagement)
+            ).fetchone()
+        return self._ledger_row(row) if row else None
+
+    def ledger_set_state(
+        self,
+        engagement: str,
+        entry_id: str,
+        *,
+        actor: str,
+        state: str | None = None,
+        review_at: float | None = None,
+        note: str = "",
+    ) -> dict[str, Any]:
+        """Change one entry's state and/or review date (the operator's extend / close / reopen).
+
+        Raises :class:`LookupError` for an unknown entry and :class:`ValueError`
+        for an unknown state. A history line is appended to the entry's finding.
+        """
+        who = self._actor(actor)
+        if state is not None and state not in LEDGER_STATES:
+            raise ValueError(f"unknown state {state!r}")
+        seq = self._ledger_seq(entry_id)
+        now = self._clock()
+        with self._tx() as cur:
+            row = (
+                cur.execute(
+                    "SELECT finding_id, state, review_at FROM lead_ledger "
+                    "WHERE seq = ? AND engagement = ?",
+                    (seq, engagement),
+                ).fetchone()
+                if seq is not None
+                else None
+            )
+            if row is None:
+                raise LookupError(f"no ledger entry {entry_id!r} in engagement {engagement!r}")
+            new_state = state or row[1]
+            new_review = float(row[2]) if review_at is None else float(review_at)
+            cur.execute(
+                "UPDATE lead_ledger SET state = ?, review_at = ?, state_at = ?, state_by = ?, "
+                "state_note = ? WHERE seq = ?",
+                (new_state, new_review, now, who, str(note or "")[:500], seq),
+            )
+            if row[0] and self._select(cur, engagement, row[0]):
+                self._append_event(
+                    cur,
+                    engagement,
+                    row[0],
+                    now,
+                    who,
+                    "review",
+                    {
+                        "ledger_id": f"L-{seq}",
+                        "from": row[1],
+                        "to": new_state,
+                        "review_at": new_review or None,
+                        "note": str(note or "")[:500],
+                    },
+                )
+        return self.ledger_get(engagement, f"L-{seq}") or {}
+
+    def ledger_supersede(
+        self,
+        engagement: str,
+        *,
+        actor: str,
+        note: str,
+        key: str | None = None,
+        finding_id: str | None = None,
+        kinds: tuple[str, ...] = (LEDGER_RULED_OUT, LEDGER_HELD),
+    ) -> int:
+        """Mark the open entries for ``key`` and/or ``finding_id`` superseded; how many were."""
+        who = self._actor(actor)
+        if key is None and finding_id is None:
+            raise ValueError("name a key or a finding id")
+        if not self._has_ledger:
+            return 0
+        clauses = ["engagement = ?", "state = ?"]
+        params: list[Any] = [engagement, STATE_OPEN]
+        if key is not None:
+            clauses.append("key = ?")
+            params.append(key)
+        if finding_id is not None:
+            clauses.append("finding_id = ?")
+            params.append(finding_id)
+        clauses.append(f"kind IN ({', '.join('?' for _ in kinds)})")
+        params.extend(kinds)
+        with self._tx() as cur:
+            cur.execute(
+                "UPDATE lead_ledger SET state = ?, state_at = ?, state_by = ?, state_note = ? "
+                f"WHERE {' AND '.join(clauses)}",  # noqa: S608
+                (STATE_SUPERSEDED, self._clock(), who, str(note or "")[:500], *params),
+            )
+            return int(cur.rowcount or 0)
+
     # ── reads ───────────────────────────────────────────────────────
 
     def get(self, engagement: str, finding_id: str) -> Finding | None:
@@ -608,6 +920,15 @@ class FindingStore:
 
 
 __all__ = [
+    "LEDGER_ATTEMPT",
+    "LEDGER_HELD",
+    "LEDGER_KINDS",
+    "LEDGER_RULED_OUT",
+    "LEDGER_STATES",
+    "STATE_CLOSED",
+    "STATE_OPEN",
+    "STATE_REOPENED",
+    "STATE_SUPERSEDED",
     "FindingNotFound",
     "FindingStore",
     "IllegalTransition",

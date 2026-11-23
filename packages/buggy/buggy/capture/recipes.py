@@ -118,6 +118,8 @@ RECIPE_KEYS = frozenset(
         "steps",
         "verdict",
         "state_changing",
+        # The rule the check tests ("a user can read only their own order"); optional.
+        "invariant",
     }
 )
 STEP_KEYS = frozenset({"id", "method", "url", "headers", "body", "identity", "extract", "expect"})
@@ -514,6 +516,7 @@ def validate(recipe: Any) -> Recipe:
     endpoint = _str(raw.get("endpoint"), "endpoint", MAX_URL)
     parameter = _str(raw.get("parameter"), "parameter", MAX_SHORT, required=False)
     remediation = _str(raw.get("remediation"), "remediation", MAX_TEXT, minimum=MIN_REMEDIATION)
+    invariant = _str(raw.get("invariant"), "invariant", MAX_TITLE, required=False).strip()
     declared = raw.get("state_changing", False)
     if not isinstance(declared, bool):
         raise RecipeError("state_changing", "must be true or false")
@@ -558,6 +561,8 @@ def validate(recipe: Any) -> Recipe:
     }
     if parameter:
         data["parameter"] = parameter
+    if invariant:
+        data["invariant"] = invariant
     if declared:
         data["state_changing"] = True
     return Recipe(

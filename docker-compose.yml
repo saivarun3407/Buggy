@@ -655,6 +655,8 @@ services:
       # forwards to this port); the lab overlay sets it to a lab-net alias.
       - BUGGY_CANARY_BASE_URL=${BUGGY_CANARY_BASE_URL:-}
       - BUGGY_CANARY_BIND=${BUGGY_CANARY_BIND:-0.0.0.0:9470}
+      # Days until a ruled-out lead or a held/discarded finding is due for review.
+      - BUGGY_REVIEW_DAYS=${BUGGY_REVIEW_DAYS:-30}
       - BUGGY_AUDIT_HMAC_KEY=${BUGGY_AUDIT_HMAC_KEY:-}
       # Test accounts the operator declares (<BUGGY_HOME>/secrets/<engagement>/
       # identities.json). The gateway logs in and holds the sessions; this is

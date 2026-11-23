@@ -12,6 +12,7 @@ can make a finding ``exploit_verified``.
 from __future__ import annotations
 
 import json
+import logging
 import sqlite3
 from collections.abc import Callable
 from dataclasses import replace
@@ -21,16 +22,21 @@ from buggy.capture.gateway import CaptureGateway, GatewayRefusal
 from buggy.findings import verifier
 from buggy.findings.grade import grade as grade_finding
 from buggy.findings.model import (
+    CONTEXT_REQUIRED_CLASSES,
     MAX_ASSERTIONS,
     Assertion,
     Finding,
     Status,
     ValidationError,
+    context_errors,
     empty_verification,
     severity_rank,
     validate,
 )
+from buggy.findings.ruled_out import DEFAULT_REVIEW_DAYS, Ledger
 from buggy.findings.store import FindingNotFound, FindingStore, IllegalTransition
+
+log = logging.getLogger("buggy.findings.service")
 
 # Decided by the service, never taken from a submission.
 _SERVICE_OWNED = ("id", "status", "verification", "grade", "grade_reasons", "created_at")
@@ -56,21 +62,48 @@ def _join_sources(current: str, incoming: str) -> str:
 
 
 class FindingService:
-    def __init__(self, store: FindingStore, gateway: CaptureGateway, sessions: Any = None) -> None:
+    def __init__(
+        self,
+        store: FindingStore,
+        gateway: CaptureGateway,
+        sessions: Any = None,
+        *,
+        review_days: float = DEFAULT_REVIEW_DAYS,
+    ) -> None:
         self.store = store
         self.gateway = gateway
         self.sessions = sessions
+        # What was tried and dropped, and why (buggy.findings.ruled_out).
+        self.ledger = Ledger(store, review_days=review_days)
+
+    def _ledger(self, fn: Callable[[], Any]) -> None:
+        """Record into the ledger; a ledger problem never fails the decision it follows."""
+        try:
+            fn()
+        except (sqlite3.Error, ValueError, LookupError):
+            log.warning("the ruled-out ledger could not be written", exc_info=True)
+
+    def _captures(self, engagement: str) -> Callable[[str], Any]:
+        store = getattr(self.gateway, "store", None)
+        return lambda capture_id: store.get(engagement, capture_id) if store is not None else None
 
     # ── submit ──────────────────────────────────────────────────────
 
-    def submit(self, engagement: str, data: Any, actor: str) -> dict[str, Any]:
+    def submit(
+        self, engagement: str, data: Any, actor: str, *, require_context: bool = False
+    ) -> dict[str, Any]:
         """Record a claim as a ``candidate``, or merge it into the finding with the same id.
 
         A second report of the same finding adds its assertions (duplicates
         dropped), keeps the higher severity and joins the sources. New
-        assertions put an undecided finding back to ``candidate``; a finding
-        that is already ``exploit_verified`` or ``discarded`` is left as it
-        is and the duplicate is noted in its history.
+        assertions put an undecided finding back to ``candidate`` (and lift
+        what the ledger ruled out for it); a finding that is already
+        ``exploit_verified`` or ``discarded`` is left as it is and the
+        duplicate is noted in its history.
+
+        ``require_context`` (an agent's own submission) refuses a finding of a
+        class in ``CONTEXT_REQUIRED_CLASSES`` that names no usable
+        ``invariant`` and ``entry_point``, unless the stored finding has them.
         """
         if not isinstance(actor, str) or not actor.strip():
             return _error("BAD_ACTOR", "actor is required: a submission names who made it")
@@ -97,6 +130,17 @@ class FindingService:
             return _error("INVALID_FINDING", str(exc), errors=exc.errors)
 
         existing = self.store.get(engagement, incoming.id)
+        if require_context and incoming.vuln_class in CONTEXT_REQUIRED_CLASSES:
+            problems = context_errors(
+                incoming.invariant or (existing.invariant if existing else ""),
+                incoming.entry_point or (existing.entry_point if existing else ""),
+            )
+            if problems:
+                return _error(
+                    "INVALID_FINDING",
+                    "; ".join(f"{e['field']}: {e['message']}" for e in problems),
+                    errors=problems,
+                )
         if existing is None:
             stored = self.store.upsert(incoming, actor)
             return {"ok": True, "created": True, "merged": False, "finding": stored.to_dict()}
@@ -139,6 +183,8 @@ class FindingService:
             cwe=existing.cwe or incoming.cwe,
             description=existing.description or incoming.description,
             remediation=existing.remediation or incoming.remediation,
+            invariant=existing.invariant or incoming.invariant,
+            entry_point=existing.entry_point or incoming.entry_point,
         )
         if fresh:
             # New evidence has not been verified: back in the queue.
@@ -148,6 +194,12 @@ class FindingService:
         stored = self.store.upsert(
             merged, actor, event="merged", detail={"assertions_added": len(fresh)}
         )
+        if fresh:
+            self._ledger(
+                lambda: self.ledger.supersede_finding(
+                    engagement, stored.id, actor=actor, note="new evidence was submitted"
+                )
+            )
         return {
             "ok": True,
             "created": False,
@@ -200,6 +252,17 @@ class FindingService:
                 "assertions": outcome.results,
                 "allow_state_change": allow_state_change,
             },
+        )
+        self._ledger(
+            lambda: self.ledger.after_verification(
+                stored,
+                outcome.status,
+                outcome.results,
+                outcome.reasons,
+                actor=actor,
+                replay_capture_ids=outcome.replay_capture_ids,
+                lookup=self._captures(engagement),
+            )
         )
         return {"ok": True, "finding": stored.to_dict(), "verification": outcome.detail()}
 
@@ -282,6 +345,11 @@ class FindingService:
             )
         except IllegalTransition as exc:
             return _error("CONFLICT", f"the finding changed while it was being graded: {exc}")
+        self._ledger(
+            lambda: self.ledger.after_grade(
+                stored, outcome.decision, list(outcome.reasons), actor=actor
+            )
+        )
         return {"ok": True, "finding": stored.to_dict(), "grade": outcome.to_dict()}
 
     # ── read ────────────────────────────────────────────────────────
