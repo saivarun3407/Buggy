@@ -47,7 +47,7 @@ from buggy.pipeline.schema import (
 )
 from buggy.pipeline.scope import PipelineLimits, ScopeFilter
 from buggy.pipeline.store import ReconStore
-from buggy.pipeline.tools import apirecon, apispec, crtsh, jsparse, params, webrecon
+from buggy.pipeline.tools import apirecon, apispec, crtsh, jsparse, params, recovered, webrecon
 from buggy.pipeline.tools.amass import Amass
 from buggy.pipeline.tools.archives import Gau, Waybackurls
 from buggy.pipeline.tools.base import Invocation
@@ -94,6 +94,8 @@ ADDRESS_RTYPES = ("A", "AAAA")
 DEFAULT_MAX_AGE = 24 * 3600.0
 MAX_JS_FILES = 200
 MAX_JS_BYTES = 3 * 1024 * 1024
+#: Source maps per run whose original files are rebuilt and scanned.
+MAX_RECOVERED_MAPS = 20
 PUBLIC_REPO_HOSTS = frozenset({"github.com", "gitlab.com", "bitbucket.org"})
 
 # (name, invocation, raw_path) -> RunResult. Injected in tests.
@@ -1313,7 +1315,9 @@ class Pipeline:
             for map_url in analysis.source_maps:
                 source_maps.setdefault(map_url, record.value)
         entry["fetched"] = fetched
-        entry["source_maps"] = self._fetch_source_maps(client, source_maps, tally, lines, pairs)
+        entry["source_maps"] = self._fetch_source_maps(
+            client, source_maps, tally, lines, pairs, entry
+        )
         self._note_requests(jsparse.NAME, tally)
         for asset, reasons in limited.items():
             detail = "; ".join(f"{count} {reason}" for reason, count in reasons.items())
@@ -1331,10 +1335,13 @@ class Pipeline:
         tally: dict[str, list[int]],
         lines: list[str],
         pairs: list[tuple[Record, str]],
+        entry: dict[str, Any] | None = None,
     ) -> int:
         """Request each source map the scripts name, once, through the scoped
         client: an out-of-scope map URL is refused before anything is sent.
-        Returns how many maps were recorded. Their source content is not kept."""
+        Returns how many maps were recorded. The map record keeps no source
+        content; the original files a map carries are rebuilt under the run's
+        work directory and scanned (:meth:`_recover_source`)."""
         found = 0
         for map_url, js_url in maps.items():
             try:
@@ -1360,7 +1367,43 @@ class Pipeline:
             found += 1
             lines.append(json.dumps({"js": js_url, "map": record.value, **record.attrs}))
             pairs.append((_with_line(record, len(lines)), record.asset))
+            if found <= MAX_RECOVERED_MAPS:
+                self._recover_source(document, record.value, js_url, lines, pairs, entry)
         return found
+
+    def _recover_source(
+        self,
+        document: Any,
+        map_url: str,
+        js_url: str,
+        lines: list[str],
+        pairs: list[tuple[Record, str]],
+        entry: dict[str, Any] | None,
+    ) -> None:
+        """Rebuild a map's original files (``sourcesContent``) and scan them with fixed rules.
+
+        No request: the map was already fetched. Files go under
+        ``work/<engagement>/<run>/recovered/<hash of the map URL>``; nothing in
+        them is run. Each hit is a ``js_finding`` record of kind
+        ``recovered_source``, a lead that still needs a live proof.
+        """
+        name = hashlib.sha256(map_url.encode()).hexdigest()[:24]
+        dest = self._workdir() / "recovered" / name
+        result = recovered.analyze(
+            document,
+            map_url=map_url,
+            js_url=js_url,
+            dest=dest,
+            in_scope=self.scope.allows,
+        )
+        if entry is not None:
+            entry["recovered_files"] = entry.get("recovered_files", 0) + len(result.files)
+            entry["recovered_findings"] = entry.get("recovered_findings", 0) + len(result.findings)
+        if result.partial:
+            self._note(jsparse.NAME, "partial", result.partial, assets=[host_of(map_url)])
+        for finding in result.findings:
+            lines.append(json.dumps({"map": map_url, **finding.attrs}, sort_keys=True))
+            pairs.append((_with_line(finding, len(lines)), finding.asset))
 
     # ── stage 6: web recon ──────────────────────────────────────────
 

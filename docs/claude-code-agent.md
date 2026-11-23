@@ -108,6 +108,15 @@ How the agent is pointed at the right skill (all fixed rules in
 - **Skills cannot name checks that do not exist.** A test checks every Buggy
   check a skill's "In Buggy" section names against the probe registry and the
   agent tools, and that every skill the map hands out exists.
+- **Skills have versions.** `packages/buggy/buggy/skills/skills.lock.json`
+  holds every SKILL.md's sha256 and the digest that last passed
+  `uv run python -m buggy.skill_audit verify-skills` (frontmatter valid,
+  sections complete, every Buggy check it names exists). `skill_get` names the
+  digest it served in its first line, so a run records which version it read.
+  `skill_list` marks a skill `unverified` when its file changed since then.
+  `make check-skills-lock` (in CI) fails when a skill changed without the lock
+  being updated; after editing a skill, run `make verify-skills` and commit
+  the lock (`... skill_audit lock --write` only rewrites the digests).
 
 HackTricks allows adapting its content with attribution; commercial use needs
 its author's permission.

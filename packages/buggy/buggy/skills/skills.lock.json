@@ -1,0 +1,1974 @@
+{
+ "algorithm": "sha256",
+ "skills": [
+  {
+   "name": "benchmark",
+   "path": "benchmark/SKILL.md",
+   "sha256": "ebefa73cc2e58ac893642f839168b54977c548cf3e26a620ee0396a48934225c",
+   "verified": "ebefa73cc2e58ac893642f839168b54977c548cf3e26a620ee0396a48934225c"
+  },
+  {
+   "name": "access-control-idor",
+   "path": "bounty/access_control/SKILL.md",
+   "sha256": "a0ea4f58cbea46838707dddcc8e2961ecef86c7c933373bbefe224ee7398bc96",
+   "verified": "a0ea4f58cbea46838707dddcc8e2961ecef86c7c933373bbefe224ee7398bc96"
+  },
+  {
+   "name": "api-security-top10",
+   "path": "bounty/api_security/SKILL.md",
+   "sha256": "5e0a2ca7e4197c5fe6e286f5a88f43cfc934ffe9245e65fa5637332bf288f864",
+   "verified": "5e0a2ca7e4197c5fe6e286f5a88f43cfc934ffe9245e65fa5637332bf288f864"
+  },
+  {
+   "name": "asvs-audit",
+   "path": "bounty/asvs/SKILL.md",
+   "sha256": "9976133675fe4a293e97de2852e9653ac85a97d2b3021b0cf53097f9f649c3c5",
+   "verified": "9976133675fe4a293e97de2852e9653ac85a97d2b3021b0cf53097f9f649c3c5"
+  },
+  {
+   "name": "authn-session-takeover",
+   "path": "bounty/authn_session/SKILL.md",
+   "sha256": "cb1f622bd1310e1aa5d44c84c19237530d955b0e1aba45ed3507d7dfcf592a43",
+   "verified": "cb1f622bd1310e1aa5d44c84c19237530d955b0e1aba45ed3507d7dfcf592a43"
+  },
+  {
+   "name": "business-logic-race",
+   "path": "bounty/business_logic/SKILL.md",
+   "sha256": "0963f89a2571dbc927aca06995909f222803d5096695d164d5c5cf1903538263",
+   "verified": "0963f89a2571dbc927aca06995909f222803d5096695d164d5c5cf1903538263"
+  },
+  {
+   "name": "client-side-injection",
+   "path": "bounty/clientside_security/SKILL.md",
+   "sha256": "b3c86219af96656777e067bafe0b02ecfec8c32ede425604e591ca0d04e9fc5e",
+   "verified": "b3c86219af96656777e067bafe0b02ecfec8c32ede425604e591ca0d04e9fc5e"
+  },
+  {
+   "name": "graphql-security",
+   "path": "bounty/graphql_security/SKILL.md",
+   "sha256": "e422c43ef064a33f7098604dbbe6c470fbddffa8253f9797a81391b46fad3ace",
+   "verified": "e422c43ef064a33f7098604dbbe6c470fbddffa8253f9797a81391b46fad3ace"
+  },
+  {
+   "name": "llm-app-security",
+   "path": "bounty/llm_security/SKILL.md",
+   "sha256": "ce2134799c20faca36725a3f620c1acabf1002125ecfd70dc888e5a4244a936c",
+   "verified": "ce2134799c20faca36725a3f620c1acabf1002125ecfd70dc888e5a4244a936c"
+  },
+  {
+   "name": "attack-coverage-mapping",
+   "path": "bounty/mitre_attack/SKILL.md",
+   "sha256": "93fc8d987add4d1d14548b44b2869c114aeecb24e7b0569e49fcfe836566ddc8",
+   "verified": "93fc8d987add4d1d14548b44b2869c114aeecb24e7b0569e49fcfe836566ddc8"
+  },
+  {
+   "name": "bounty-scout-intake",
+   "path": "bounty/scout/SKILL.md",
+   "sha256": "65b6c8b04afe10f77ef6158b4c65966247d50bb5750abd6b1fd23b9697e6914c",
+   "verified": "65b6c8b04afe10f77ef6158b4c65966247d50bb5750abd6b1fd23b9697e6914c"
+  },
+  {
+   "name": "secrets-cicd-exposure",
+   "path": "bounty/secrets_cicd/SKILL.md",
+   "sha256": "44f9c235f530d44d1eb509c139effeb1c276c551b13c0d35003218e703e78070",
+   "verified": "44f9c235f530d44d1eb509c139effeb1c276c551b13c0d35003218e703e78070"
+  },
+  {
+   "name": "ssrf-cloud-metadata",
+   "path": "bounty/ssrf_cloud/SKILL.md",
+   "sha256": "78a15bfb08413501f3ae8b16eb6487172e7de2a348253128cc6d382a9124f0e2",
+   "verified": "78a15bfb08413501f3ae8b16eb6487172e7de2a348253128cc6d382a9124f0e2"
+  },
+  {
+   "name": "defensive-authenticated-surface-review",
+   "path": "shared/defensive-assessment/authenticated-surface-review/SKILL.md",
+   "sha256": "c23ddba9d396c8e91f46536c95403989793ba5a9f8d78118f3fe90b93b46f77c",
+   "verified": "c23ddba9d396c8e91f46536c95403989793ba5a9f8d78118f3fe90b93b46f77c"
+  },
+  {
+   "name": "defensive-authorization-evidence-matrix",
+   "path": "shared/defensive-assessment/authorization-evidence-matrix/SKILL.md",
+   "sha256": "51b6a9918b8b9f343bd62fa3863912c334bcc8e62ce79f019523b24ed38f0aca",
+   "verified": "51b6a9918b8b9f343bd62fa3863912c334bcc8e62ce79f019523b24ed38f0aca"
+  },
+  {
+   "name": "defensive-export-detection-review",
+   "path": "shared/defensive-assessment/export-detection-review/SKILL.md",
+   "sha256": "ca65178cb8449e4a1a1ef4e0522b0cfe4deee8393f207bd68a468ee8c423742e",
+   "verified": "ca65178cb8449e4a1a1ef4e0522b0cfe4deee8393f207bd68a468ee8c423742e"
+  },
+  {
+   "name": "defensive-mfa-enrollment-review",
+   "path": "shared/defensive-assessment/mfa-enrollment-review/SKILL.md",
+   "sha256": "192a36f85f4ecc636c8ffcdf5c749d830f0ff315b90b0b79f54da65a6b80d056",
+   "verified": "192a36f85f4ecc636c8ffcdf5c749d830f0ff315b90b0b79f54da65a6b80d056"
+  },
+  {
+   "name": "defensive-oauth-consent-review",
+   "path": "shared/defensive-assessment/oauth-consent-review/SKILL.md",
+   "sha256": "076347247e063ff25bb01dab2f24d9a71d1a9baa6d6d9202bfbdfdbb3abd88fd",
+   "verified": "076347247e063ff25bb01dab2f24d9a71d1a9baa6d6d9202bfbdfdbb3abd88fd"
+  },
+  {
+   "name": "defensive-remediation-retest",
+   "path": "shared/defensive-assessment/remediation-retest/SKILL.md",
+   "sha256": "195443e8b83add2bc051d9f3bab2206ba858442a6927aac76ca43f086aa92670",
+   "verified": "195443e8b83add2bc051d9f3bab2206ba858442a6927aac76ca43f086aa92670"
+  },
+  {
+   "name": "defensive-saas-guest-access-review",
+   "path": "shared/defensive-assessment/saas-guest-access-review/SKILL.md",
+   "sha256": "d2c6cf2064765e158f0eefe8b23dd048f881c86e4403d1a231f6a9e37261bbcc",
+   "verified": "d2c6cf2064765e158f0eefe8b23dd048f881c86e4403d1a231f6a9e37261bbcc"
+  },
+  {
+   "name": "defensive-session-revocation-review",
+   "path": "shared/defensive-assessment/session-revocation-review/SKILL.md",
+   "sha256": "6c3a5babb89e955021bc0077460894a693c0ffacb81c13ccc99a45f54327eed3",
+   "verified": "6c3a5babb89e955021bc0077460894a693c0ffacb81c13ccc99a45f54327eed3"
+  },
+  {
+   "name": "finding-protocol",
+   "path": "shared/finding-protocol/SKILL.md",
+   "sha256": "771ac17c67d06d98585e06b7c5efd48fe634eef043a9eecb054902d5f42fd345",
+   "verified": "771ac17c67d06d98585e06b7c5efd48fe634eef043a9eecb054902d5f42fd345"
+  },
+  {
+   "name": "opsec",
+   "path": "shared/opsec/SKILL.md",
+   "sha256": "a3f316155e62a4225fa031fc7e15aece7c16453f1f978402fefec95e3ac31c58",
+   "verified": "a3f316155e62a4225fa031fc7e15aece7c16453f1f978402fefec95e3ac31c58"
+  },
+  {
+   "name": "references",
+   "path": "shared/references/SKILL.md",
+   "sha256": "f6d13fe7b8b321a4f1c7f53a005767914ee4163875361d57bee99c1148588d07",
+   "verified": "f6d13fe7b8b321a4f1c7f53a005767914ee4163875361d57bee99c1148588d07"
+  },
+  {
+   "name": "analyst-overview",
+   "path": "standard/analyst/SKILL.md",
+   "sha256": "6ec4ca58534c4b9232923f9cfc1104c9fd404c525559df9880b9180cac8e148c",
+   "verified": "6ec4ca58534c4b9232923f9cfc1104c9fd404c525559df9880b9180cac8e148c"
+  },
+  {
+   "name": "adversarial-ml-evasion",
+   "path": "standard/analyst/adversarial-ml-evasion/SKILL.md",
+   "sha256": "9c526e4ea8ddad84a21528a7842fb6ff83ed0a10d57839aea58a7000d95e0c57",
+   "verified": "9c526e4ea8ddad84a21528a7842fb6ff83ed0a10d57839aea58a7000d95e0c57"
+  },
+  {
+   "name": "auth-bypass",
+   "path": "standard/analyst/auth-bypass/SKILL.md",
+   "sha256": "cf3ce39f57a46fdb4dfd68696f6d2c3b9b7f199ce00c6da2a092050c65881073",
+   "verified": "cf3ce39f57a46fdb4dfd68696f6d2c3b9b7f199ce00c6da2a092050c65881073"
+  },
+  {
+   "name": "bounty-hunting-methodology",
+   "path": "standard/analyst/bounty-hunting/SKILL.md",
+   "sha256": "fb299373e76b041bd3a4d85514b4c8a163dc86eb781bda08a0c982a1d7fca1ea",
+   "verified": "fb299373e76b041bd3a4d85514b4c8a163dc86eb781bda08a0c982a1d7fca1ea"
+  },
+  {
+   "name": "chain-credential-reuse",
+   "path": "standard/analyst/chains/cred-reuse/SKILL.md",
+   "sha256": "a672489d30d8ec494f4900d101ce93b7e06c87c2d243881f49f532ede2187067",
+   "verified": "a672489d30d8ec494f4900d101ce93b7e06c87c2d243881f49f532ede2187067"
+  },
+  {
+   "name": "chain-idor-to-priv-esc",
+   "path": "standard/analyst/chains/idor-to-priv-esc/SKILL.md",
+   "sha256": "9aade412b4acab65c20c85f06abbcbbccde5dc51d5fca4fc52373f4f2f4dc40b",
+   "verified": "9aade412b4acab65c20c85f06abbcbbccde5dc51d5fca4fc52373f4f2f4dc40b"
+  },
+  {
+   "name": "chain-ssrf-to-rce",
+   "path": "standard/analyst/chains/ssrf-to-rce/SKILL.md",
+   "sha256": "55f8e65c604afeb313554f212f787dd962fc9d7deeee3f4b36614fa8cbb6c156",
+   "verified": "55f8e65c604afeb313554f212f787dd962fc9d7deeee3f4b36614fa8cbb6c156"
+  },
+  {
+   "name": "chain-xss-to-takeover",
+   "path": "standard/analyst/chains/xss-to-takeover/SKILL.md",
+   "sha256": "cad017d9e0de7af9769964611a7ac2d125818c608d7ded01a344d2512adac218",
+   "verified": "cad017d9e0de7af9769964611a7ac2d125818c608d7ded01a344d2512adac218"
+  },
+  {
+   "name": "command-injection",
+   "path": "standard/analyst/command-injection/SKILL.md",
+   "sha256": "02c1148240333d25752329e86daba2f105797601d4c8832667ddf4e988b5f481",
+   "verified": "02c1148240333d25752329e86daba2f105797601d4c8832667ddf4e988b5f481"
+  },
+  {
+   "name": "data-and-model-poisoning",
+   "path": "standard/analyst/data-and-model-poisoning/SKILL.md",
+   "sha256": "0ef58ef478e395639f02cf8290a65ebbeacbaa4b2e17ded9795110b515328b2e",
+   "verified": "0ef58ef478e395639f02cf8290a65ebbeacbaa4b2e17ded9795110b515328b2e"
+  },
+  {
+   "name": "deserialization",
+   "path": "standard/analyst/deserialization/SKILL.md",
+   "sha256": "56e7652efc23d7b5d0b4dcd057a55cf09b8a8998ab884b100cc6c5059c2a55fb",
+   "verified": "56e7652efc23d7b5d0b4dcd057a55cf09b8a8998ab884b100cc6c5059c2a55fb"
+  },
+  {
+   "name": "excessive-agency",
+   "path": "standard/analyst/excessive-agency/SKILL.md",
+   "sha256": "d1298d77ee175d44be7b37aa62ab94da75a5a4d32aabb5b7d59500e1feb3fe25",
+   "verified": "d1298d77ee175d44be7b37aa62ab94da75a5a4d32aabb5b7d59500e1feb3fe25"
+  },
+  {
+   "name": "idor",
+   "path": "standard/analyst/idor/SKILL.md",
+   "sha256": "ef2a0a0fa2912734b03350cdb820e09ea160e60505a2f2d77d7f140bfba3be53",
+   "verified": "ef2a0a0fa2912734b03350cdb820e09ea160e60505a2f2d77d7f140bfba3be53"
+  },
+  {
+   "name": "improper-output-handling",
+   "path": "standard/analyst/improper-output-handling/SKILL.md",
+   "sha256": "c9e154cb0fad840137c232a42dd55454c5fbb14095426bd84e5b624c36281080",
+   "verified": "c9e154cb0fad840137c232a42dd55454c5fbb14095426bd84e5b624c36281080"
+  },
+  {
+   "name": "misinformation",
+   "path": "standard/analyst/misinformation/SKILL.md",
+   "sha256": "fb70970ba062779cdaaa6486719ddf0ab4fffa2f53325d6aee46b573a4d7bfef",
+   "verified": "fb70970ba062779cdaaa6486719ddf0ab4fffa2f53325d6aee46b573a4d7bfef"
+  },
+  {
+   "name": "ml-model-extraction",
+   "path": "standard/analyst/ml-model-extraction/SKILL.md",
+   "sha256": "76e9aba545b939ab5d43be7bd7f55a2404128ee2eba51e710c4359bb5c2bffd2",
+   "verified": "76e9aba545b939ab5d43be7bd7f55a2404128ee2eba51e710c4359bb5c2bffd2"
+  },
+  {
+   "name": "path-traversal",
+   "path": "standard/analyst/path-traversal/SKILL.md",
+   "sha256": "39f903969e5b92b2b39d38488e48a27c83ba7741e2ab499eee679463b39d6c68",
+   "verified": "39f903969e5b92b2b39d38488e48a27c83ba7741e2ab499eee679463b39d6c68"
+  },
+  {
+   "name": "pattern-exhaustion",
+   "path": "standard/analyst/pattern-exhaustion/SKILL.md",
+   "sha256": "f4e46fa7afcd21b8c86293cb05840be1306fc688537369a9c973313f1a845320",
+   "verified": "f4e46fa7afcd21b8c86293cb05840be1306fc688537369a9c973313f1a845320"
+  },
+  {
+   "name": "prompt-injection",
+   "path": "standard/analyst/prompt-injection/SKILL.md",
+   "sha256": "42290c61f36ebc17c81237608fa071e98a26b340dd3bc0dcd89f50b4fd408213",
+   "verified": "42290c61f36ebc17c81237608fa071e98a26b340dd3bc0dcd89f50b4fd408213"
+  },
+  {
+   "name": "prototype-pollution",
+   "path": "standard/analyst/prototype-pollution/SKILL.md",
+   "sha256": "4e3b2c7c5c1ef05450c9c5ccce6039716369b6fb376979648b24df564ae93322",
+   "verified": "4e3b2c7c5c1ef05450c9c5ccce6039716369b6fb376979648b24df564ae93322"
+  },
+  {
+   "name": "redos",
+   "path": "standard/analyst/redos/SKILL.md",
+   "sha256": "2d21cae6586bc1324d8b1336847ef1c3975f70a5d8b449f4cb62c089171ad814",
+   "verified": "2d21cae6586bc1324d8b1336847ef1c3975f70a5d8b449f4cb62c089171ad814"
+  },
+  {
+   "name": "sensitive-information-disclosure",
+   "path": "standard/analyst/sensitive-information-disclosure/SKILL.md",
+   "sha256": "788500c6c8fc5318608b737dd1ee47c5310bcfe7cb6b62342f9868164ee7b88d",
+   "verified": "788500c6c8fc5318608b737dd1ee47c5310bcfe7cb6b62342f9868164ee7b88d"
+  },
+  {
+   "name": "sql-injection",
+   "path": "standard/analyst/sql-injection/SKILL.md",
+   "sha256": "87731fd4aace5613cb0f9104644373219034a5fcb87ed8db6039a6bb22670c41",
+   "verified": "87731fd4aace5613cb0f9104644373219034a5fcb87ed8db6039a6bb22670c41"
+  },
+  {
+   "name": "ssrf",
+   "path": "standard/analyst/ssrf/SKILL.md",
+   "sha256": "3d0430d4a48eab2151dfcd672395cfd595fc720adf27e89615d7dd6b35546545",
+   "verified": "3d0430d4a48eab2151dfcd672395cfd595fc720adf27e89615d7dd6b35546545"
+  },
+  {
+   "name": "ssti",
+   "path": "standard/analyst/ssti/SKILL.md",
+   "sha256": "4a5ea46236646095dde7512cbf758bc3ce39b9a457547a9d3691308153b5ed10",
+   "verified": "4a5ea46236646095dde7512cbf758bc3ce39b9a457547a9d3691308153b5ed10"
+  },
+  {
+   "name": "supply-chain",
+   "path": "standard/analyst/supply-chain/SKILL.md",
+   "sha256": "ddd9e4a36040079cc71c01b67556d8e5e5e9655470cad38ce7d57946373fc6ae",
+   "verified": "ddd9e4a36040079cc71c01b67556d8e5e5e9655470cad38ce7d57946373fc6ae"
+  },
+  {
+   "name": "system-prompt-leakage",
+   "path": "standard/analyst/system-prompt-leakage/SKILL.md",
+   "sha256": "d9f593eac579eb75bf700ea51f48681f2f6ca465bbba74df1e46358a1bbb6d3b",
+   "verified": "d9f593eac579eb75bf700ea51f48681f2f6ca465bbba74df1e46358a1bbb6d3b"
+  },
+  {
+   "name": "ti-anyrun-lookup",
+   "path": "standard/analyst/ti-anyrun-lookup/SKILL.md",
+   "sha256": "9e6d4a4fc27857ca2bff306dbd97ff5d3d06ed7c2f9fe81648115fc62d51d7a4",
+   "verified": "9e6d4a4fc27857ca2bff306dbd97ff5d3d06ed7c2f9fe81648115fc62d51d7a4"
+  },
+  {
+   "name": "ti-ioc-extraction",
+   "path": "standard/analyst/ti-ioc-extraction/SKILL.md",
+   "sha256": "e3a78f115703edf814ef9307bbbb66f425bdef695d433fe0e5982b029bf9344b",
+   "verified": "e3a78f115703edf814ef9307bbbb66f425bdef695d433fe0e5982b029bf9344b"
+  },
+  {
+   "name": "ti-yara-hunting",
+   "path": "standard/analyst/ti-yara-hunting/SKILL.md",
+   "sha256": "94e11d4cd395c57499e7237a322e5b1c161b8199595567895a820d299107bc84",
+   "verified": "94e11d4cd395c57499e7237a322e5b1c161b8199595567895a820d299107bc84"
+  },
+  {
+   "name": "trust-boundary-analysis",
+   "path": "standard/analyst/trust-boundary/SKILL.md",
+   "sha256": "c22e8b63619c03140cf5927ab94cb6e884f4fa6164d01cd8f88e80974c08c568",
+   "verified": "c22e8b63619c03140cf5927ab94cb6e884f4fa6164d01cd8f88e80974c08c568"
+  },
+  {
+   "name": "unbounded-consumption",
+   "path": "standard/analyst/unbounded-consumption/SKILL.md",
+   "sha256": "30a8bf326c2c3a61e0d505ce8179d75b7e8344b7f08bdc7de452dc80bdf45169",
+   "verified": "30a8bf326c2c3a61e0d505ce8179d75b7e8344b7f08bdc7de452dc80bdf45169"
+  },
+  {
+   "name": "vector-and-embedding-weaknesses",
+   "path": "standard/analyst/vector-and-embedding-weaknesses/SKILL.md",
+   "sha256": "abb09d76de68451f5042dce9256eed6387ff76960c4f1b570952497992c2632e",
+   "verified": "abb09d76de68451f5042dce9256eed6387ff76960c4f1b570952497992c2632e"
+  },
+  {
+   "name": "xxe",
+   "path": "standard/analyst/xxe/SKILL.md",
+   "sha256": "fd245dfa12c1e10aff558df50b92c9c3e42764cc21a25f69b6c5ec7517814112",
+   "verified": "fd245dfa12c1e10aff558df50b92c9c3e42764cc21a25f69b6c5ec7517814112"
+  },
+  {
+   "name": "engagement-lifecycle",
+   "path": "standard/buggy-orchestrator/engagement-lifecycle/SKILL.md",
+   "sha256": "dc5672d0f7e9e0ce1549af31c99865071b4ebf4072d30c579d639536076c705e",
+   "verified": "dc5672d0f7e9e0ce1549af31c99865071b4ebf4072d30c579d639536076c705e"
+  },
+  {
+   "name": "engagement-startup",
+   "path": "standard/buggy-orchestrator/engagement-startup/SKILL.md",
+   "sha256": "9df6e9b7434e8e1c053a5525229a830dd2314906f4d70ed5edbd0158028f0fcd",
+   "verified": "9df6e9b7434e8e1c053a5525229a830dd2314906f4d70ed5edbd0158028f0fcd"
+  },
+  {
+   "name": "final-report",
+   "path": "standard/buggy-orchestrator/final-report/SKILL.md",
+   "sha256": "f9fe82583d214bc5c9d98acd3fd840ce61a7c0456b83435917e680b38a07cf35",
+   "verified": "f9fe82583d214bc5c9d98acd3fd840ce61a7c0456b83435917e680b38a07cf35"
+  },
+  {
+   "name": "kali-mcp-bridge",
+   "path": "standard/buggy-orchestrator/kali-mcp-bridge/SKILL.md",
+   "sha256": "4d40ca49e93e7e79726af9265cec839d511b4b1bdad51c2ab104303609c0ca89",
+   "verified": "4d40ca49e93e7e79726af9265cec839d511b4b1bdad51c2ab104303609c0ca89"
+  },
+  {
+   "name": "kill-chain-analysis",
+   "path": "standard/buggy-orchestrator/kill-chain-analysis/SKILL.md",
+   "sha256": "a4b466100f9b0f456ce51a3b4580980162c6c9ddfafba00ca33e824e96025aea",
+   "verified": "a4b466100f9b0f456ce51a3b4580980162c6c9ddfafba00ca33e824e96025aea"
+  },
+  {
+   "name": "orchestration",
+   "path": "standard/buggy-orchestrator/orchestration/SKILL.md",
+   "sha256": "227d1b65bc5dbc9648ade10a2c3f68e5f9ca631a8f17512e9dd4d653652deccb",
+   "verified": "227d1b65bc5dbc9648ade10a2c3f68e5f9ca631a8f17512e9dd4d653652deccb"
+  },
+  {
+   "name": "pentest-task-tree",
+   "path": "standard/buggy-orchestrator/pentest-task-tree/SKILL.md",
+   "sha256": "e8e5734b8ea453bed7d31bc0badb9921ac8b2053b0644b5c6aacc40628e80191",
+   "verified": "e8e5734b8ea453bed7d31bc0badb9921ac8b2053b0644b5c6aacc40628e80191"
+  },
+  {
+   "name": "ad",
+   "path": "standard/exploit/ad/SKILL.md",
+   "sha256": "309e0a3dde4ad683b0d85499d87eba26b525dd5d29d1c702dc8ba568ace50410",
+   "verified": "309e0a3dde4ad683b0d85499d87eba26b525dd5d29d1c702dc8ba568ace50410"
+  },
+  {
+   "name": "api-overview",
+   "path": "standard/exploit/api/SKILL.md",
+   "sha256": "413a15ba9283e3e1c14957a4bb91deeaa0b93f2e6b705a8c8567ccae624b1a4e",
+   "verified": "413a15ba9283e3e1c14957a4bb91deeaa0b93f2e6b705a8c8567ccae624b1a4e"
+  },
+  {
+   "name": "api-grpc",
+   "path": "standard/exploit/api/grpc/SKILL.md",
+   "sha256": "4967348f765179ccda6ba4b17ca1b63d83cc2349ffecae70367fc526ccb00cda",
+   "verified": "4967348f765179ccda6ba4b17ca1b63d83cc2349ffecae70367fc526ccb00cda"
+  },
+  {
+   "name": "api-server-sent-events",
+   "path": "standard/exploit/api/server-sent-events/SKILL.md",
+   "sha256": "418c3c2e085cd7e303195187170fafd096ae08edb0c6d4deaef4e0f9e9f2cff1",
+   "verified": "418c3c2e085cd7e303195187170fafd096ae08edb0c6d4deaef4e0f9e9f2cff1"
+  },
+  {
+   "name": "api-soap-wsdl",
+   "path": "standard/exploit/api/soap-wsdl/SKILL.md",
+   "sha256": "0596c30a02379b7721bb684174026f996640b2974b2f0339846caed20cfa3daa",
+   "verified": "0596c30a02379b7721bb684174026f996640b2974b2f0339846caed20cfa3daa"
+  },
+  {
+   "name": "api-websocket",
+   "path": "standard/exploit/api/websocket/SKILL.md",
+   "sha256": "8a2f4af7219a75ce7f1840e23438e0b93a9b542262f92e2aed2e0728ac9760e7",
+   "verified": "8a2f4af7219a75ce7f1840e23438e0b93a9b542262f92e2aed2e0728ac9760e7"
+  },
+  {
+   "name": "cicd",
+   "path": "standard/exploit/cicd/SKILL.md",
+   "sha256": "4bae8df8bf390ec7ba97529a85091668561266b78f72de60f00bc4ffc08be063",
+   "verified": "4bae8df8bf390ec7ba97529a85091668561266b78f72de60f00bc4ffc08be063"
+  },
+  {
+   "name": "cicd-secrets-exfil",
+   "path": "standard/exploit/cicd/cicd-secrets-exfil/SKILL.md",
+   "sha256": "a1d5f0bdee8dda5022273d898d759e7b843cf8bb6082d382176b0332ebae27b9",
+   "verified": "a1d5f0bdee8dda5022273d898d759e7b843cf8bb6082d382176b0332ebae27b9"
+  },
+  {
+   "name": "github-actions-injection",
+   "path": "standard/exploit/cicd/github-actions-injection/SKILL.md",
+   "sha256": "71940fbdf88ca99c74428cd0cd6c892d37b93bc0ffe076a484e00d57b752575d",
+   "verified": "71940fbdf88ca99c74428cd0cd6c892d37b93bc0ffe076a484e00d57b752575d"
+  },
+  {
+   "name": "poisoned-pipeline-execution",
+   "path": "standard/exploit/cicd/poisoned-pipeline-execution/SKILL.md",
+   "sha256": "d53273aceb43747bbc1b24af997a63f7bf73ab8b28f137bc03f1aa68fe1feffd",
+   "verified": "d53273aceb43747bbc1b24af997a63f7bf73ab8b28f137bc03f1aa68fe1feffd"
+  },
+  {
+   "name": "self-hosted-runner-abuse",
+   "path": "standard/exploit/cicd/self-hosted-runner-abuse/SKILL.md",
+   "sha256": "cc23918a18761015afc1c43dcaca93d95d60ed0d9714697d7659262603ea3aa7",
+   "verified": "cc23918a18761015afc1c43dcaca93d95d60ed0d9714697d7659262603ea3aa7"
+  },
+  {
+   "name": "crypto-decode",
+   "path": "standard/exploit/crypto/SKILL.md",
+   "sha256": "db2843761d05a8892a2f2bbc5b4a878d7897d2080960c1e3e0395f4760bd4d95",
+   "verified": "db2843761d05a8892a2f2bbc5b4a878d7897d2080960c1e3e0395f4760bd4d95"
+  },
+  {
+   "name": "edge-device-exploitation",
+   "path": "standard/exploit/edge-device-exploitation/SKILL.md",
+   "sha256": "146d292ee34dd9fcaa46ecdce4daaf5b4981d40167131f6fa0f93caf86297450",
+   "verified": "146d292ee34dd9fcaa46ecdce4daaf5b4981d40167131f6fa0f93caf86297450"
+  },
+  {
+   "name": "ics-ot-overview",
+   "path": "standard/exploit/ics-ot/SKILL.md",
+   "sha256": "bc2cf304bd8b0a64c1d541414e08a4999ad3d1b7789c33e86af1e7d61086ee3d",
+   "verified": "bc2cf304bd8b0a64c1d541414e08a4999ad3d1b7789c33e86af1e7d61086ee3d"
+  },
+  {
+   "name": "ics-bacnet",
+   "path": "standard/exploit/ics-ot/bacnet/SKILL.md",
+   "sha256": "677a4973ff1f4d6d3d80575fd477e93674fe82915a3667bfbcd0a61cc3181d97",
+   "verified": "677a4973ff1f4d6d3d80575fd477e93674fe82915a3667bfbcd0a61cc3181d97"
+  },
+  {
+   "name": "ics-dnp3",
+   "path": "standard/exploit/ics-ot/dnp3/SKILL.md",
+   "sha256": "b1c5b1b9ab0ee9bc16cb3257f315e738ff8266a5a8077d811b5eb4931463c262",
+   "verified": "b1c5b1b9ab0ee9bc16cb3257f315e738ff8266a5a8077d811b5eb4931463c262"
+  },
+  {
+   "name": "enip-cip",
+   "path": "standard/exploit/ics-ot/enip-cip/SKILL.md",
+   "sha256": "4875ae2e72b0a163e7d11a2e01ddfdb76403b99aa790e8b2d60cb5f82a681880",
+   "verified": "4875ae2e72b0a163e7d11a2e01ddfdb76403b99aa790e8b2d60cb5f82a681880"
+  },
+  {
+   "name": "ics-modbus",
+   "path": "standard/exploit/ics-ot/modbus/SKILL.md",
+   "sha256": "bf5ea55140e6107c969a10bc9da74331b7f9308dd40cfd75f9d81dbb8d3dae07",
+   "verified": "bf5ea55140e6107c969a10bc9da74331b7f9308dd40cfd75f9d81dbb8d3dae07"
+  },
+  {
+   "name": "opcua",
+   "path": "standard/exploit/ics-ot/opcua/SKILL.md",
+   "sha256": "01ed638029cfb791143f0e783a51b1f10831cf34b727d95338dd37e5ee43cd23",
+   "verified": "01ed638029cfb791143f0e783a51b1f10831cf34b727d95338dd37e5ee43cd23"
+  },
+  {
+   "name": "profinet",
+   "path": "standard/exploit/ics-ot/profinet/SKILL.md",
+   "sha256": "c99cd0fcf63bfc11781a1b639efd240beab23b76732f0fdda0d5591bb0bbba0a",
+   "verified": "c99cd0fcf63bfc11781a1b639efd240beab23b76732f0fdda0d5591bb0bbba0a"
+  },
+  {
+   "name": "ics-s7comm",
+   "path": "standard/exploit/ics-ot/s7comm/SKILL.md",
+   "sha256": "900dfb4379e6eeb73fea9d1c6d00496e95a91c34dde5000e751023b6353ffe81",
+   "verified": "900dfb4379e6eeb73fea9d1c6d00496e95a91c34dde5000e751023b6353ffe81"
+  },
+  {
+   "name": "exploit-reporting",
+   "path": "standard/exploit/reporting/SKILL.md",
+   "sha256": "3a908f3725b8ad7ed7aa8962390485bbc10318b06ff4fc672fdf2c347a05d2ff",
+   "verified": "3a908f3725b8ad7ed7aa8962390485bbc10318b06ff4fc672fdf2c347a05d2ff"
+  },
+  {
+   "name": "rmm-tool-abuse",
+   "path": "standard/exploit/rmm-tool-abuse/SKILL.md",
+   "sha256": "10c7521713c6c1b826e9642c11b203d9e67c1c491ec19fdf0fdbe43606922a0d",
+   "verified": "10c7521713c6c1b826e9642c11b203d9e67c1c491ec19fdf0fdbe43606922a0d"
+  },
+  {
+   "name": "supplychain-overview",
+   "path": "standard/exploit/supplychain/SKILL.md",
+   "sha256": "31a2c5b359bc0cc89de57d83fb4e97a705be0ff166d6b26dc4137a16d3c9ee51",
+   "verified": "31a2c5b359bc0cc89de57d83fb4e97a705be0ff166d6b26dc4137a16d3c9ee51"
+  },
+  {
+   "name": "dep-confusion",
+   "path": "standard/exploit/supplychain/dep-confusion/SKILL.md",
+   "sha256": "837d3193c5f063c91eec37d0cdd50d22337939a7cab9d6b6266c947685a4b800",
+   "verified": "837d3193c5f063c91eec37d0cdd50d22337939a7cab9d6b6266c947685a4b800"
+  },
+  {
+   "name": "web",
+   "path": "standard/exploit/web/SKILL.md",
+   "sha256": "45f3f6237c3c290aee0b6bf59b746aeaec56e873d9ef8dc1a275ef899fb401b1",
+   "verified": "45f3f6237c3c290aee0b6bf59b746aeaec56e873d9ef8dc1a275ef899fb401b1"
+  },
+  {
+   "name": "ato-methodology",
+   "path": "standard/exploit/web/ato-methodology/SKILL.md",
+   "sha256": "4f11bfa0690db1d1438e4b0549017a179139180aa3f9724e62dad3d2073894ae",
+   "verified": "4f11bfa0690db1d1438e4b0549017a179139180aa3f9724e62dad3d2073894ae"
+  },
+  {
+   "name": "bfla",
+   "path": "standard/exploit/web/bfla/SKILL.md",
+   "sha256": "f2fcba00450f5798fd0e171ff952684f20df07f0cd4d092b31ee09ddc7ee300f",
+   "verified": "f2fcba00450f5798fd0e171ff952684f20df07f0cd4d092b31ee09ddc7ee300f"
+  },
+  {
+   "name": "blind-sqli",
+   "path": "standard/exploit/web/blind-sqli/SKILL.md",
+   "sha256": "32766d4e6ba26c330bb80bc8dfc1904d9c6e29df57362ec8ba11219a4173bd8b",
+   "verified": "32766d4e6ba26c330bb80bc8dfc1904d9c6e29df57362ec8ba11219a4173bd8b"
+  },
+  {
+   "name": "business-logic",
+   "path": "standard/exploit/web/business-logic/SKILL.md",
+   "sha256": "30bdc2c99d7241ace5e5c2da88f7e6408981997180bb9a3cfc25a802306db701",
+   "verified": "30bdc2c99d7241ace5e5c2da88f7e6408981997180bb9a3cfc25a802306db701"
+  },
+  {
+   "name": "cache-deception",
+   "path": "standard/exploit/web/cache-deception/SKILL.md",
+   "sha256": "df7fd69e3941c99a3227dc9804b5f44bb3b621ac20bfa96e1da7ccc78b8ddc89",
+   "verified": "df7fd69e3941c99a3227dc9804b5f44bb3b621ac20bfa96e1da7ccc78b8ddc89"
+  },
+  {
+   "name": "clickjacking",
+   "path": "standard/exploit/web/clickjacking/SKILL.md",
+   "sha256": "0eddaec7f2f725a9feec534f57162ec41694e55c69995283dbe50b77d7604360",
+   "verified": "0eddaec7f2f725a9feec534f57162ec41694e55c69995283dbe50b77d7604360"
+  },
+  {
+   "name": "exploit-command-injection",
+   "path": "standard/exploit/web/command-injection/SKILL.md",
+   "sha256": "766cfc562e5f669bf49fe0585d86398b0782825e06654ee8bd877a1d2baed8c1",
+   "verified": "766cfc562e5f669bf49fe0585d86398b0782825e06654ee8bd877a1d2baed8c1"
+  },
+  {
+   "name": "cors",
+   "path": "standard/exploit/web/cors/SKILL.md",
+   "sha256": "6ae3ed9cf31a9ecbca2bdf06f2958e40b2a68b7796c884fb45f430d420eecd94",
+   "verified": "6ae3ed9cf31a9ecbca2bdf06f2958e40b2a68b7796c884fb45f430d420eecd94"
+  },
+  {
+   "name": "crypto",
+   "path": "standard/exploit/web/crypto/SKILL.md",
+   "sha256": "519bea03b632f3b00917cbea412af6bfcc87384869f4b2c6a1d702f45c6ab16e",
+   "verified": "519bea03b632f3b00917cbea412af6bfcc87384869f4b2c6a1d702f45c6ab16e"
+  },
+  {
+   "name": "csrf",
+   "path": "standard/exploit/web/csrf/SKILL.md",
+   "sha256": "ae46d742cc4f8be7b982603c79ef09837669e8f0a72c96cce512b57524116cd1",
+   "verified": "ae46d742cc4f8be7b982603c79ef09837669e8f0a72c96cce512b57524116cd1"
+  },
+  {
+   "name": "cve",
+   "path": "standard/exploit/web/cve/SKILL.md",
+   "sha256": "a22b9db0d8ab50e71053a445c2b834837b652a4dd39205f0827deaf77d13fc55",
+   "verified": "a22b9db0d8ab50e71053a445c2b834837b652a4dd39205f0827deaf77d13fc55"
+  },
+  {
+   "name": "exploit-deserialization",
+   "path": "standard/exploit/web/deserialization/SKILL.md",
+   "sha256": "bf09038663a25a62ba2c4d878cdf197669074b7f155389bdd1edcaac8291ee74",
+   "verified": "bf09038663a25a62ba2c4d878cdf197669074b7f155389bdd1edcaac8291ee74"
+  },
+  {
+   "name": "dns-rebinding",
+   "path": "standard/exploit/web/dns-rebinding/SKILL.md",
+   "sha256": "1ddc8b3b1cabab36d2e012a21848af830b63ea6da3c38092c5ab4d15177f3c4d",
+   "verified": "1ddc8b3b1cabab36d2e012a21848af830b63ea6da3c38092c5ab4d15177f3c4d"
+  },
+  {
+   "name": "dom-clobbering",
+   "path": "standard/exploit/web/dom-clobbering/SKILL.md",
+   "sha256": "8a298150abe3ba22be3d4ee55bad8aed7d9b8fafe8aac3139760ff25956d4ee1",
+   "verified": "8a298150abe3ba22be3d4ee55bad8aed7d9b8fafe8aac3139760ff25956d4ee1"
+  },
+  {
+   "name": "graphql",
+   "path": "standard/exploit/web/graphql/SKILL.md",
+   "sha256": "c2110b4011ebdb698df48fb0cb5746f561028ee8d259f121e6a00754dbbe7ebc",
+   "verified": "c2110b4011ebdb698df48fb0cb5746f561028ee8d259f121e6a00754dbbe7ebc"
+  },
+  {
+   "name": "web-2fa-bypass",
+   "path": "standard/exploit/web/hacktricks/2fa-bypass/SKILL.md",
+   "sha256": "663cb07ce41b84710119ab6ee6fed4f82fa49aca23e7785f3803217cb614aa64",
+   "verified": "663cb07ce41b84710119ab6ee6fed4f82fa49aca23e7785f3803217cb614aa64"
+  },
+  {
+   "name": "web-403-and-401-bypasses",
+   "path": "standard/exploit/web/hacktricks/403-and-401-bypasses/SKILL.md",
+   "sha256": "ad25b2626bd49e1bd06e5143bf4e8c802c998487fd998cef9b1bea5296019a84",
+   "verified": "ad25b2626bd49e1bd06e5143bf4e8c802c998487fd998cef9b1bea5296019a84"
+  },
+  {
+   "name": "web-abusing-hop-by-hop-headers",
+   "path": "standard/exploit/web/hacktricks/abusing-hop-by-hop-headers/SKILL.md",
+   "sha256": "606eccccafc5685b2a7f24beacb2eac68f53c50afd2c1d5a0f81d4af87efae96",
+   "verified": "606eccccafc5685b2a7f24beacb2eac68f53c50afd2c1d5a0f81d4af87efae96"
+  },
+  {
+   "name": "web-account-takeover",
+   "path": "standard/exploit/web/hacktricks/account-takeover/SKILL.md",
+   "sha256": "ba194ad769e61cffef1b1d29d73fa1e9f644222c2adf61a962dbc6b76d792381",
+   "verified": "ba194ad769e61cffef1b1d29d73fa1e9f644222c2adf61a962dbc6b76d792381"
+  },
+  {
+   "name": "web-application-layer-dos",
+   "path": "standard/exploit/web/hacktricks/application-layer-dos/SKILL.md",
+   "sha256": "84a900697a0965d435615820c5881bc01a92f491b13d87e6ed40c67afc2406c6",
+   "verified": "84a900697a0965d435615820c5881bc01a92f491b13d87e6ed40c67afc2406c6"
+  },
+  {
+   "name": "web-browser-extension-pentesting-methodology",
+   "path": "standard/exploit/web/hacktricks/browser-extension-pentesting-methodology/SKILL.md",
+   "sha256": "ae4c7027927e6e5ee1971bbebb37c20dc13a6f0dd98e10b1fe9ee7d000111171",
+   "verified": "ae4c7027927e6e5ee1971bbebb37c20dc13a6f0dd98e10b1fe9ee7d000111171"
+  },
+  {
+   "name": "web-burp-suite",
+   "path": "standard/exploit/web/hacktricks/burp-suite/SKILL.md",
+   "sha256": "1bc7e7f41267998521e35e2f9d1411b493e9d71596cb11d1373873bc5a332b48",
+   "verified": "1bc7e7f41267998521e35e2f9d1411b493e9d71596cb11d1373873bc5a332b48"
+  },
+  {
+   "name": "web-business-logic-vulnerabilities",
+   "path": "standard/exploit/web/hacktricks/business-logic-vulnerabilities/SKILL.md",
+   "sha256": "b9221cdb8d35d9826ac2b393669b948f3efcdf237b6e7edb24cdda4a68986eb0",
+   "verified": "b9221cdb8d35d9826ac2b393669b948f3efcdf237b6e7edb24cdda4a68986eb0"
+  },
+  {
+   "name": "web-bypass-payment-process",
+   "path": "standard/exploit/web/hacktricks/bypass-payment-process/SKILL.md",
+   "sha256": "55f3c717366da24ab8e3a7ad37fc2e9bbd3ffd8bc9a29065ca7677a90b86efa7",
+   "verified": "55f3c717366da24ab8e3a7ad37fc2e9bbd3ffd8bc9a29065ca7677a90b86efa7"
+  },
+  {
+   "name": "web-cache-deception",
+   "path": "standard/exploit/web/hacktricks/cache-deception/SKILL.md",
+   "sha256": "48ea19d80ecad26160d2aaca8989d5dea641452af8e33cfd5efe0c78258e9bad",
+   "verified": "48ea19d80ecad26160d2aaca8989d5dea641452af8e33cfd5efe0c78258e9bad"
+  },
+  {
+   "name": "web-captcha-bypass",
+   "path": "standard/exploit/web/hacktricks/captcha-bypass/SKILL.md",
+   "sha256": "33f1863bfcf0dec011798ec9c2404ca1a063ed235874db81e9be7d630fa63322",
+   "verified": "33f1863bfcf0dec011798ec9c2404ca1a063ed235874db81e9be7d630fa63322"
+  },
+  {
+   "name": "web-clickjacking",
+   "path": "standard/exploit/web/hacktricks/clickjacking/SKILL.md",
+   "sha256": "e8c9e1de287064374b1577cd2ff9fc16962bdc6533dbaa08eeb54ad918dda7da",
+   "verified": "e8c9e1de287064374b1577cd2ff9fc16962bdc6533dbaa08eeb54ad918dda7da"
+  },
+  {
+   "name": "web-client-side-path-traversal",
+   "path": "standard/exploit/web/hacktricks/client-side-path-traversal/SKILL.md",
+   "sha256": "f90adf2dce97c7af5b7f98b255f8fc3934d421a5a24d75a7453407faeddf3994",
+   "verified": "f90adf2dce97c7af5b7f98b255f8fc3934d421a5a24d75a7453407faeddf3994"
+  },
+  {
+   "name": "web-client-side-template-injection-csti",
+   "path": "standard/exploit/web/hacktricks/client-side-template-injection-csti/SKILL.md",
+   "sha256": "4fedc4dd0e9f693c63dcaf5db9d0515087b920b06758b5bce91c627b5b1b4844",
+   "verified": "4fedc4dd0e9f693c63dcaf5db9d0515087b920b06758b5bce91c627b5b1b4844"
+  },
+  {
+   "name": "web-cloud-storage-buckets",
+   "path": "standard/exploit/web/hacktricks/cloud-storage-buckets/SKILL.md",
+   "sha256": "2839a776ae0de654e178372a444c11734e676ef961107f7c577b262dfe3a0b52",
+   "verified": "2839a776ae0de654e178372a444c11734e676ef961107f7c577b262dfe3a0b52"
+  },
+  {
+   "name": "web-command-injection",
+   "path": "standard/exploit/web/hacktricks/command-injection/SKILL.md",
+   "sha256": "60a59218302354a48cc96e23b8ff87cf35eeacce78a7ce36d5c7d1717c440845",
+   "verified": "60a59218302354a48cc96e23b8ff87cf35eeacce78a7ce36d5c7d1717c440845"
+  },
+  {
+   "name": "web-commons-text-string-interpolation",
+   "path": "standard/exploit/web/hacktricks/commons-text-string-interpolation/SKILL.md",
+   "sha256": "929d1abadc092e24bc7bab9d0d41cbbd6fd73b0f47ff13a1c106f25cbcd5f030",
+   "verified": "929d1abadc092e24bc7bab9d0d41cbbd6fd73b0f47ff13a1c106f25cbcd5f030"
+  },
+  {
+   "name": "web-content-security-policy-csp-bypass",
+   "path": "standard/exploit/web/hacktricks/content-security-policy-csp-bypass/SKILL.md",
+   "sha256": "32948c9f802a87a4b3833367d4149c5081c8581097d5de8ad3792a618f9599d8",
+   "verified": "32948c9f802a87a4b3833367d4149c5081c8581097d5de8ad3792a618f9599d8"
+  },
+  {
+   "name": "web-content-spoofing-text-injection",
+   "path": "standard/exploit/web/hacktricks/content-spoofing-text-injection/SKILL.md",
+   "sha256": "e1551d2e2e6c6ec16f20361df37954555877fa4244f08f4c006980fd94204424",
+   "verified": "e1551d2e2e6c6ec16f20361df37954555877fa4244f08f4c006980fd94204424"
+  },
+  {
+   "name": "web-cors-bypass",
+   "path": "standard/exploit/web/hacktricks/cors-bypass/SKILL.md",
+   "sha256": "3641d77aa72cf838c55a5f5222abac355f627f06b5a0510426484eba8b9fae49",
+   "verified": "3641d77aa72cf838c55a5f5222abac355f627f06b5a0510426484eba8b9fae49"
+  },
+  {
+   "name": "web-crlf-0d-0a",
+   "path": "standard/exploit/web/hacktricks/crlf-0d-0a/SKILL.md",
+   "sha256": "4cfdc600d197384a330d10e5abe928ceb58595b38ebe501d0be0a837e41d1cee",
+   "verified": "4cfdc600d197384a330d10e5abe928ceb58595b38ebe501d0be0a837e41d1cee"
+  },
+  {
+   "name": "web-csrf-cross-site-request-forgery",
+   "path": "standard/exploit/web/hacktricks/csrf-cross-site-request-forgery/SKILL.md",
+   "sha256": "4d5abec68ca9fcd0c818ed67065c1499f4d60b767e1d5b7c11d3f9eb28c5f139",
+   "verified": "4d5abec68ca9fcd0c818ed67065c1499f4d60b767e1d5b7c11d3f9eb28c5f139"
+  },
+  {
+   "name": "web-dangling-markup-html-scriptless-injection",
+   "path": "standard/exploit/web/hacktricks/dangling-markup-html-scriptless-injection/SKILL.md",
+   "sha256": "ee17332422d989c3e18283c6715af384f54c30e7a40e1e8d4fc7ab1e023a4a7f",
+   "verified": "ee17332422d989c3e18283c6715af384f54c30e7a40e1e8d4fc7ab1e023a4a7f"
+  },
+  {
+   "name": "web-dapps-decentralizedapplications",
+   "path": "standard/exploit/web/hacktricks/dapps-decentralizedapplications/SKILL.md",
+   "sha256": "b19c6f50879c2137b98ebd48500cb190c59e344a9129a9350a4a4668aaa4a522",
+   "verified": "b19c6f50879c2137b98ebd48500cb190c59e344a9129a9350a4a4668aaa4a522"
+  },
+  {
+   "name": "web-dependency-confusion",
+   "path": "standard/exploit/web/hacktricks/dependency-confusion/SKILL.md",
+   "sha256": "ae436bd304371ad36a3beec2653fefe959603847979e988581b055eae7cc5200",
+   "verified": "ae436bd304371ad36a3beec2653fefe959603847979e988581b055eae7cc5200"
+  },
+  {
+   "name": "web-deserialization",
+   "path": "standard/exploit/web/hacktricks/deserialization/SKILL.md",
+   "sha256": "5d6ca451ab9eae21cb798fd7c8b981cc62937917d583eb76045b70cff37bdd75",
+   "verified": "5d6ca451ab9eae21cb798fd7c8b981cc62937917d583eb76045b70cff37bdd75"
+  },
+  {
+   "name": "web-domain-subdomain-takeover",
+   "path": "standard/exploit/web/hacktricks/domain-subdomain-takeover/SKILL.md",
+   "sha256": "777a2b9fcedda09f2784c94fa738c135413b567413b95d688c4b5bea809f8f39",
+   "verified": "777a2b9fcedda09f2784c94fa738c135413b567413b95d688c4b5bea809f8f39"
+  },
+  {
+   "name": "web-email-injections",
+   "path": "standard/exploit/web/hacktricks/email-injections/SKILL.md",
+   "sha256": "7030136c6bcf80b5a7b1da560ff6aa3942266002f31785811c68d6c4e71ff678",
+   "verified": "7030136c6bcf80b5a7b1da560ff6aa3942266002f31785811c68d6c4e71ff678"
+  },
+  {
+   "name": "web-exposed-files-and-secrets",
+   "path": "standard/exploit/web/hacktricks/exposed-files-and-secrets/SKILL.md",
+   "sha256": "85f3955c8b98ea0c5c3e1c12307b9835edf3fa455e10bc3560466bcf5d38895f",
+   "verified": "85f3955c8b98ea0c5c3e1c12307b9835edf3fa455e10bc3560466bcf5d38895f"
+  },
+  {
+   "name": "web-file-inclusion",
+   "path": "standard/exploit/web/hacktricks/file-inclusion/SKILL.md",
+   "sha256": "2e903dacf84909bca5a57aed13f91ce91fdd9078ab3f9f0a4d242f6790efd897",
+   "verified": "2e903dacf84909bca5a57aed13f91ce91fdd9078ab3f9f0a4d242f6790efd897"
+  },
+  {
+   "name": "web-file-upload",
+   "path": "standard/exploit/web/hacktricks/file-upload/SKILL.md",
+   "sha256": "7ec6dc0046c424004f6dc661a37432adacaed865a8775c7c81474c9812d24746",
+   "verified": "7ec6dc0046c424004f6dc661a37432adacaed865a8775c7c81474c9812d24746"
+  },
+  {
+   "name": "web-firebase-realtime-database",
+   "path": "standard/exploit/web/hacktricks/firebase-realtime-database/SKILL.md",
+   "sha256": "613bcd597d7bb6edceb14c0925379cd3b14a2f5bf7e734d2c69985b5140498b6",
+   "verified": "613bcd597d7bb6edceb14c0925379cd3b14a2f5bf7e734d2c69985b5140498b6"
+  },
+  {
+   "name": "web-formula-csv-doc-latex-ghostscript-injection",
+   "path": "standard/exploit/web/hacktricks/formula-csv-doc-latex-ghostscript-injection/SKILL.md",
+   "sha256": "724849349bd4ef67d6def5cd81e2ffe6da9ad7f5f40bd4d94e55a4d7c2e3a480",
+   "verified": "724849349bd4ef67d6def5cd81e2ffe6da9ad7f5f40bd4d94e55a4d7c2e3a480"
+  },
+  {
+   "name": "web-graphql",
+   "path": "standard/exploit/web/hacktricks/graphql/SKILL.md",
+   "sha256": "4472a24e3583ee17d349931cddbe6746ffd93afaacaf0b2f684b01a33d4dc9eb",
+   "verified": "4472a24e3583ee17d349931cddbe6746ffd93afaacaf0b2f684b01a33d4dc9eb"
+  },
+  {
+   "name": "web-grpc-web-pentest",
+   "path": "standard/exploit/web/hacktricks/grpc-web-pentest/SKILL.md",
+   "sha256": "efa71d1670a7d44248c3f44110e1c779bf8613f469be3b0470116acea16c4d55",
+   "verified": "efa71d1670a7d44248c3f44110e1c779bf8613f469be3b0470116acea16c4d55"
+  },
+  {
+   "name": "web-h2c-smuggling",
+   "path": "standard/exploit/web/hacktricks/h2c-smuggling/SKILL.md",
+   "sha256": "b2397d43f5f8f35c6a5c39b8fc992afd1dc130ff5b1347e48c98ca41570bfc29",
+   "verified": "b2397d43f5f8f35c6a5c39b8fc992afd1dc130ff5b1347e48c98ca41570bfc29"
+  },
+  {
+   "name": "web-hacking-jwt-json-web-tokens",
+   "path": "standard/exploit/web/hacktricks/hacking-jwt-json-web-tokens/SKILL.md",
+   "sha256": "450c3395f4cd08baca4f2052c3aeb236a5c50dfe50a546e65bf2af28524369f1",
+   "verified": "450c3395f4cd08baca4f2052c3aeb236a5c50dfe50a546e65bf2af28524369f1"
+  },
+  {
+   "name": "web-hacking-with-cookies",
+   "path": "standard/exploit/web/hacktricks/hacking-with-cookies/SKILL.md",
+   "sha256": "c956a459b1a8d50ff5034da3be3a386f183cb150389fec9c0b5a47d166a9f641",
+   "verified": "c956a459b1a8d50ff5034da3be3a386f183cb150389fec9c0b5a47d166a9f641"
+  },
+  {
+   "name": "web-http-connection-contamination",
+   "path": "standard/exploit/web/hacktricks/http-connection-contamination/SKILL.md",
+   "sha256": "2ddfd207e56ca5b81ede081efedc440632bc949b316945233d7344169543428e",
+   "verified": "2ddfd207e56ca5b81ede081efedc440632bc949b316945233d7344169543428e"
+  },
+  {
+   "name": "web-http-connection-request-smuggling",
+   "path": "standard/exploit/web/hacktricks/http-connection-request-smuggling/SKILL.md",
+   "sha256": "4022c52f5eec8aaff1df66f6db7f7b3245f9b65601f71ee4b1509bea27b55c42",
+   "verified": "4022c52f5eec8aaff1df66f6db7f7b3245f9b65601f71ee4b1509bea27b55c42"
+  },
+  {
+   "name": "web-http-request-smuggling",
+   "path": "standard/exploit/web/hacktricks/http-request-smuggling/SKILL.md",
+   "sha256": "e4d2d0bb4ac5183f612843df6b7313943d01e95b1d194fc905767a1529b47acc",
+   "verified": "e4d2d0bb4ac5183f612843df6b7313943d01e95b1d194fc905767a1529b47acc"
+  },
+  {
+   "name": "web-http-response-smuggling-desync",
+   "path": "standard/exploit/web/hacktricks/http-response-smuggling-desync/SKILL.md",
+   "sha256": "b1cfc05661c32073b80377332e72d49a5d062e625f40d02d6c3147865ee8f44c",
+   "verified": "b1cfc05661c32073b80377332e72d49a5d062e625f40d02d6c3147865ee8f44c"
+  },
+  {
+   "name": "web-http2-protocol-dos",
+   "path": "standard/exploit/web/hacktricks/http2-protocol-dos/SKILL.md",
+   "sha256": "0550a9dc36784e87a44218984196bf106d74728149102fc607386f90332b2c0b",
+   "verified": "0550a9dc36784e87a44218984196bf106d74728149102fc607386f90332b2c0b"
+  },
+  {
+   "name": "web-idor",
+   "path": "standard/exploit/web/hacktricks/idor/SKILL.md",
+   "sha256": "123d6315449ef2ac57fac9c6457430c54556065e67ccc7f5f719449381ecfc72",
+   "verified": "123d6315449ef2ac57fac9c6457430c54556065e67ccc7f5f719449381ecfc72"
+  },
+  {
+   "name": "web-iframe-traps",
+   "path": "standard/exploit/web/hacktricks/iframe-traps/SKILL.md",
+   "sha256": "10e20d8e4e15917b59010e6fe2012c8bdef2dba5dd37220d8c95d1b57a96d5b5",
+   "verified": "10e20d8e4e15917b59010e6fe2012c8bdef2dba5dd37220d8c95d1b57a96d5b5"
+  },
+  {
+   "name": "web-json-xml-yaml-hacking",
+   "path": "standard/exploit/web/hacktricks/json-xml-yaml-hacking/SKILL.md",
+   "sha256": "d75ec61ccfd7f5ba4db2f8f90873fa372476fb55f362baa0ba5f87809c79592e",
+   "verified": "d75ec61ccfd7f5ba4db2f8f90873fa372476fb55f362baa0ba5f87809c79592e"
+  },
+  {
+   "name": "web-ldap-injection",
+   "path": "standard/exploit/web/hacktricks/ldap-injection/SKILL.md",
+   "sha256": "d39748f60dde79cb69b91cdd676858884ba0308f27c2705aeebfab2a0801d267",
+   "verified": "d39748f60dde79cb69b91cdd676858884ba0308f27c2705aeebfab2a0801d267"
+  },
+  {
+   "name": "web-login-bypass",
+   "path": "standard/exploit/web/hacktricks/login-bypass/SKILL.md",
+   "sha256": "dee4a34093a53a263bb2b5ec8c19a034e719b1d5dd467c19ca7a7df7a8973952",
+   "verified": "dee4a34093a53a263bb2b5ec8c19a034e719b1d5dd467c19ca7a7df7a8973952"
+  },
+  {
+   "name": "web-mass-assignment-cwe-915",
+   "path": "standard/exploit/web/hacktricks/mass-assignment-cwe-915/SKILL.md",
+   "sha256": "e2a51d930fddce43c0b5165f6d9332892fc73dae7a7235beace83f0f36ca44b1",
+   "verified": "e2a51d930fddce43c0b5165f6d9332892fc73dae7a7235beace83f0f36ca44b1"
+  },
+  {
+   "name": "web-nosql-injection",
+   "path": "standard/exploit/web/hacktricks/nosql-injection/SKILL.md",
+   "sha256": "051a766d2a102e082787794831db639a1a953c2772c6f6b5cab42873236fbaae",
+   "verified": "051a766d2a102e082787794831db639a1a953c2772c6f6b5cab42873236fbaae"
+  },
+  {
+   "name": "web-oauth-to-account-takeover",
+   "path": "standard/exploit/web/hacktricks/oauth-to-account-takeover/SKILL.md",
+   "sha256": "fdbb938432ccaf148ce1074964eed585c5c805924a07c9bb594772813f44cfc3",
+   "verified": "fdbb938432ccaf148ce1074964eed585c5c805924a07c9bb594772813f44cfc3"
+  },
+  {
+   "name": "web-open-redirect",
+   "path": "standard/exploit/web/hacktricks/open-redirect/SKILL.md",
+   "sha256": "75a412cfd279749bb1790b779ef9e4619bb594c4aa1fc83202c66713a26ad98c",
+   "verified": "75a412cfd279749bb1790b779ef9e4619bb594c4aa1fc83202c66713a26ad98c"
+  },
+  {
+   "name": "web-orm-injection",
+   "path": "standard/exploit/web/hacktricks/orm-injection/SKILL.md",
+   "sha256": "d93265afacfdb681d6103c3f7f25481f1763b41cbf496088e33170c8928ea6ff",
+   "verified": "d93265afacfdb681d6103c3f7f25481f1763b41cbf496088e33170c8928ea6ff"
+  },
+  {
+   "name": "web-parameter-pollution",
+   "path": "standard/exploit/web/hacktricks/parameter-pollution/SKILL.md",
+   "sha256": "c15cc16b5a27ce3a0e12e3deca7e3c7f445efb6c1a1e6086f04b1dcb5002458b",
+   "verified": "c15cc16b5a27ce3a0e12e3deca7e3c7f445efb6c1a1e6086f04b1dcb5002458b"
+  },
+  {
+   "name": "web-phone-number-injections",
+   "path": "standard/exploit/web/hacktricks/phone-number-injections/SKILL.md",
+   "sha256": "d9be73b27efb08d49a135e01ae483cf6e1cd3cecae4e537ced4c181a60451b22",
+   "verified": "d9be73b27efb08d49a135e01ae483cf6e1cd3cecae4e537ced4c181a60451b22"
+  },
+  {
+   "name": "web-pocs-and-polygloths-cheatsheet",
+   "path": "standard/exploit/web/hacktricks/pocs-and-polygloths-cheatsheet/SKILL.md",
+   "sha256": "0591e480265f4a70a9d70235c353be89a0c109389202a610fe61f35448e0246e",
+   "verified": "0591e480265f4a70a9d70235c353be89a0c109389202a610fe61f35448e0246e"
+  },
+  {
+   "name": "web-postmessage-vulnerabilities",
+   "path": "standard/exploit/web/hacktricks/postmessage-vulnerabilities/SKILL.md",
+   "sha256": "cecebc035ec953a8821b7287c6858a94377771006f88eb89e8178be0d05978c9",
+   "verified": "cecebc035ec953a8821b7287c6858a94377771006f88eb89e8178be0d05978c9"
+  },
+  {
+   "name": "web-proxy-waf-protections-bypass",
+   "path": "standard/exploit/web/hacktricks/proxy-waf-protections-bypass/SKILL.md",
+   "sha256": "71275deb27b9c5905bfc53105fb093910a87f6dffa9d122cd1db1cab6fb3dcb0",
+   "verified": "71275deb27b9c5905bfc53105fb093910a87f6dffa9d122cd1db1cab6fb3dcb0"
+  },
+  {
+   "name": "web-race-condition",
+   "path": "standard/exploit/web/hacktricks/race-condition/SKILL.md",
+   "sha256": "571206cc2df4edf5b077960d510bfffcc3fc94c49e4da5097005b8a4f3ccec4d",
+   "verified": "571206cc2df4edf5b077960d510bfffcc3fc94c49e4da5097005b8a4f3ccec4d"
+  },
+  {
+   "name": "web-rate-limit-bypass",
+   "path": "standard/exploit/web/hacktricks/rate-limit-bypass/SKILL.md",
+   "sha256": "b8aff5b1ecc7cc953fc100f7ba8d75d7f29960b49b9cd969f856d147fa67dea1",
+   "verified": "b8aff5b1ecc7cc953fc100f7ba8d75d7f29960b49b9cd969f856d147fa67dea1"
+  },
+  {
+   "name": "web-referer-header-and-referrer-policy",
+   "path": "standard/exploit/web/hacktricks/referer-header-and-referrer-policy/SKILL.md",
+   "sha256": "8dba23ae289dd85ec4f3987193083aa9661ed4365c8177d5aa64914e50d88e23",
+   "verified": "8dba23ae289dd85ec4f3987193083aa9661ed4365c8177d5aa64914e50d88e23"
+  },
+  {
+   "name": "web-reflected-file-download",
+   "path": "standard/exploit/web/hacktricks/reflected-file-download/SKILL.md",
+   "sha256": "46d94e7760d8a34d3eb51466b75983ead8350be1fb3f47f9fe4aa7c428aabf34",
+   "verified": "46d94e7760d8a34d3eb51466b75983ead8350be1fb3f47f9fe4aa7c428aabf34"
+  },
+  {
+   "name": "web-registration-vulnerabilities",
+   "path": "standard/exploit/web/hacktricks/registration-vulnerabilities/SKILL.md",
+   "sha256": "e286d13a9d406a4fcaf76f4190684c130a1c2af06dd6cb86397b4558b92dc988",
+   "verified": "e286d13a9d406a4fcaf76f4190684c130a1c2af06dd6cb86397b4558b92dc988"
+  },
+  {
+   "name": "web-regular-expression-denial-of-service-redos",
+   "path": "standard/exploit/web/hacktricks/regular-expression-denial-of-service-redos/SKILL.md",
+   "sha256": "71601b3e1607614802e2d1f46b9b16e96a2c4fbbcde6faa124bb511cb5a10e03",
+   "verified": "71601b3e1607614802e2d1f46b9b16e96a2c4fbbcde6faa124bb511cb5a10e03"
+  },
+  {
+   "name": "web-reset-password",
+   "path": "standard/exploit/web/hacktricks/reset-password/SKILL.md",
+   "sha256": "357c8d6a10e59349a62687de96c649ba18e184ba144570471a8d8c96ca5601fb",
+   "verified": "357c8d6a10e59349a62687de96c649ba18e184ba144570471a8d8c96ca5601fb"
+  },
+  {
+   "name": "web-reverse-tab-nabbing",
+   "path": "standard/exploit/web/hacktricks/reverse-tab-nabbing/SKILL.md",
+   "sha256": "289ef3ff249f7f7957299f73ce2cb11d5bcd74fded3705bad95bb752b07d284c",
+   "verified": "289ef3ff249f7f7957299f73ce2cb11d5bcd74fded3705bad95bb752b07d284c"
+  },
+  {
+   "name": "web-rsql-injection",
+   "path": "standard/exploit/web/hacktricks/rsql-injection/SKILL.md",
+   "sha256": "68d5c8608904e943ce2974145600a3f15d1438e0e3d44b4c134b8419be963672",
+   "verified": "68d5c8608904e943ce2974145600a3f15d1438e0e3d44b4c134b8419be963672"
+  },
+  {
+   "name": "web-saml-attacks",
+   "path": "standard/exploit/web/hacktricks/saml-attacks/SKILL.md",
+   "sha256": "68d519f017e08a48e4f5ca4a289c462b089de83a8bdb2cd6c6acfd6b75d742b3",
+   "verified": "68d519f017e08a48e4f5ca4a289c462b089de83a8bdb2cd6c6acfd6b75d742b3"
+  },
+  {
+   "name": "web-sensitive-information-exfiltration",
+   "path": "standard/exploit/web/hacktricks/sensitive-information-exfiltration/SKILL.md",
+   "sha256": "6f081f55932eb70466c17855b2ee0ea5adc04a56453fc5efacb97e72f928f395",
+   "verified": "6f081f55932eb70466c17855b2ee0ea5adc04a56453fc5efacb97e72f928f395"
+  },
+  {
+   "name": "web-server-side-code-injection",
+   "path": "standard/exploit/web/hacktricks/server-side-code-injection/SKILL.md",
+   "sha256": "b0fd82be433f3316c2213ccc3fc93b1495ab666c8823cb0f880d166651411909",
+   "verified": "b0fd82be433f3316c2213ccc3fc93b1495ab666c8823cb0f880d166651411909"
+  },
+  {
+   "name": "web-server-side-inclusion-edge-side-inclusion-injection",
+   "path": "standard/exploit/web/hacktricks/server-side-inclusion-edge-side-inclusion-injection/SKILL.md",
+   "sha256": "b05946f6678d7151fee225b069f3bdb9f6a46991e97a2e23fc5bae3b44df2dc6",
+   "verified": "b05946f6678d7151fee225b069f3bdb9f6a46991e97a2e23fc5bae3b44df2dc6"
+  },
+  {
+   "name": "web-server-side-javascript-injection",
+   "path": "standard/exploit/web/hacktricks/server-side-javascript-injection/SKILL.md",
+   "sha256": "ef5889831ea3c0cbe5f3d956e9947621dfde0dd1307da8a726b3d305a42cdc85",
+   "verified": "ef5889831ea3c0cbe5f3d956e9947621dfde0dd1307da8a726b3d305a42cdc85"
+  },
+  {
+   "name": "web-soap-jax-ws-threadlocal-auth-bypass",
+   "path": "standard/exploit/web/hacktricks/soap-jax-ws-threadlocal-auth-bypass/SKILL.md",
+   "sha256": "d1874f69d0f2a6467a4043614daeb15568ad997faa7004926eeef06aa0edd903",
+   "verified": "d1874f69d0f2a6467a4043614daeb15568ad997faa7004926eeef06aa0edd903"
+  },
+  {
+   "name": "web-special-http-headers",
+   "path": "standard/exploit/web/hacktricks/special-http-headers/SKILL.md",
+   "sha256": "29a63ec47d0499def11805d327f99c1f5fa916fe3e2754ea2c6869f8fc00c025",
+   "verified": "29a63ec47d0499def11805d327f99c1f5fa916fe3e2754ea2c6869f8fc00c025"
+  },
+  {
+   "name": "web-sql-injection",
+   "path": "standard/exploit/web/hacktricks/sql-injection/SKILL.md",
+   "sha256": "70cc851d1d947ad9e79be6b1f3beee8a922e74ef9245e15b09e1ce8c5c5f68dd",
+   "verified": "70cc851d1d947ad9e79be6b1f3beee8a922e74ef9245e15b09e1ce8c5c5f68dd"
+  },
+  {
+   "name": "web-ssrf-server-side-request-forgery",
+   "path": "standard/exploit/web/hacktricks/ssrf-server-side-request-forgery/SKILL.md",
+   "sha256": "fb69131485043ec4857884d93fa38e7466764c0c392144851dea061c31ca0091",
+   "verified": "fb69131485043ec4857884d93fa38e7466764c0c392144851dea061c31ca0091"
+  },
+  {
+   "name": "web-ssti-server-side-template-injection",
+   "path": "standard/exploit/web/hacktricks/ssti-server-side-template-injection/SKILL.md",
+   "sha256": "b4cea58aae48898d8a050c9ef6a4b3100ca7c364b1fa41053794beb5518869ee",
+   "verified": "b4cea58aae48898d8a050c9ef6a4b3100ca7c364b1fa41053794beb5518869ee"
+  },
+  {
+   "name": "web-tech-adobe-coldfusion",
+   "path": "standard/exploit/web/hacktricks/tech-adobe-coldfusion/SKILL.md",
+   "sha256": "c492fedc98fa9818a1fd11cd44ad1659c0b4f1998b933b4704a49a15a1f66e99",
+   "verified": "c492fedc98fa9818a1fd11cd44ad1659c0b4f1998b933b4704a49a15a1f66e99"
+  },
+  {
+   "name": "web-tech-aem-adobe-experience-cloud",
+   "path": "standard/exploit/web/hacktricks/tech-aem-adobe-experience-cloud/SKILL.md",
+   "sha256": "779d3d530d828e9f1469093b7e366df79e41fd01162365c57662d326c9fba2a1",
+   "verified": "779d3d530d828e9f1469093b7e366df79e41fd01162365c57662d326c9fba2a1"
+  },
+  {
+   "name": "web-tech-angular",
+   "path": "standard/exploit/web/hacktricks/tech-angular/SKILL.md",
+   "sha256": "f58b96ba1d22c4805396c6dfb55df3f45bda0dcaee7ae35c1e17e160dab6f856",
+   "verified": "f58b96ba1d22c4805396c6dfb55df3f45bda0dcaee7ae35c1e17e160dab6f856"
+  },
+  {
+   "name": "web-tech-apache",
+   "path": "standard/exploit/web/hacktricks/tech-apache/SKILL.md",
+   "sha256": "77ae703c98eb7ce4fa1cddefe8a80b0d40520c9954069cb716a272af6141e9f7",
+   "verified": "77ae703c98eb7ce4fa1cddefe8a80b0d40520c9954069cb716a272af6141e9f7"
+  },
+  {
+   "name": "web-tech-apache-tapestry",
+   "path": "standard/exploit/web/hacktricks/tech-apache-tapestry/SKILL.md",
+   "sha256": "2502bb3dfffbec7fb1a4c6320348ed3ce07ede9ef5d120ca515e7fe7257596c7",
+   "verified": "2502bb3dfffbec7fb1a4c6320348ed3ce07ede9ef5d120ca515e7fe7257596c7"
+  },
+  {
+   "name": "web-tech-artifactory-hacking-guide",
+   "path": "standard/exploit/web/hacktricks/tech-artifactory-hacking-guide/SKILL.md",
+   "sha256": "274b6f2b60c68f1de5110d22e68127ac43682a69345c48da07782ec918e95564",
+   "verified": "274b6f2b60c68f1de5110d22e68127ac43682a69345c48da07782ec918e95564"
+  },
+  {
+   "name": "web-tech-beyondtrust-remote-support-mrs-origin-spoofing",
+   "path": "standard/exploit/web/hacktricks/tech-beyondtrust-remote-support-mrs-origin-spoofing/SKILL.md",
+   "sha256": "85ae4ddf030de2c0a37c59de397e782ad66dea1aa0a25b942ddfb436c914df6d",
+   "verified": "85ae4ddf030de2c0a37c59de397e782ad66dea1aa0a25b942ddfb436c914df6d"
+  },
+  {
+   "name": "web-tech-bolt-cms",
+   "path": "standard/exploit/web/hacktricks/tech-bolt-cms/SKILL.md",
+   "sha256": "ad5524f7077e03c8c9adff9bbe6b679cba695d76261a17b112afb430221649f9",
+   "verified": "ad5524f7077e03c8c9adff9bbe6b679cba695d76261a17b112afb430221649f9"
+  },
+  {
+   "name": "web-tech-cgi",
+   "path": "standard/exploit/web/hacktricks/tech-cgi/SKILL.md",
+   "sha256": "c1d2db01970e68ea6d607dc3ff1eeb0589f4f0a355901888026cb27ec5deb915",
+   "verified": "c1d2db01970e68ea6d607dc3ff1eeb0589f4f0a355901888026cb27ec5deb915"
+  },
+  {
+   "name": "web-tech-citrix-netscaler",
+   "path": "standard/exploit/web/hacktricks/tech-citrix-netscaler/SKILL.md",
+   "sha256": "cd6ddaa4806d0eb3da7e037420611851d227d123b289967fc9b55bc64404a8b0",
+   "verified": "cd6ddaa4806d0eb3da7e037420611851d227d123b289967fc9b55bc64404a8b0"
+  },
+  {
+   "name": "web-tech-code-review-tools",
+   "path": "standard/exploit/web/hacktricks/tech-code-review-tools/SKILL.md",
+   "sha256": "46d4ede0514198501ab7435fd593c0e204e35e1ac1eadb8178f6cd636f84df70",
+   "verified": "46d4ede0514198501ab7435fd593c0e204e35e1ac1eadb8178f6cd636f84df70"
+  },
+  {
+   "name": "web-tech-custom-protocols",
+   "path": "standard/exploit/web/hacktricks/tech-custom-protocols/SKILL.md",
+   "sha256": "156c84bb4e21e8dcf1d7c59378d05125c0cadcf7b9294fb0c7312bc9832a0acb",
+   "verified": "156c84bb4e21e8dcf1d7c59378d05125c0cadcf7b9294fb0c7312bc9832a0acb"
+  },
+  {
+   "name": "web-tech-debug-and-admin-endpoints",
+   "path": "standard/exploit/web/hacktricks/tech-debug-and-admin-endpoints/SKILL.md",
+   "sha256": "6a22f26b758cc7315e9e7118d6394aa6befc7899ea4cc64a250aff58f52cf061",
+   "verified": "6a22f26b758cc7315e9e7118d6394aa6befc7899ea4cc64a250aff58f52cf061"
+  },
+  {
+   "name": "web-tech-django",
+   "path": "standard/exploit/web/hacktricks/tech-django/SKILL.md",
+   "sha256": "37831e959471e6d4908ca179de1b5a35cf0bb2bf4e0355e703ba5d206f904511",
+   "verified": "37831e959471e6d4908ca179de1b5a35cf0bb2bf4e0355e703ba5d206f904511"
+  },
+  {
+   "name": "web-tech-dotnet-soap-wsdl-client-exploitation",
+   "path": "standard/exploit/web/hacktricks/tech-dotnet-soap-wsdl-client-exploitation/SKILL.md",
+   "sha256": "1b2b4f5beb2e5ee0ae985162e32c70f4feaf5b0e35b096225170ba779b9103e3",
+   "verified": "1b2b4f5beb2e5ee0ae985162e32c70f4feaf5b0e35b096225170ba779b9103e3"
+  },
+  {
+   "name": "web-tech-dotnetnuke-dnn",
+   "path": "standard/exploit/web/hacktricks/tech-dotnetnuke-dnn/SKILL.md",
+   "sha256": "4c6a490f64305bc23223398403693c1ef7e382b63238025f3da6bc1cdad99a67",
+   "verified": "4c6a490f64305bc23223398403693c1ef7e382b63238025f3da6bc1cdad99a67"
+  },
+  {
+   "name": "web-tech-drupal",
+   "path": "standard/exploit/web/hacktricks/tech-drupal/SKILL.md",
+   "sha256": "bed505083b432d5cbc2a82105181d459e9aef1b65c7430fad0a2dd9bdfa4d392",
+   "verified": "bed505083b432d5cbc2a82105181d459e9aef1b65c7430fad0a2dd9bdfa4d392"
+  },
+  {
+   "name": "web-tech-flask",
+   "path": "standard/exploit/web/hacktricks/tech-flask/SKILL.md",
+   "sha256": "9748fa53f4dd055a46792c292c3b2e5e5addad62653597fc3b6d781b8d574a4a",
+   "verified": "9748fa53f4dd055a46792c292c3b2e5e5addad62653597fc3b6d781b8d574a4a"
+  },
+  {
+   "name": "web-tech-fortinet-fortiweb",
+   "path": "standard/exploit/web/hacktricks/tech-fortinet-fortiweb/SKILL.md",
+   "sha256": "7f9ef147294160e39ec40ec69db39b31648e7adf876fa63c9c8f66ad42fd8d28",
+   "verified": "7f9ef147294160e39ec40ec69db39b31648e7adf876fa63c9c8f66ad42fd8d28"
+  },
+  {
+   "name": "web-tech-geonetwork",
+   "path": "standard/exploit/web/hacktricks/tech-geonetwork/SKILL.md",
+   "sha256": "3b0a2e0bd4104efdc14f741238027d692b9fd1f2f65ae18e12614bc2edb23a2c",
+   "verified": "3b0a2e0bd4104efdc14f741238027d692b9fd1f2f65ae18e12614bc2edb23a2c"
+  },
+  {
+   "name": "web-tech-git",
+   "path": "standard/exploit/web/hacktricks/tech-git/SKILL.md",
+   "sha256": "855a1ff604c061e1de73dfed722bd89ff3bf21ab382b318dbb81ecd7c9acd51a",
+   "verified": "855a1ff604c061e1de73dfed722bd89ff3bf21ab382b318dbb81ecd7c9acd51a"
+  },
+  {
+   "name": "web-tech-grafana",
+   "path": "standard/exploit/web/hacktricks/tech-grafana/SKILL.md",
+   "sha256": "5fcdb554d102c156ea98874744c81abd8dbdd50ab56d87a0762a1a13e29e5994",
+   "verified": "5fcdb554d102c156ea98874744c81abd8dbdd50ab56d87a0762a1a13e29e5994"
+  },
+  {
+   "name": "web-tech-h2-java-sql-database",
+   "path": "standard/exploit/web/hacktricks/tech-h2-java-sql-database/SKILL.md",
+   "sha256": "a11ff30c4e054146115be0b8530d05f958551c51d9c5bffe0c0bed7302d7d16e",
+   "verified": "a11ff30c4e054146115be0b8530d05f958551c51d9c5bffe0c0bed7302d7d16e"
+  },
+  {
+   "name": "web-tech-iis-internet-information-services",
+   "path": "standard/exploit/web/hacktricks/tech-iis-internet-information-services/SKILL.md",
+   "sha256": "3bbbb3119669cc6586ff413972c33407f8b0e29d3cede9c6e965b665d285fd31",
+   "verified": "3bbbb3119669cc6586ff413972c33407f8b0e29d3cede9c6e965b665d285fd31"
+  },
+  {
+   "name": "web-tech-imagemagick-security",
+   "path": "standard/exploit/web/hacktricks/tech-imagemagick-security/SKILL.md",
+   "sha256": "70861aac86bfb35fa083761e6f63cc9629af7daa6e050e992773433b16f3b90f",
+   "verified": "70861aac86bfb35fa083761e6f63cc9629af7daa6e050e992773433b16f3b90f"
+  },
+  {
+   "name": "web-tech-ispconfig",
+   "path": "standard/exploit/web/hacktricks/tech-ispconfig/SKILL.md",
+   "sha256": "faa7eae3dff8e17ac0fceb1e1b2e4eabc755072211c53b80fd72a6c2282f9abc",
+   "verified": "faa7eae3dff8e17ac0fceb1e1b2e4eabc755072211c53b80fd72a6c2282f9abc"
+  },
+  {
+   "name": "web-tech-java-servlet-filter-memory-shells",
+   "path": "standard/exploit/web/hacktricks/tech-java-servlet-filter-memory-shells/SKILL.md",
+   "sha256": "528185ae7337fd7480879d730b4a1c81a1fbd537d267f556474c407ddb37ad44",
+   "verified": "528185ae7337fd7480879d730b4a1c81a1fbd537d267f556474c407ddb37ad44"
+  },
+  {
+   "name": "web-tech-jboss",
+   "path": "standard/exploit/web/hacktricks/tech-jboss/SKILL.md",
+   "sha256": "dc40ffc64b618447785a0fc69048ad15800c57658388328056e3c02ac83d4fb4",
+   "verified": "dc40ffc64b618447785a0fc69048ad15800c57658388328056e3c02ac83d4fb4"
+  },
+  {
+   "name": "web-tech-jira",
+   "path": "standard/exploit/web/hacktricks/tech-jira/SKILL.md",
+   "sha256": "38c75461bbcdb8485dc1565eda4c28b35414e53f4eda04ae3727b46f0f61fae0",
+   "verified": "38c75461bbcdb8485dc1565eda4c28b35414e53f4eda04ae3727b46f0f61fae0"
+  },
+  {
+   "name": "web-tech-joomla",
+   "path": "standard/exploit/web/hacktricks/tech-joomla/SKILL.md",
+   "sha256": "e0eb5aa586057e046e24c027a466482d6cc4dbed8ae43ac02c030eeb0fb384d5",
+   "verified": "e0eb5aa586057e046e24c027a466482d6cc4dbed8ae43ac02c030eeb0fb384d5"
+  },
+  {
+   "name": "web-tech-jsp",
+   "path": "standard/exploit/web/hacktricks/tech-jsp/SKILL.md",
+   "sha256": "86b67a2fdd1ba7ed9af46efee5ba382371b386ba684f985ded7f042f1e69a04b",
+   "verified": "86b67a2fdd1ba7ed9af46efee5ba382371b386ba684f985ded7f042f1e69a04b"
+  },
+  {
+   "name": "web-tech-laravel",
+   "path": "standard/exploit/web/hacktricks/tech-laravel/SKILL.md",
+   "sha256": "37ea09d554fb73b74a6b55d2b618c1e8a4b87f38ec68895ad8c65f3c98647af3",
+   "verified": "37ea09d554fb73b74a6b55d2b618c1e8a4b87f38ec68895ad8c65f3c98647af3"
+  },
+  {
+   "name": "web-tech-meshcentral",
+   "path": "standard/exploit/web/hacktricks/tech-meshcentral/SKILL.md",
+   "sha256": "28833da034ec110a0d913b321ae0f94908d4919bfbc324ffbf684b279b833d45",
+   "verified": "28833da034ec110a0d913b321ae0f94908d4919bfbc324ffbf684b279b833d45"
+  },
+  {
+   "name": "web-tech-microsoft-sharepoint",
+   "path": "standard/exploit/web/hacktricks/tech-microsoft-sharepoint/SKILL.md",
+   "sha256": "35881d340362efc863a428ddb3a024cb3b18f3b883d78320f7dee67b215ef04e",
+   "verified": "35881d340362efc863a428ddb3a024cb3b18f3b883d78320f7dee67b215ef04e"
+  },
+  {
+   "name": "web-tech-moodle",
+   "path": "standard/exploit/web/hacktricks/tech-moodle/SKILL.md",
+   "sha256": "6d6a5a34337aa0941b93a514ad26016a5043ed8e1978f73f2a9f5a776f7297dd",
+   "verified": "6d6a5a34337aa0941b93a514ad26016a5043ed8e1978f73f2a9f5a776f7297dd"
+  },
+  {
+   "name": "web-tech-nextjs",
+   "path": "standard/exploit/web/hacktricks/tech-nextjs/SKILL.md",
+   "sha256": "33428c288d8cb4055937cf5fc1936998c778848aabf132730496065ef92c269d",
+   "verified": "33428c288d8cb4055937cf5fc1936998c778848aabf132730496065ef92c269d"
+  },
+  {
+   "name": "web-tech-nginx",
+   "path": "standard/exploit/web/hacktricks/tech-nginx/SKILL.md",
+   "sha256": "e23613f75612e4d195043f07bd513ae2d01ef0339ca6a8a15b32aee76bbe0c83",
+   "verified": "e23613f75612e4d195043f07bd513ae2d01ef0339ca6a8a15b32aee76bbe0c83"
+  },
+  {
+   "name": "web-tech-nodejs-express",
+   "path": "standard/exploit/web/hacktricks/tech-nodejs-express/SKILL.md",
+   "sha256": "562974cfdf9878e555f51a1d7e3b9b18f448f019a46d26fb8d628bc7eb19ae55",
+   "verified": "562974cfdf9878e555f51a1d7e3b9b18f448f019a46d26fb8d628bc7eb19ae55"
+  },
+  {
+   "name": "web-tech-pentesting-web-methodology",
+   "path": "standard/exploit/web/hacktricks/tech-pentesting-web-methodology/SKILL.md",
+   "sha256": "fd305db5a523e2d2692dc81fdc504e46443d839e127e7edb881841f8ad9dad8c",
+   "verified": "fd305db5a523e2d2692dc81fdc504e46443d839e127e7edb881841f8ad9dad8c"
+  },
+  {
+   "name": "web-tech-perl-tricks",
+   "path": "standard/exploit/web/hacktricks/tech-perl-tricks/SKILL.md",
+   "sha256": "b1a528bc8a6255f91b0e01d98358c5424d10269f8e52e159fbb8fa8e87d0e4c1",
+   "verified": "b1a528bc8a6255f91b0e01d98358c5424d10269f8e52e159fbb8fa8e87d0e4c1"
+  },
+  {
+   "name": "web-tech-php-tricks-esp",
+   "path": "standard/exploit/web/hacktricks/tech-php-tricks-esp/SKILL.md",
+   "sha256": "534bd98a45c6b38e4d2febbf00c7b0f933d6def37a094320337c96ede46354a3",
+   "verified": "534bd98a45c6b38e4d2febbf00c7b0f933d6def37a094320337c96ede46354a3"
+  },
+  {
+   "name": "web-tech-prestashop",
+   "path": "standard/exploit/web/hacktricks/tech-prestashop/SKILL.md",
+   "sha256": "cc90e6d4bc542a0a9ab613c9d839de6d4c17950de0caf138c1333a3b833f44e9",
+   "verified": "cc90e6d4bc542a0a9ab613c9d839de6d4c17950de0caf138c1333a3b833f44e9"
+  },
+  {
+   "name": "web-tech-proxmox-ve",
+   "path": "standard/exploit/web/hacktricks/tech-proxmox-ve/SKILL.md",
+   "sha256": "c53146d109152593507ed064569d5008ce54b65127911b0fe9cc3d22bb8b6b4d",
+   "verified": "c53146d109152593507ed064569d5008ce54b65127911b0fe9cc3d22bb8b6b4d"
+  },
+  {
+   "name": "web-tech-put-method-webdav",
+   "path": "standard/exploit/web/hacktricks/tech-put-method-webdav/SKILL.md",
+   "sha256": "17de024b6d05e8c31ba795b57c8fb86d53557e315d4bb1d17c93c980b5e49e2a",
+   "verified": "17de024b6d05e8c31ba795b57c8fb86d53557e315d4bb1d17c93c980b5e49e2a"
+  },
+  {
+   "name": "web-tech-react",
+   "path": "standard/exploit/web/hacktricks/tech-react/SKILL.md",
+   "sha256": "6d7d2ed0651d89d6442f5bcb7f99494cd27a80ab60c3f2363840d4c91e1a29bd",
+   "verified": "6d7d2ed0651d89d6442f5bcb7f99494cd27a80ab60c3f2363840d4c91e1a29bd"
+  },
+  {
+   "name": "web-tech-rocket-chat",
+   "path": "standard/exploit/web/hacktricks/tech-rocket-chat/SKILL.md",
+   "sha256": "8c92a36ad063dfe545b46c14535355a79ae0bf1599c0cbae7779e448fd72203e",
+   "verified": "8c92a36ad063dfe545b46c14535355a79ae0bf1599c0cbae7779e448fd72203e"
+  },
+  {
+   "name": "web-tech-roundcube",
+   "path": "standard/exploit/web/hacktricks/tech-roundcube/SKILL.md",
+   "sha256": "83ddba1fdcfda2030350367ed97851493b80bd55469225bef9afabe280eb2755",
+   "verified": "83ddba1fdcfda2030350367ed97851493b80bd55469225bef9afabe280eb2755"
+  },
+  {
+   "name": "web-tech-ruby-tricks",
+   "path": "standard/exploit/web/hacktricks/tech-ruby-tricks/SKILL.md",
+   "sha256": "3761945f7537f5d934941216cbe7a53359b3e8f2d82a26103ab2b7b42b9316ca",
+   "verified": "3761945f7537f5d934941216cbe7a53359b3e8f2d82a26103ab2b7b42b9316ca"
+  },
+  {
+   "name": "web-tech-salesforce",
+   "path": "standard/exploit/web/hacktricks/tech-salesforce/SKILL.md",
+   "sha256": "29c5a08fb7843a5403cf0e940d6c68fd2bada66eb744d4546cf73a49041bab5d",
+   "verified": "29c5a08fb7843a5403cf0e940d6c68fd2bada66eb744d4546cf73a49041bab5d"
+  },
+  {
+   "name": "web-tech-servicenow",
+   "path": "standard/exploit/web/hacktricks/tech-servicenow/SKILL.md",
+   "sha256": "0bf8caf4c5bba273273b3ea4f80f1084b9739c6d8891ae2418c7bbb5b31e4a91",
+   "verified": "0bf8caf4c5bba273273b3ea4f80f1084b9739c6d8891ae2418c7bbb5b31e4a91"
+  },
+  {
+   "name": "web-tech-sitecore",
+   "path": "standard/exploit/web/hacktricks/tech-sitecore/SKILL.md",
+   "sha256": "dd8d23a276c52c8457d8a9113ef595e01ae800658e578ad03ce47ee6fa18b6fc",
+   "verified": "dd8d23a276c52c8457d8a9113ef595e01ae800658e578ad03ce47ee6fa18b6fc"
+  },
+  {
+   "name": "web-tech-spring-actuators",
+   "path": "standard/exploit/web/hacktricks/tech-spring-actuators/SKILL.md",
+   "sha256": "55c8f52176f21d014633f5735c0a8b488d2794f15e04175696136069707d0376",
+   "verified": "55c8f52176f21d014633f5735c0a8b488d2794f15e04175696136069707d0376"
+  },
+  {
+   "name": "web-tech-spring-data-binding-classloader-manipulation",
+   "path": "standard/exploit/web/hacktricks/tech-spring-data-binding-classloader-manipulation/SKILL.md",
+   "sha256": "3d4114e65408680cb43588b6ee08396f488edc08b193dc296531b934fd58a750",
+   "verified": "3d4114e65408680cb43588b6ee08396f488edc08b193dc296531b934fd58a750"
+  },
+  {
+   "name": "web-tech-ssr-meta-frameworks",
+   "path": "standard/exploit/web/hacktricks/tech-ssr-meta-frameworks/SKILL.md",
+   "sha256": "2ecc9ef524aa36b2ec04e33a4cc8a79e8b3e5fbf1710b7edd4bdf332611699c3",
+   "verified": "2ecc9ef524aa36b2ec04e33a4cc8a79e8b3e5fbf1710b7edd4bdf332611699c3"
+  },
+  {
+   "name": "web-tech-supabase-postgrest",
+   "path": "standard/exploit/web/hacktricks/tech-supabase-postgrest/SKILL.md",
+   "sha256": "c9b4314b77a7173347e1c334526fa4e73f664f60e9c8fdccb4229731e0912a85",
+   "verified": "c9b4314b77a7173347e1c334526fa4e73f664f60e9c8fdccb4229731e0912a85"
+  },
+  {
+   "name": "web-tech-swagger-openapi-ui",
+   "path": "standard/exploit/web/hacktricks/tech-swagger-openapi-ui/SKILL.md",
+   "sha256": "8be84b1a6418d6b82d9ef98b14f1171f773cb5e13c8e9e5ae6e648294fdf3e37",
+   "verified": "8be84b1a6418d6b82d9ef98b14f1171f773cb5e13c8e9e5ae6e648294fdf3e37"
+  },
+  {
+   "name": "web-tech-symphony",
+   "path": "standard/exploit/web/hacktricks/tech-symphony/SKILL.md",
+   "sha256": "97e354b41421140cd78642c57c250726fdd9ca6c1ba67b55262fceeedefce533",
+   "verified": "97e354b41421140cd78642c57c250726fdd9ca6c1ba67b55262fceeedefce533"
+  },
+  {
+   "name": "web-tech-telerik-ui-aspnet-ajax-unsafe-reflection-webresource-axd",
+   "path": "standard/exploit/web/hacktricks/tech-telerik-ui-aspnet-ajax-unsafe-reflection-webresource-axd/SKILL.md",
+   "sha256": "97575a6263d5553a2dee8aeff7e723e5f4dea5c392c35694801e3e291de02695",
+   "verified": "97575a6263d5553a2dee8aeff7e723e5f4dea5c392c35694801e3e291de02695"
+  },
+  {
+   "name": "web-tech-tomcat",
+   "path": "standard/exploit/web/hacktricks/tech-tomcat/SKILL.md",
+   "sha256": "9edb9a5c8947a5d1ed4cfe58e2ac85b35b7241aaf153c2a409e2519428f7c1e1",
+   "verified": "9edb9a5c8947a5d1ed4cfe58e2ac85b35b7241aaf153c2a409e2519428f7c1e1"
+  },
+  {
+   "name": "web-tech-traefik",
+   "path": "standard/exploit/web/hacktricks/tech-traefik/SKILL.md",
+   "sha256": "22794b8e7821174319321c31a65aeb1fb21874e212650a0f53534281485e8945",
+   "verified": "22794b8e7821174319321c31a65aeb1fb21874e212650a0f53534281485e8945"
+  },
+  {
+   "name": "web-tech-uncovering-cloudflare",
+   "path": "standard/exploit/web/hacktricks/tech-uncovering-cloudflare/SKILL.md",
+   "sha256": "e86cf985401b26c4e5472aacb62453bec962853520c7ff272cd2d39886bc5a95",
+   "verified": "e86cf985401b26c4e5472aacb62453bec962853520c7ff272cd2d39886bc5a95"
+  },
+  {
+   "name": "web-tech-veeam-service-provider-console",
+   "path": "standard/exploit/web/hacktricks/tech-veeam-service-provider-console/SKILL.md",
+   "sha256": "2e3ea5f5bd3076ca8fb21dd0101248eb4f8d326ba8464d43a834f969e7eb98ab",
+   "verified": "2e3ea5f5bd3076ca8fb21dd0101248eb4f8d326ba8464d43a834f969e7eb98ab"
+  },
+  {
+   "name": "web-tech-vmware-esx-vcenter",
+   "path": "standard/exploit/web/hacktricks/tech-vmware-esx-vcenter/SKILL.md",
+   "sha256": "7bf46a1215eab2ac8aee65168d1c4c66ec7bb06a58ac0d39602fab923f499958",
+   "verified": "7bf46a1215eab2ac8aee65168d1c4c66ec7bb06a58ac0d39602fab923f499958"
+  },
+  {
+   "name": "web-tech-vuejs",
+   "path": "standard/exploit/web/hacktricks/tech-vuejs/SKILL.md",
+   "sha256": "c7b176ae1df08a694fd5708369c747e53800e06c279c5e38535e89f0d11441ca",
+   "verified": "c7b176ae1df08a694fd5708369c747e53800e06c279c5e38535e89f0d11441ca"
+  },
+  {
+   "name": "web-tech-werkzeug",
+   "path": "standard/exploit/web/hacktricks/tech-werkzeug/SKILL.md",
+   "sha256": "22934e4a5aab6ccff87270dd23932a828074490c0c1f62233b008691bf0a9a06",
+   "verified": "22934e4a5aab6ccff87270dd23932a828074490c0c1f62233b008691bf0a9a06"
+  },
+  {
+   "name": "web-tech-wordpress",
+   "path": "standard/exploit/web/hacktricks/tech-wordpress/SKILL.md",
+   "sha256": "92a035a69aae618026b2cd30d158f07e0f04309da2756badbcbcf45fb954a8c6",
+   "verified": "92a035a69aae618026b2cd30d158f07e0f04309da2756badbcbcf45fb954a8c6"
+  },
+  {
+   "name": "web-tech-wsgi",
+   "path": "standard/exploit/web/hacktricks/tech-wsgi/SKILL.md",
+   "sha256": "7a569a663d25640e3ea0b700da67bb0964030dcecf3ee25d07df9b3adad0f513",
+   "verified": "7a569a663d25640e3ea0b700da67bb0964030dcecf3ee25d07df9b3adad0f513"
+  },
+  {
+   "name": "web-tech-zabbix",
+   "path": "standard/exploit/web/hacktricks/tech-zabbix/SKILL.md",
+   "sha256": "1a9556e4f88e0398e9f2851d098400af031f8ad6111ac7bdbee115581e590add",
+   "verified": "1a9556e4f88e0398e9f2851d098400af031f8ad6111ac7bdbee115581e590add"
+  },
+  {
+   "name": "web-tech-zoneminder-motioneye-motion",
+   "path": "standard/exploit/web/hacktricks/tech-zoneminder-motioneye-motion/SKILL.md",
+   "sha256": "a7849d089176758a18137df5f7d7627a74d035021b57b8e7dcc235fa71af944a",
+   "verified": "a7849d089176758a18137df5f7d7627a74d035021b57b8e7dcc235fa71af944a"
+  },
+  {
+   "name": "web-timing-attacks",
+   "path": "standard/exploit/web/hacktricks/timing-attacks/SKILL.md",
+   "sha256": "b2f32a97dba29eea60f4ce2bb5f0e7e1aeb3f6e5453d95a41f6c46fd1bc1b814",
+   "verified": "b2f32a97dba29eea60f4ce2bb5f0e7e1aeb3f6e5453d95a41f6c46fd1bc1b814"
+  },
+  {
+   "name": "web-tls-transport-security",
+   "path": "standard/exploit/web/hacktricks/tls-transport-security/SKILL.md",
+   "sha256": "43afc71f572fe9bcd161fb8485b8e5ad349a65dfe1bc5315b86bf88c50f65098",
+   "verified": "43afc71f572fe9bcd161fb8485b8e5ad349a65dfe1bc5315b86bf88c50f65098"
+  },
+  {
+   "name": "web-unicode-injection",
+   "path": "standard/exploit/web/hacktricks/unicode-injection/SKILL.md",
+   "sha256": "6b2f87b06a2d39b4772c221a3e363fd855db066a599581fb13354624a5d7e04b",
+   "verified": "6b2f87b06a2d39b4772c221a3e363fd855db066a599581fb13354624a5d7e04b"
+  },
+  {
+   "name": "web-uuid-insecurities",
+   "path": "standard/exploit/web/hacktricks/uuid-insecurities/SKILL.md",
+   "sha256": "e8fc9e8f1a9e47054b43c4e11913574e8fa20b5a8b5a089be4b07b4cf580b385",
+   "verified": "e8fc9e8f1a9e47054b43c4e11913574e8fa20b5a8b5a089be4b07b4cf580b385"
+  },
+  {
+   "name": "web-web-api-pentesting",
+   "path": "standard/exploit/web/hacktricks/web-api-pentesting/SKILL.md",
+   "sha256": "2954408b63bec1b23a03fd8cf5707b426177ce28516b5c5ba58ef1a946e1751e",
+   "verified": "2954408b63bec1b23a03fd8cf5707b426177ce28516b5c5ba58ef1a946e1751e"
+  },
+  {
+   "name": "web-web-tool-wfuzz",
+   "path": "standard/exploit/web/hacktricks/web-tool-wfuzz/SKILL.md",
+   "sha256": "105f16e04cea0e2d9f8db7b88eead64a950f32d6430692f20c73187dd727ad6d",
+   "verified": "105f16e04cea0e2d9f8db7b88eead64a950f32d6430692f20c73187dd727ad6d"
+  },
+  {
+   "name": "web-web-vulnerabilities-methodology",
+   "path": "standard/exploit/web/hacktricks/web-vulnerabilities-methodology/SKILL.md",
+   "sha256": "bbfcce5704d5592b00c21a46aaf9e338c4ce34d5d49b22654d4550e2e077b505",
+   "verified": "bbfcce5704d5592b00c21a46aaf9e338c4ce34d5d49b22654d4550e2e077b505"
+  },
+  {
+   "name": "web-webhook-security",
+   "path": "standard/exploit/web/hacktricks/webhook-security/SKILL.md",
+   "sha256": "d24f7776bca28be2862429023732f65a1bb0cc5ee6c7437174c3cc0485eccfbc",
+   "verified": "d24f7776bca28be2862429023732f65a1bb0cc5ee6c7437174c3cc0485eccfbc"
+  },
+  {
+   "name": "web-websocket-attacks",
+   "path": "standard/exploit/web/hacktricks/websocket-attacks/SKILL.md",
+   "sha256": "6bffcd05b56873ddb8b69e931f08b30168e629337256981a596be3cf93308641",
+   "verified": "6bffcd05b56873ddb8b69e931f08b30168e629337256981a596be3cf93308641"
+  },
+  {
+   "name": "web-xml-injection",
+   "path": "standard/exploit/web/hacktricks/xml-injection/SKILL.md",
+   "sha256": "a33db0ccef863121712b29ccc5c57e8e7ec31411aa0c093a84513bcdf17f2043",
+   "verified": "a33db0ccef863121712b29ccc5c57e8e7ec31411aa0c093a84513bcdf17f2043"
+  },
+  {
+   "name": "web-xpath-injection",
+   "path": "standard/exploit/web/hacktricks/xpath-injection/SKILL.md",
+   "sha256": "8551cbc73adb28fcd6fdefa6a0a55d7b9c47c22f6579a8b3d12f7ce498293512",
+   "verified": "8551cbc73adb28fcd6fdefa6a0a55d7b9c47c22f6579a8b3d12f7ce498293512"
+  },
+  {
+   "name": "web-xs-search",
+   "path": "standard/exploit/web/hacktricks/xs-search/SKILL.md",
+   "sha256": "443e40623d472019ac75207de04aa44a25ad0435308c4d74f8e6db6dfdccb6b5",
+   "verified": "443e40623d472019ac75207de04aa44a25ad0435308c4d74f8e6db6dfdccb6b5"
+  },
+  {
+   "name": "web-xslt-server-side-injection-extensible-stylesheet-language-transformations",
+   "path": "standard/exploit/web/hacktricks/xslt-server-side-injection-extensible-stylesheet-language-transformations/SKILL.md",
+   "sha256": "6928565fcb0d6d6c62aa465f0d629dce9bdc11dea1c83e6b08719dea3136bc77",
+   "verified": "6928565fcb0d6d6c62aa465f0d629dce9bdc11dea1c83e6b08719dea3136bc77"
+  },
+  {
+   "name": "web-xss-cross-site-scripting",
+   "path": "standard/exploit/web/hacktricks/xss-cross-site-scripting/SKILL.md",
+   "sha256": "4cac4c5a83f9c0d788002a7ee727f6577f33de3a19ec98494448eb0dec493dd2",
+   "verified": "4cac4c5a83f9c0d788002a7ee727f6577f33de3a19ec98494448eb0dec493dd2"
+  },
+  {
+   "name": "web-xssi-cross-site-script-inclusion",
+   "path": "standard/exploit/web/hacktricks/xssi-cross-site-script-inclusion/SKILL.md",
+   "sha256": "d2cccb515c9eda5d0be1514731dc989ece9addc2f71da29fc7a25b40477391f5",
+   "verified": "d2cccb515c9eda5d0be1514731dc989ece9addc2f71da29fc7a25b40477391f5"
+  },
+  {
+   "name": "web-xxe-xee-xml-external-entity",
+   "path": "standard/exploit/web/hacktricks/xxe-xee-xml-external-entity/SKILL.md",
+   "sha256": "2bdaab72891d880bc2163744b34496deff5b66786f2a7e2ea6e2d26527b5d8e8",
+   "verified": "2bdaab72891d880bc2163744b34496deff5b66786f2a7e2ea6e2d26527b5d8e8"
+  },
+  {
+   "name": "header-injection",
+   "path": "standard/exploit/web/header-injection/SKILL.md",
+   "sha256": "fd93e3dee4a780ded1377ca35541bc4cb7d5c7e952c866d2f0d0567a3d09b188",
+   "verified": "fd93e3dee4a780ded1377ca35541bc4cb7d5c7e952c866d2f0d0567a3d09b188"
+  },
+  {
+   "name": "hpp",
+   "path": "standard/exploit/web/hpp/SKILL.md",
+   "sha256": "8d686a182aa19d31b9a788cd7400a7c7f9c2d77035663817ac922f62e0173054",
+   "verified": "8d686a182aa19d31b9a788cd7400a7c7f9c2d77035663817ac922f62e0173054"
+  },
+  {
+   "name": "exploit-idor",
+   "path": "standard/exploit/web/idor/SKILL.md",
+   "sha256": "c779ec3b726e458c9f1e99616b4e4c1e9ee2209f5d408a819dbba77ef4b17f75",
+   "verified": "c779ec3b726e458c9f1e99616b4e4c1e9ee2209f5d408a819dbba77ef4b17f75"
+  },
+  {
+   "name": "jwt",
+   "path": "standard/exploit/web/jwt/SKILL.md",
+   "sha256": "8d4ce408617374eb648dcf6896bce60f156bb3292f2e18d200bfdf6cf75c4143",
+   "verified": "8d4ce408617374eb648dcf6896bce60f156bb3292f2e18d200bfdf6cf75c4143"
+  },
+  {
+   "name": "ldapi",
+   "path": "standard/exploit/web/ldapi/SKILL.md",
+   "sha256": "1c7aeb4a4ee01e2ab3c24cdd410b25b34441cb8f76e9020eb7364a80cc5f6046",
+   "verified": "1c7aeb4a4ee01e2ab3c24cdd410b25b34441cb8f76e9020eb7364a80cc5f6046"
+  },
+  {
+   "name": "lfi",
+   "path": "standard/exploit/web/lfi/SKILL.md",
+   "sha256": "4d87b57940fb7d81a9d06b084d1c4088827244412c49716e7f6c04d9cb542713",
+   "verified": "4d87b57940fb7d81a9d06b084d1c4088827244412c49716e7f6c04d9cb542713"
+  },
+  {
+   "name": "mass-assignment",
+   "path": "standard/exploit/web/mass-assignment/SKILL.md",
+   "sha256": "6a4f734120204b2ad89472115e0ec83557dc5cf1ecca35a2e3fff2a654f9049a",
+   "verified": "6a4f734120204b2ad89472115e0ec83557dc5cf1ecca35a2e3fff2a654f9049a"
+  },
+  {
+   "name": "mfa-bypass",
+   "path": "standard/exploit/web/mfa-bypass/SKILL.md",
+   "sha256": "f5a1e85ca022cc7bbd7bbd4dbc4305b726cedec58436f8158f7a24869f27b0df",
+   "verified": "f5a1e85ca022cc7bbd7bbd4dbc4305b726cedec58436f8158f7a24869f27b0df"
+  },
+  {
+   "name": "nosqli",
+   "path": "standard/exploit/web/nosqli/SKILL.md",
+   "sha256": "2e21ec1f11534a90bfbb3cc657d2a3e097c5f05f3a846e594faad66ede8971ab",
+   "verified": "2e21ec1f11534a90bfbb3cc657d2a3e097c5f05f3a846e594faad66ede8971ab"
+  },
+  {
+   "name": "oauth",
+   "path": "standard/exploit/web/oauth/SKILL.md",
+   "sha256": "25a010cb53a47002028e304984d398d4d49cd1f9a1b9615b5b4642e5bed0af90",
+   "verified": "25a010cb53a47002028e304984d398d4d49cd1f9a1b9615b5b4642e5bed0af90"
+  },
+  {
+   "name": "open-redirect",
+   "path": "standard/exploit/web/open-redirect/SKILL.md",
+   "sha256": "49272ace8947f1c25e3e56ff9cebbf74a903f202b4bd3270dec236e4c331485d",
+   "verified": "49272ace8947f1c25e3e56ff9cebbf74a903f202b4bd3270dec236e4c331485d"
+  },
+  {
+   "name": "php-type-juggling",
+   "path": "standard/exploit/web/php-type-juggling/SKILL.md",
+   "sha256": "383dd6ce00a4237522974a158a7dcb8372b9513448e23a0a1bd69d6016019102",
+   "verified": "383dd6ce00a4237522974a158a7dcb8372b9513448e23a0a1bd69d6016019102"
+  },
+  {
+   "name": "proxy-misconfig",
+   "path": "standard/exploit/web/proxy-misconfig/SKILL.md",
+   "sha256": "c5f2925286bc75bf00d313593173f7615b5f14f60820e4ff50e53dbd8973cc2e",
+   "verified": "c5f2925286bc75bf00d313593173f7615b5f14f60820e4ff50e53dbd8973cc2e"
+  },
+  {
+   "name": "race-condition",
+   "path": "standard/exploit/web/race-condition/SKILL.md",
+   "sha256": "6173d6156796c4902bce38e7dcefea906a69db33bf1e4c73907fc968cef4e92c",
+   "verified": "6173d6156796c4902bce38e7dcefea906a69db33bf1e4c73907fc968cef4e92c"
+  },
+  {
+   "name": "saml",
+   "path": "standard/exploit/web/saml/SKILL.md",
+   "sha256": "de22e63c11661a2464744a2e108cb2973ef37d371517309e6f9ea6d9d7c8f888",
+   "verified": "de22e63c11661a2464744a2e108cb2973ef37d371517309e6f9ea6d9d7c8f888"
+  },
+  {
+   "name": "smuggling",
+   "path": "standard/exploit/web/smuggling/SKILL.md",
+   "sha256": "2facc660c119a48c37338b8597c2bcce47a2cd1825792a3b5ce46953bde1671a",
+   "verified": "2facc660c119a48c37338b8597c2bcce47a2cd1825792a3b5ce46953bde1671a"
+  },
+  {
+   "name": "sqli",
+   "path": "standard/exploit/web/sqli/SKILL.md",
+   "sha256": "0b9722ec77d74fde385c0b74153f3fac0587be872c6966b1245d4194c055d098",
+   "verified": "0b9722ec77d74fde385c0b74153f3fac0587be872c6966b1245d4194c055d098"
+  },
+  {
+   "name": "exploit-ssrf",
+   "path": "standard/exploit/web/ssrf/SKILL.md",
+   "sha256": "2c3b38a5983a0dd4158df5c8688f899676a4a2935095c86e395685d600772971",
+   "verified": "2c3b38a5983a0dd4158df5c8688f899676a4a2935095c86e395685d600772971"
+  },
+  {
+   "name": "exploit-ssti",
+   "path": "standard/exploit/web/ssti/SKILL.md",
+   "sha256": "de49cb2d51a3e753824465153da90da88b8e68d9463bff4e2014eb392c9825a0",
+   "verified": "de49cb2d51a3e753824465153da90da88b8e68d9463bff4e2014eb392c9825a0"
+  },
+  {
+   "name": "verb-tampering",
+   "path": "standard/exploit/web/verb-tampering/SKILL.md",
+   "sha256": "ac08b8509554f4bcf9c70679253d6f028683d321205843f3d10c4f80171cb2cc",
+   "verified": "ac08b8509554f4bcf9c70679253d6f028683d321205843f3d10c4f80171cb2cc"
+  },
+  {
+   "name": "waf-bypass",
+   "path": "standard/exploit/web/waf-bypass/SKILL.md",
+   "sha256": "f0ddd4728fa7e280c78549ef667b2fb1a24702218a7d5234f80752145c1c3116",
+   "verified": "f0ddd4728fa7e280c78549ef667b2fb1a24702218a7d5234f80752145c1c3116"
+  },
+  {
+   "name": "web-cache-poisoning",
+   "path": "standard/exploit/web/web-cache-poisoning/SKILL.md",
+   "sha256": "ecfb25afc7d779d957e6036350658436f699c7d7fcdd889ffda7ecd28c0c8ce9",
+   "verified": "ecfb25afc7d779d957e6036350658436f699c7d7fcdd889ffda7ecd28c0c8ce9"
+  },
+  {
+   "name": "xpath-xslt",
+   "path": "standard/exploit/web/xpath-xslt/SKILL.md",
+   "sha256": "245de714ad1033e00dcab55df0fd1310efbd0d039b6101914aa3f5cac8da82ff",
+   "verified": "245de714ad1033e00dcab55df0fd1310efbd0d039b6101914aa3f5cac8da82ff"
+  },
+  {
+   "name": "xs-leaks",
+   "path": "standard/exploit/web/xs-leaks/SKILL.md",
+   "sha256": "565456ec16b11bec1ffd012fce2edc666bead3176fab1fdf2dc627b454e56ddd",
+   "verified": "565456ec16b11bec1ffd012fce2edc666bead3176fab1fdf2dc627b454e56ddd"
+  },
+  {
+   "name": "xss",
+   "path": "standard/exploit/web/xss/SKILL.md",
+   "sha256": "bfe73052bc574a8a46246a40e2091197aede8551c479200fee1c331c1e25952c",
+   "verified": "bfe73052bc574a8a46246a40e2091197aede8551c479200fee1c331c1e25952c"
+  },
+  {
+   "name": "exploit-xxe",
+   "path": "standard/exploit/web/xxe/SKILL.md",
+   "sha256": "f2b3dcd65ac3640f4126804db33cf67273dd9f180cc7a6d1939147d92929790b",
+   "verified": "f2b3dcd65ac3640f4126804db33cf67273dd9f180cc7a6d1939147d92929790b"
+  },
+  {
+   "name": "active-recon",
+   "path": "standard/recon/active-recon/SKILL.md",
+   "sha256": "4a36b5021b8ee40687f7093c1a63012cac9869efb3f54a9475a89fa5600a4938",
+   "verified": "4a36b5021b8ee40687f7093c1a63012cac9869efb3f54a9475a89fa5600a4938"
+  },
+  {
+   "name": "cloud-recon",
+   "path": "standard/recon/cloud-recon/SKILL.md",
+   "sha256": "ded1e703978c5d494b42c0fcf3044ab2c054a875d9e6149dca7fbbdf947559e6",
+   "verified": "ded1e703978c5d494b42c0fcf3044ab2c054a875d9e6149dca7fbbdf947559e6"
+  },
+  {
+   "name": "iot-security",
+   "path": "standard/recon/iot-security/SKILL.md",
+   "sha256": "83336816e6c214a21940176c0be60bf5ed989cd1b497c37d69e6bb45e45b11d3",
+   "verified": "83336816e6c214a21940176c0be60bf5ed989cd1b497c37d69e6bb45e45b11d3"
+  },
+  {
+   "name": "mobile-security",
+   "path": "standard/recon/mobile-security/SKILL.md",
+   "sha256": "e51043a2fe7f056699038451b6935114fe3bc7a01508ab74705372fe57e11e7c",
+   "verified": "e51043a2fe7f056699038451b6935114fe3bc7a01508ab74705372fe57e11e7c"
+  },
+  {
+   "name": "open-web",
+   "path": "standard/recon/open-web/SKILL.md",
+   "sha256": "4381d4e78691ba1ba04fb0caa1f67cafa6041baa8af065a120b54d5ec61fe9e2",
+   "verified": "4381d4e78691ba1ba04fb0caa1f67cafa6041baa8af065a120b54d5ec61fe9e2"
+  },
+  {
+   "name": "osint",
+   "path": "standard/recon/osint/SKILL.md",
+   "sha256": "2c41c7645f509f583466053589830fba8a85f864f4eaf7f7ce932a5b29601584",
+   "verified": "2c41c7645f509f583466053589830fba8a85f864f4eaf7f7ce932a5b29601584"
+  },
+  {
+   "name": "passive-recon",
+   "path": "standard/recon/passive-recon/SKILL.md",
+   "sha256": "9c7b270710646453a191624f396395e7c5135992ef69fa170dfb3cdee2f2c8f3",
+   "verified": "9c7b270710646453a191624f396395e7c5135992ef69fa170dfb3cdee2f2c8f3"
+  },
+  {
+   "name": "recon-reporting",
+   "path": "standard/recon/reporting/SKILL.md",
+   "sha256": "c0173402e47622f4cea3109fc5dede7ab6b30f05a50724a4b6558338cc72cb37",
+   "verified": "c0173402e47622f4cea3109fc5dede7ab6b30f05a50724a4b6558338cc72cb37"
+  },
+  {
+   "name": "web-recon",
+   "path": "standard/recon/web-recon/SKILL.md",
+   "sha256": "dfbb143d6a580130bd004f8f1490f14f2347f9be33ca96288fdf721067bc2975",
+   "verified": "dfbb143d6a580130bd004f8f1490f14f2347f9be33ca96288fdf721067bc2975"
+  },
+  {
+   "name": "web-api-enumeration",
+   "path": "standard/recon/web-recon/api-enumeration/SKILL.md",
+   "sha256": "5ad036701c1bcc745853e2cc57d00e8726b8111f81bcf02755a272ccbe381f0e",
+   "verified": "5ad036701c1bcc745853e2cc57d00e8726b8111f81bcf02755a272ccbe381f0e"
+  },
+  {
+   "name": "web-auth-mapping",
+   "path": "standard/recon/web-recon/auth-mapping/SKILL.md",
+   "sha256": "48e2831d9b869df129fc9c70c4f52a39ab3da43d26fab30f333038d4a5a38890",
+   "verified": "48e2831d9b869df129fc9c70c4f52a39ab3da43d26fab30f333038d4a5a38890"
+  },
+  {
+   "name": "web-cms-scanning",
+   "path": "standard/recon/web-recon/cms-scanning/SKILL.md",
+   "sha256": "8eace5463a16f5c225e05d655f2fc3eda91757fa63c4fe86c36c697725cd7e94",
+   "verified": "8eace5463a16f5c225e05d655f2fc3eda91757fa63c4fe86c36c697725cd7e94"
+  },
+  {
+   "name": "web-cookie-audit",
+   "path": "standard/recon/web-recon/cookie-audit/SKILL.md",
+   "sha256": "8405da1fac9976c56b0b29112cf1e61af5b96be1bd099f6f0630c8af0cc102e5",
+   "verified": "8405da1fac9976c56b0b29112cf1e61af5b96be1bd099f6f0630c8af0cc102e5"
+  },
+  {
+   "name": "web-discovery",
+   "path": "standard/recon/web-recon/discovery/SKILL.md",
+   "sha256": "fb5cf188e9e3cf4895bbd444c5da7e1a1fba80c4d2bad670a2604c8a106c29e2",
+   "verified": "fb5cf188e9e3cf4895bbd444c5da7e1a1fba80c4d2bad670a2604c8a106c29e2"
+  },
+  {
+   "name": "web-subdomain-takeover",
+   "path": "standard/recon/web-recon/subdomain-takeover/SKILL.md",
+   "sha256": "3aafefd4d9f4df27de5748427648d4cf771acc92a6d85a65574f6b7cbfceba37",
+   "verified": "3aafefd4d9f4df27de5748427648d4cf771acc92a6d85a65574f6b7cbfceba37"
+  },
+  {
+   "name": "web-waf-detection",
+   "path": "standard/recon/web-recon/waf-detection/SKILL.md",
+   "sha256": "5b415547991ea8b262c826d5f06909ddb70dbd5c54b61fea3c7f28d6add5b06e",
+   "verified": "5b415547991ea8b262c826d5f06909ddb70dbd5c54b61fea3c7f28d6add5b06e"
+  },
+  {
+   "name": "wireless-security",
+   "path": "standard/recon/wireless-security/SKILL.md",
+   "sha256": "f06b208158fc8bd1cb24759da28c266fa5de254b8e3d3f0ee1d54a442b0c0cf0",
+   "verified": "f06b208158fc8bd1cb24759da28c266fa5de254b8e3d3f0ee1d54a442b0c0cf0"
+  },
+  {
+   "name": "abort-template",
+   "path": "standard/soundwave/abort-template/SKILL.md",
+   "sha256": "b95dee342a183f7096a51507e1ca5bf0b54f65f402ae83ae357d249faa8801a6",
+   "verified": "b95dee342a183f7096a51507e1ca5bf0b54f65f402ae83ae357d249faa8801a6"
+  },
+  {
+   "name": "cleanup-template",
+   "path": "standard/soundwave/cleanup-template/SKILL.md",
+   "sha256": "7bd1ebabaf8efe9f2be3de936a27e4ea6e6d618dace578b1d8ed54af115e287d",
+   "verified": "7bd1ebabaf8efe9f2be3de936a27e4ea6e6d618dace578b1d8ed54af115e287d"
+  },
+  {
+   "name": "conops-template",
+   "path": "standard/soundwave/conops-template/SKILL.md",
+   "sha256": "7d9c5f0597efddd1aca1a4e337cc2176fc721d120da64fb6d988d27ad3b974b2",
+   "verified": "7d9c5f0597efddd1aca1a4e337cc2176fc721d120da64fb6d988d27ad3b974b2"
+  },
+  {
+   "name": "contact-template",
+   "path": "standard/soundwave/contact-template/SKILL.md",
+   "sha256": "59ea6fdbe262cfe07e7151aac454147000f2e7debac4ba8f015d7fd7fdf431fd",
+   "verified": "59ea6fdbe262cfe07e7151aac454147000f2e7debac4ba8f015d7fd7fdf431fd"
+  },
+  {
+   "name": "data-handling-template",
+   "path": "standard/soundwave/data-handling-template/SKILL.md",
+   "sha256": "ccf2f8ec182e575011410dd29f180749c104fb854de64221ebb856571147b4cd",
+   "verified": "ccf2f8ec182e575011410dd29f180749c104fb854de64221ebb856571147b4cd"
+  },
+  {
+   "name": "opplan-converter",
+   "path": "standard/soundwave/opplan-converter/SKILL.md",
+   "sha256": "3e1164e1e9d22098596f287b57216a37a15b94c8b224fbb830eee610b3cc8bf5",
+   "verified": "3e1164e1e9d22098596f287b57216a37a15b94c8b224fbb830eee610b3cc8bf5"
+  },
+  {
+   "name": "roe-template",
+   "path": "standard/soundwave/roe-template/SKILL.md",
+   "sha256": "2d8cb17e5b9c7ec3b0743699fd537fde860184d47f402d601d293baf785c7c7d",
+   "verified": "2d8cb17e5b9c7ec3b0743699fd537fde860184d47f402d601d293baf785c7c7d"
+  },
+  {
+   "name": "structured-questions",
+   "path": "standard/soundwave/structured-questions/SKILL.md",
+   "sha256": "f0d8e854283e0cd7e0468b1a8cde56301cca54b677cfebf523866a1f95e2b570",
+   "verified": "f0d8e854283e0cd7e0468b1a8cde56301cca54b677cfebf523866a1f95e2b570"
+  },
+  {
+   "name": "threat-profile",
+   "path": "standard/soundwave/threat-profile/SKILL.md",
+   "sha256": "ebc6813f8965fb1777a90233ddff2f38e9b7a938b71526fc74febd2b4b820741",
+   "verified": "ebc6813f8965fb1777a90233ddff2f38e9b7a938b71526fc74febd2b4b820741"
+  },
+  {
+   "name": "emulation-overview",
+   "path": "standard/soundwave/threat-profile/emulation/SKILL.md",
+   "sha256": "62c51e2225685530019d939e25186b764f22f817f166a7c90dbbde3f72ce45d6",
+   "verified": "62c51e2225685530019d939e25186b764f22f817f166a7c90dbbde3f72ce45d6"
+  },
+  {
+   "name": "apt29",
+   "path": "standard/soundwave/threat-profile/emulation/apt29/SKILL.md",
+   "sha256": "a593b8aaf184eea7dcdc0f599e2223bb3e15776a83c9a751253b73fd287b5c79",
+   "verified": "a593b8aaf184eea7dcdc0f599e2223bb3e15776a83c9a751253b73fd287b5c79"
+  },
+  {
+   "name": "fin7",
+   "path": "standard/soundwave/threat-profile/emulation/fin7/SKILL.md",
+   "sha256": "64b5c93cd75dd24eceacf509bd6fb8c030b5741adcd0828489a385fd3bcc4875",
+   "verified": "64b5c93cd75dd24eceacf509bd6fb8c030b5741adcd0828489a385fd3bcc4875"
+  },
+  {
+   "name": "lazarus",
+   "path": "standard/soundwave/threat-profile/emulation/lazarus/SKILL.md",
+   "sha256": "cc1f36cc0ad565eb853578c365fe6bfb6f6d71ac102af65f4d13c17be7517878",
+   "verified": "cc1f36cc0ad565eb853578c365fe6bfb6f6d71ac102af65f4d13c17be7517878"
+  },
+  {
+   "name": "lockbit",
+   "path": "standard/soundwave/threat-profile/emulation/lockbit/SKILL.md",
+   "sha256": "f24c37886119fc291e1291599e49c0f80f00b1b1f6c57f5490678dc3709d458f",
+   "verified": "f24c37886119fc291e1291599e49c0f80f00b1b1f6c57f5490678dc3709d458f"
+  },
+  {
+   "name": "sandworm",
+   "path": "standard/soundwave/threat-profile/emulation/sandworm/SKILL.md",
+   "sha256": "e1be230d3bc8866ad7ecf1c22d9a2ccdf7843460c0c351fd99055a774aeb9f1c",
+   "verified": "e1be230d3bc8866ad7ecf1c22d9a2ccdf7843460c0c351fd99055a774aeb9f1c"
+  },
+  {
+   "name": "emulation-scattered-spider",
+   "path": "standard/soundwave/threat-profile/emulation/scattered-spider/SKILL.md",
+   "sha256": "9930dacc89041007e260a833a10cd7ae40949c7d543aab24dbcb2dd2c23d4205",
+   "verified": "9930dacc89041007e260a833a10cd7ae40949c7d543aab24dbcb2dd2c23d4205"
+  },
+  {
+   "name": "emulation-volt-typhoon",
+   "path": "standard/soundwave/threat-profile/emulation/volt-typhoon/SKILL.md",
+   "sha256": "55717396a09f30815bff3781e0179d6fc3b5312bb14040943ef416646bc2dfc5",
+   "verified": "55717396a09f30815bff3781e0179d6fc3b5312bb14040943ef416646bc2dfc5"
+  }
+ ],
+ "version": 1
+}

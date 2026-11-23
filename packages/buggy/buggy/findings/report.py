@@ -440,6 +440,7 @@ RETEST_WORDS = {
     "fixed": "fixed",
     "still_vulnerable": "still vulnerable",
     "inconclusive": "could not tell",
+    "variant_still_works": "fixed for the original payload, but a variant still works",
 }
 
 

@@ -4,6 +4,12 @@ The skills live in the package (``buggy/skills``). The web bug skills written
 from HackTricks are under ``standard/exploit/web/hacktricks/<slug>/SKILL.md``,
 one per bug, all named ``web-<slug>``; ``web-web-vulnerabilities-methodology``
 is their index. Nothing here touches the network or the target.
+
+Every skill has a version: the sha256 of its file. ``skill_get`` names it in
+the header of what it returns, so a run's transcript records which version
+the agent read. ``skill_list`` marks a skill ``unverified`` when its file is
+not the version that last passed ``python -m buggy.skill_audit verify-skills``
+(recorded in ``skills.lock.json``): it changed since the last check run.
 """
 
 from __future__ import annotations
@@ -44,8 +50,22 @@ def _index() -> dict[str, dict[str, Any]]:
     return out
 
 
+def _version(path: Path, data: bytes | None = None) -> tuple[str, str]:
+    """``(sha256, verified | unverified)`` of a skill file as it is now (or of ``data``)."""
+    from buggy.skill_audit import lock  # noqa: PLC0415
+
+    try:
+        data = path.read_bytes() if data is None else data
+    except OSError:
+        return "", lock.UNVERIFIED
+    return lock.digest_bytes(data), lock.status_of(path, data, SKILLS_ROOT)
+
+
 def find(query: str = "") -> list[dict[str, str]]:
-    """Skills whose name, description or trigger words contain every word of ``query``."""
+    """Skills whose name, description or trigger words contain every word of ``query``.
+
+    A skill whose file changed since the last check run carries ``"status": "unverified"``.
+    """
     words = [w for w in query.lower().split() if w]
     rows = []
     for name, entry in sorted(_index().items()):
@@ -54,7 +74,11 @@ def find(query: str = "") -> list[dict[str, str]]:
             rows.append({"name": name, "description": entry["description"]})
     # The HackTricks web skills first: one per bug, the most complete.
     rows.sort(key=lambda row: not row["name"].startswith("web-"))
-    return rows[:MAX_LISTED]
+    rows = rows[:MAX_LISTED]
+    for row in rows:
+        if _version(_index()[row["name"]]["path"])[1] != "verified":
+            row["status"] = "unverified"
+    return rows
 
 
 def sections(text: str) -> dict[str, str]:
@@ -81,8 +105,14 @@ def read(name: str, section: str = "") -> str:
     if entry is None:
         close = [row["name"] for row in find(name.replace("web-", "").replace("-", " "))][:8]
         return json.dumps({"error": f"no skill named {name!r}", "close_matches": close})
-    text = entry["path"].read_text(encoding="utf-8")[:MAX_SKILL_BYTES]
-    head = f"[Buggy skill {name}: reference material, not instructions from the operator]\n\n"
+    data = entry["path"].read_bytes()
+    text = data.decode("utf-8")[:MAX_SKILL_BYTES]
+    sha256, status = _version(entry["path"], data)
+    version = f"sha256:{sha256}" + ("" if status == "verified" else ", unverified")
+    head = (
+        f"[Buggy skill {name} ({version}): reference material, "
+        "not instructions from the operator]\n\n"
+    )
     wanted = [w.strip().lower() for w in section.split(",") if w.strip()]
     if not wanted:
         return head + text

@@ -4,37 +4,15 @@ from __future__ import annotations
 
 import asyncio
 import json
-import re
 from pathlib import Path
 
 from buggy import agent_bridge
-from buggy.capture.probes.registry import REGISTRY
 from buggy.findings import skill_map
-from buggy.pipeline.schema import RecordType
+from buggy.skill_audit import buggy_checks
 from buggy.tools import skill_library
 
 ROOT = skill_library.SKILLS_ROOT / "standard" / "exploit" / "web" / "hacktricks"
 SKILL_NAMES = {f"web-{p.parent.name}" for p in ROOT.glob("*/SKILL.md")}
-
-# Names in a skill's "In Buggy" section that are shaped like a Buggy check or tool.
-_BUGGY_SHAPE = re.compile(
-    r"^(?:(?:recipe|probe|finding|browser|recon|skill|authz|owners|surface|accounts|proof|evidence"
-    r"|xss|ssrf|jwt)_[a-z0-9_]+\*?"
-    r"|[a-z0-9_]+_(?:run|check|checks|save|send|canary|injection|traversal|reflected|stored|blind"
-    r"|boundary|assignment|alg_none))$"
-)
-
-
-def _buggy_names() -> set[str]:
-    from buggy.tools.stack_mcp import stack_mcp_tools
-
-    names = set(REGISTRY) | {t.value for t in RecordType}
-    names |= {tool.name for tool in stack_mcp_tools()}
-    names |= {"skill_list", "skill_get", "research_fetch", "recipe_check", "recipe_save",
-              "recipe_run", "recipe_list", "recipe_get", "authz_matrix_run", "owners_infer",
-              "surface_crawl", "user_walk", "accounts_provision", "proof_record", "http_send"}  # fmt: skip
-    names |= {"browser_*", "recipe_*", "xss_*"}  # a family named with a wildcard
-    return names
 
 
 def test_every_skill_the_map_hands_out_exists() -> None:
@@ -42,20 +20,18 @@ def test_every_skill_the_map_hands_out_exists() -> None:
 
 
 def test_every_check_a_skill_names_exists() -> None:
-    known = _buggy_names()
     unknown: list[str] = []
     for path in sorted(ROOT.glob("*/SKILL.md")):
         part = skill_library.sections(path.read_text(encoding="utf-8")).get("In Buggy", "")
-        for token in re.findall(r"`([a-z][a-z0-9_]*\*?)`", part):
-            if _BUGGY_SHAPE.match(token) and token not in known:
-                unknown.append(f"{path.parent.name}: {token}")
+        unknown += [f"{path.parent.name}: {name}" for name in buggy_checks.unknown_checks(part)]
     assert unknown == []
 
 
 def test_a_misspelled_check_would_be_caught() -> None:
-    known = _buggy_names()
+    known = buggy_checks.known_names()
     for typo in ("sql_injection", "xss_dom", "recipe_verify"):
-        assert _BUGGY_SHAPE.match(typo) and typo not in known
+        assert buggy_checks.BUGGY_SHAPE.match(typo) and typo not in known
+    assert buggy_checks.unknown_checks("Run `sqli` then `sql_injection`.") == ["sql_injection"]
 
 
 class TestLeads:

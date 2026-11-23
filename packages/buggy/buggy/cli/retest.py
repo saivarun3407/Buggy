@@ -9,6 +9,11 @@ capture service): the roots come from ``BUGGY_CONTROL_ROOT``,
 request goes through the capture gateway. State-changing proofs are not
 re-sent from here (they come out ``inconclusive``). A retest never changes a
 finding's status.
+
+When the original proof is fixed, a small fixed set of read-only variants of
+it is tried (``buggy.findings.variants``; ``--no-variants`` skips them). A
+variant that still works is queued as a new, linked candidate and the outcome
+is ``variant_still_works``.
 """
 
 from __future__ import annotations
@@ -28,6 +33,7 @@ from buggy.findings.store import (
     RETEST_FIXED,
     RETEST_INCONCLUSIVE,
     RETEST_STILL_VULNERABLE,
+    RETEST_VARIANT_WORKS,
     FindingStore,
 )
 
@@ -39,7 +45,8 @@ EXIT_VULNERABLE = 10
 EXIT_CODES_HELP = """\
 exit codes:
   0   every retested finding is fixed (or there was nothing to retest)
-  10  at least one finding is still vulnerable (this wins over 3)
+  10  at least one finding is still vulnerable, or a variant of a fixed one still
+      works (this wins over 3)
   3   at least one retest was inconclusive and none is still vulnerable
   2   usage or configuration error (unknown finding, unreadable store)
 """
@@ -59,12 +66,17 @@ def _build_parser() -> argparse.ArgumentParser:
         "--all-verified", action="store_true", help="Retest every exploit_verified finding."
     )
     p.add_argument("--json", action="store_true", help="Print one JSON document.")
+    p.add_argument(
+        "--no-variants",
+        action="store_true",
+        help="After a fix, do not try the read-only variants of the proof.",
+    )
     return p
 
 
 def exit_code(results: list[dict[str, Any]]) -> int:
     outcomes = {r.get("outcome") for r in results}
-    if RETEST_STILL_VULNERABLE in outcomes:
+    if outcomes & {RETEST_STILL_VULNERABLE, RETEST_VARIANT_WORKS}:
         return EXIT_VULNERABLE
     if RETEST_INCONCLUSIVE in outcomes or outcomes - {RETEST_FIXED}:
         return EXIT_INCOMPLETE
@@ -125,7 +137,7 @@ def main(argv: list[str] | None = None, *, opener: Any = None, sleep: Any = None
             ids = [args.finding_id]
         results: list[dict[str, Any]] = []
         for finding_id in ids:
-            out = retest(service, args.engagement, finding_id)
+            out = retest(service, args.engagement, finding_id, variants=not args.no_variants)
             if not out.get("ok"):
                 out = {
                     "finding_id": finding_id,

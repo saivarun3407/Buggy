@@ -1,0 +1,28 @@
+{
+ "version": 3,
+ "file": "main.js",
+ "sources": [
+  "webpack:///./src/app/admin/admin.guard.ts",
+  "webpack:///./src/app/search/search.component.ts",
+  "webpack:///./src/app/app.routes.ts",
+  "webpack:///./src/environments/environment.ts",
+  "webpack:///./src/app/notes.ts",
+  "webpack:///node_modules/lodash/lodash.js",
+  "webpack:///webpack/bootstrap",
+  "webpack:///../../../../etc/escape.ts",
+  "C:\\Users\\dev\\src\\win.ts"
+ ],
+ "sourcesContent": [
+  "import { Injectable } from '@angular/core';\n\n@Injectable()\nexport class AdminGuard {\n  canActivate(): boolean {\n    // only the client checks this\n    return this.user.role === 'admin';\n  }\n}\n",
+  "export class SearchComponent {\n  search(term: string) {\n    this.http.get('/rest/products/search?q=' + term);\n    this.http.get(`${this.host}/api/Users/${id}`);\n    const panel = document.getElementById('results');\n    panel.innerHTML = this.route.snapshot.queryParams.q;\n  }\n}\n",
+  "export const routes = [\n  { path: 'administration', component: AdminComponent },\n  { path: '**', component: NotFound },\n];\nexport const adminApi = '/api/admin/users';\nexport const loginApi = '/rest/user/login';\nexport const other = 'https://cdn.other.net/x.js';\n",
+  "export const environment = {\n  production: false,\n  debug: true,\n  awsKey: '__FAKE_KEY__',\n};\n",
+  "// eval(this.text) was removed\nconst note = \"isAdmin is a word in a string\";\n",
+  "var x = eval(code);\n",
+  "eval(module);\n",
+  "export const ok = 1;\n",
+  "export const win = 1;\n"
+ ],
+ "names": [],
+ "mappings": ""
+}

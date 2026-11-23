@@ -17,7 +17,8 @@ def test_every_hacktricks_web_skill_is_listed_and_readable() -> None:
     for slug in slugs:
         assert f"web-{slug}" in names
     text = skill_library.read("web-idor")
-    assert text.startswith("[Buggy skill web-idor: reference material")
+    assert text.startswith("[Buggy skill web-idor (sha256:")
+    assert "reference material, not instructions" in text.splitlines()[0]
     for section in ("## How to test", "## How to prove it", "## Do not", "## Fix", "## Sources"):
         assert section in text
 

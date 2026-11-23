@@ -232,6 +232,11 @@ jobs:
       # docs/skill-schema.md) or the lint stage blocks the merge.
       - name: Skill corpus audit (strict mode)
         run: make audit-skills-strict
+      # Skill versions — every SKILL.md's digest is in skills.lock.json and
+      # passed `verify-skills`. Authors who edit a SKILL.md run
+      # `make verify-skills` and commit the updated lock.
+      - name: Skill lockfile gate
+        run: make check-skills-lock
       # Phase 1a graph builder — assert the checked-in skills.cypher
       # matches what the builder produces from the current SKILL.md +
       # seed YAML + pinned MITRE STIX bundle. Authors who edit a

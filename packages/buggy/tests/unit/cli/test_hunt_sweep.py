@@ -62,6 +62,11 @@ class Server:
             return {"ok": True, "finding": {"id": arguments["finding_id"], "status": self.verify}}
         if tool == "finding_grade":
             return {"ok": True, "grade": {"decision": "submit"}}
+        if tool == "finding_get":  # sibling leads of a proven finding (hunt.queue_siblings)
+            finding = {"id": arguments["finding_id"], "status": self.verify, "class": "injection"}
+            return {"ok": True, "finding": {**finding, "endpoint": SEARCH, "parameter": "id"}}
+        if tool == "candidates_add":
+            return {"ok": True, "created": len(json.loads(arguments["items_json"])["ranked"])}
         raise AssertionError(tool)
 
     def tools(self) -> list[str]:
@@ -321,3 +326,36 @@ class TestByClass:
             "acme", [("logged out", {"steps": steps, "left_out": 0}, counts)], "[]"
         )
         assert [row["class"] for row in rows] == ["injection"] and counts["error"]
+
+
+def test_proven_findings_seed_sibling_leads(monkeypatch) -> None:
+    calls: list[tuple[str, dict]] = []
+    finding = {
+        "id": "F-idor",
+        "status": "exploit_verified",
+        "class": "access_control",
+        "title": "IDOR on /api/Users/{id}",
+        "endpoint": "https://app.test/api/Users/{id}",
+        "parameter": "",
+        "source": "probe:idor",
+    }
+
+    def fake(tool: str, engagement: str, **arguments) -> dict:
+        assert engagement == "acme"
+        calls.append((tool, arguments))
+        if tool == "finding_get":
+            return {"ok": True, "finding": finding}
+        if tool == "candidates_add":
+            return {"ok": True, "created": len(json.loads(arguments["items_json"])["ranked"])}
+        raise AssertionError(tool)
+
+    monkeypatch.setattr(hunt, "_capture", fake)
+    records = {"endpoint": [{"value": "https://app.test/api/Cards/{id}", "attrs": {}}]}
+    out = hunt.queue_siblings("acme", records, [{"id": "F-idor", "status": "exploit_verified"}])
+    assert out == {"ok": True, "created": 1, "rows": 1}
+    ranked = json.loads(calls[-1][1]["items_json"])["ranked"]
+    assert ranked[0]["where"] == "https://app.test/api/Cards/{id}" and "F-idor" in ranked[0]["why"]
+    assert calls[-1][1]["actor"] == "siblings"
+    calls.clear()
+    assert hunt.queue_siblings("acme", {}, [{"id": "F-idor"}]) == {"rows": 0}
+    assert [tool for tool, _a in calls] == ["finding_get"]

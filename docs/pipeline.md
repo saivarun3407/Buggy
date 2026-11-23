@@ -105,6 +105,33 @@ What they add to the lead queue (`rank_candidates`):
 | `api_base`: more than one version served | API |
 | `web_finding`: session cookie without its flags | misconfiguration |
 | `js_file` source map | information exposure |
+| `js_finding` `recovered_source`: role check in client code | access control |
+| `js_finding` `recovered_source`: hard-coded secret | information exposure |
+| `js_finding` `recovered_source`: DOM sink | XSS, `xss_reflected` |
+| `js_finding` `recovered_source`: debug switch | misconfiguration |
+| `js_finding` `recovered_source`: routes; an admin or login path among them | API; access control or login |
+
+### Recovered source
+
+A source map that carries `sourcesContent` holds the original files. After
+the map is fetched (the JS step of `urls`, through the scoped client, skipped
+with `passive_only`), `pipeline/tools/recovered.py` writes those files under
+the run's work directory and reads them with fixed rules. Nothing is run.
+
+- File names from the map are cleaned: no `..`, no absolute path, no drive,
+  no scheme; each file must stay inside the directory. Library code
+  (`node_modules`, the webpack runtime) is skipped.
+- Limits per map: 400 files, 1 MB per file, 16 MB in all, 300 hits, 10 s.
+  At most 20 maps per run.
+- Rules: DOM sinks (the same list as for bundles), secrets (the secret
+  scanner's patterns, `pipeline/tools/secret_patterns.py`, and long key-shaped
+  values given to a key, secret, token or password name), endpoints and
+  client routes, role checks done in the client (`isAdmin`, `hasRole(`,
+  `role === 'admin'`), debug switches (`debug: true`, `production: false`).
+- Each hit is a `js_finding` with `kind: recovered_source`, `rule`, the
+  original `file` and `line`, and a redacted snippet. A secret's value is
+  never stored. An endpoint on an out-of-scope host keeps no URL.
+- Each hit is a lead, not a finding: it still needs a live proof.
 
 ## Scope
 

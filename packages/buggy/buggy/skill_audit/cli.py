@@ -103,7 +103,16 @@ def _build_argparser() -> argparse.ArgumentParser:
     return parser
 
 
+#: Subcommands kept in :mod:`buggy.skill_audit.lock` (skill versions).
+LOCK_COMMANDS = ("lock", "verify-skills")
+
+
 def main(argv: list[str] | None = None) -> ExitCode:
+    argv = sys.argv[1:] if argv is None else argv
+    if argv and argv[0] in LOCK_COMMANDS:
+        from buggy.skill_audit.lock import main as lock_main  # noqa: PLC0415
+
+        return ExitCode(lock_main(argv))
     args = _build_argparser().parse_args(argv)
     if not args.root.exists():
         print(f"error: --root {args.root} does not exist", file=sys.stderr)

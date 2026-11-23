@@ -161,7 +161,14 @@ _LEDGER_FIELDS = (
 RETEST_FIXED = "fixed"
 RETEST_STILL_VULNERABLE = "still_vulnerable"
 RETEST_INCONCLUSIVE = "inconclusive"
-RETEST_OUTCOMES = (RETEST_FIXED, RETEST_STILL_VULNERABLE, RETEST_INCONCLUSIVE)
+# The original proof fails, but a variant of it still works (a new, linked finding).
+RETEST_VARIANT_WORKS = "variant_still_works"
+RETEST_OUTCOMES = (
+    RETEST_FIXED,
+    RETEST_STILL_VULNERABLE,
+    RETEST_INCONCLUSIVE,
+    RETEST_VARIANT_WORKS,
+)
 
 # A decided finding does not go back in the queue.
 _NEVER_BACK_TO_CANDIDATE = frozenset({Status.DISCARDED.value, Status.EXPLOIT_VERIFIED.value})
@@ -566,8 +573,8 @@ class FindingStore:
         Sets ``retest = {at, outcome, capture_ids}`` and appends a ``retest``
         event. ``fixed`` sets ``fixed_at`` (kept if it is already set);
         ``still_vulnerable`` on a finding that has a ``fixed_at`` clears it and
-        appends a ``regressed`` event first; ``inconclusive`` leaves ``fixed_at``
-        as it is. The read that decides and the writes are one transaction.
+        appends a ``regressed`` event first; ``inconclusive`` and
+        ``variant_still_works`` leave ``fixed_at`` as it is. The read that decides and the writes are one transaction.
         Returns :meth:`retest_state` as it is afterwards plus ``regressed``.
         """
         who = self._actor(actor)
@@ -936,5 +943,6 @@ __all__ = [
     "RETEST_INCONCLUSIVE",
     "RETEST_OUTCOMES",
     "RETEST_STILL_VULNERABLE",
+    "RETEST_VARIANT_WORKS",
     "check_transition",
 ]

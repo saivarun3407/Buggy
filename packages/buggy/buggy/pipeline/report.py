@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import re
 import time
+from collections.abc import Callable
 from typing import Any
 
 from buggy.pipeline.tools import params
@@ -136,6 +137,105 @@ def group_issues(vulnerabilities: list[dict[str, Any]]) -> list[dict[str, Any]]:
         grouped.values(),
         key=lambda e: (SEVERITY_ORDER.index(e["severity"]), e["name"].lower()),
     )
+
+
+#: What a recovered-source rule means as a lead: ``(class, what was found, what to do, probe)``.
+_RECOVERED_ROWS: dict[str, tuple[str, str, str, str]] = {
+    "client_auth": (
+        "access_control",
+        "role or permission checks in client code",
+        "the server must enforce them too: request what they guard with a low-privilege account",
+        MANUAL,
+    ),
+    "secret": (
+        "info_exposure",
+        "hard-coded secrets",
+        "check whether each is live and what it opens (the value is not stored)",
+        MANUAL,
+    ),
+    "dom_sink": (
+        "xss",
+        "DOM sinks",
+        "trace what reaches them from the URL or a message",
+        "xss_reflected",
+    ),
+    "debug_flag": (
+        "misconfiguration",
+        "debug switches",
+        "check whether production honours them",
+        MANUAL,
+    ),
+    "endpoint": (
+        "api",
+        "routes",
+        "test the ones recon did not find with a live request",
+        MANUAL,
+    ),
+}
+#: Places named per row of a recovered-source lead, and admin/auth paths queued on their own.
+_RECOVERED_NAMED = 6
+_RECOVERED_PATHS = 10
+
+
+def _rank_recovered(
+    records: dict[str, list[dict[str, Any]]], add: Callable[[str, str, str, str], None]
+) -> None:
+    """Leads from the original files a source map gave back (``recovered_source`` js findings).
+
+    One row per map and rule, naming the original file and line of the first
+    hits; an administrative or login path named in that source is its own row.
+    """
+    groups: dict[tuple[str, str], list[dict[str, Any]]] = {}
+    for record in records.get("js_finding", []):
+        attrs = _attrs(record)
+        if attrs.get("kind") != "recovered_source" or attrs.get("rule") not in _RECOVERED_ROWS:
+            continue
+        where = str(attrs.get("map") or attrs.get("found_in") or "")
+        groups.setdefault((str(attrs["rule"]), where), []).append(attrs)
+    for rule in ("client_auth", "secret", "dom_sink", "debug_flag", "endpoint"):
+        for (kind, where), hits in groups.items():
+            if kind != rule:
+                continue
+            vuln_class, what, todo, probe = _RECOVERED_ROWS[rule]
+            named = [
+                f"{h.get('detail')} ({h.get('file')}:{h.get('line')})"
+                for h in hits[:_RECOVERED_NAMED]
+            ]
+            more = len(hits) - _RECOVERED_NAMED
+            add(
+                vuln_class,
+                where,
+                f"{what} in source recovered from the source map: {', '.join(named)}"
+                + (f" and {more} more" if more > 0 else "")
+                + f"; {todo}",
+                probe,
+            )
+            if rule != "endpoint":
+                continue
+            paths = 0
+            for hit in hits:
+                url = str(hit.get("url") or "")
+                path = url.split("?", 1)[0]
+                if not url or paths >= _RECOVERED_PATHS:
+                    continue
+                origin = f"named in recovered source {hit.get('file')}:{hit.get('line')}"
+                if _ADMIN_PATH.search(path):
+                    paths += 1
+                    add(
+                        "access_control",
+                        url,
+                        f"administrative path {origin}: request it without and with a "
+                        "low-privilege account",
+                        MANUAL,
+                    )
+                elif _AUTH_PATH.search(path):
+                    paths += 1
+                    add(
+                        "auth_session",
+                        url,
+                        f"authentication path {origin}: reset, MFA and session handling",
+                        MANUAL,
+                    )
 
 
 def rank_candidates(
@@ -286,6 +386,8 @@ def rank_candidates(
             f"DOM sinks: {shown}" + (f" and {more} more" if more > 0 else ""),
             "xss_reflected",
         )
+
+    _rank_recovered(records, add)
 
     for kind in ("endpoint", "url"):
         for record in records.get(kind, []):

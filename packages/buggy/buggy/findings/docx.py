@@ -460,6 +460,7 @@ def _finding(
             "fixed": "fixed",
             "still_vulnerable": "still vulnerable",
             "inconclusive": "could not tell",
+            "variant_still_works": "fixed for the original payload, but a variant still works",
         }
         outcome = words.get(_str(retest, "outcome"), _str(retest, "outcome"))
         out.append(_label("Retest", f"{outcome} (retested {_str(retest, 'at')})"))

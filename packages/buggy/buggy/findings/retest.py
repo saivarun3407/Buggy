@@ -22,6 +22,14 @@ Outcomes
     passes (a control showing the target is up and answering this request
     normally, so a broken login or an outage cannot look like a fix).
 
+``variant_still_works``
+    The original proof is fixed (as above), but a variant of it still works:
+    another quote or encoding, another path form, a neighbouring object
+    (:mod:`buggy.findings.variants`, read-only requests only). The variant is
+    queued as a new candidate finding linked to this one; ``fixed_at`` is not set.
+    Without ``variants=False``, every "fixed" is followed by this search; when it
+    cannot tell, the outcome stays ``fixed`` and the reasons say what was unclear.
+
 ``inconclusive``
     Anything else: a transport error or a 5xx, a redirect or another status
     that is neither a normal answer nor a refusal, a request that was not
@@ -64,12 +72,14 @@ from __future__ import annotations
 from typing import Any
 
 from buggy.capture.gateway import SAFE_METHODS
+from buggy.findings import variants as variant_search
 from buggy.findings import verifier
 from buggy.findings.model import Finding, Status
 from buggy.findings.store import (
     RETEST_FIXED,
     RETEST_INCONCLUSIVE,
     RETEST_STILL_VULNERABLE,
+    RETEST_VARIANT_WORKS,
     FindingNotFound,
 )
 
@@ -198,6 +208,7 @@ def retest(
     finding_id: str,
     *,
     allow_state_change: bool = False,
+    variants: bool = True,
     actor: str = "retest",
 ) -> dict[str, Any]:
     """Retest one stored finding and record the outcome. The finding's status is not changed.
@@ -206,7 +217,9 @@ def retest(
     ``store``, ``gateway`` and ``sessions`` are used). Returns ``ok``,
     ``outcome``, ``reasons``, ``capture_ids`` (every fresh capture this retest
     made), ``attempts``, ``status`` (the finding's, unchanged), ``retest``,
-    ``fixed_at`` and ``regressed``; or ``ok: False`` with ``code``/``detail``.
+    ``fixed_at``, ``regressed`` and, after a "fixed", ``variants`` (what the
+    variant search tried, :class:`buggy.findings.variants.Report`); or
+    ``ok: False`` with ``code``/``detail``.
     """
     store, gateway = service.store, service.gateway
     finding = store.get(engagement, finding_id)
@@ -278,6 +291,22 @@ def retest(
                 ]
             else:
                 verdict, reasons = RETEST_INCONCLUSIVE, [UNSTABLE]
+    variant_report: dict[str, Any] | None = None
+    if verdict == RETEST_FIXED and variants:
+        found = variant_search.search(service, finding, actor=actor)
+        variant_report = found.to_dict()
+        capture_ids.extend(found.capture_ids)
+        if found.outcome == variant_search.VARIANT_WORKS:
+            working = next(t for t in found.tried if t.outcome == variant_search.WORKS)
+            linked = ", ".join(found.new_finding_ids) or "not queued"
+            verdict = RETEST_VARIANT_WORKS
+            reasons = [
+                f"fixed for the original payload, but the variant {working.name!r} still works "
+                f"(new finding: {linked})",
+                *reasons,
+            ]
+        elif found.outcome == variant_search.COULD_NOT_TELL:
+            reasons = [*reasons, "variants: could not tell", *found.reasons]
     try:
         recorded = store.record_retest(
             engagement,
@@ -289,6 +318,7 @@ def retest(
                 "reasons": reasons,
                 "attempts": len(attempts),
                 "allow_state_change": allow_state_change,
+                **({"variants": variant_report} if variant_report is not None else {}),
             },
         )
     except FindingNotFound:
@@ -307,6 +337,7 @@ def retest(
         "reasons": reasons,
         "capture_ids": capture_ids,
         "attempts": attempts,
+        **({"variants": variant_report} if variant_report is not None else {}),
         **recorded,
     }
 

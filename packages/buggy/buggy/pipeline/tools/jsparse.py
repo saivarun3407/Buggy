@@ -387,6 +387,11 @@ def _masks(text: str) -> tuple[str, str]:
     return "".join(code), "".join(bare)
 
 
+def masked(text: str) -> tuple[str, str]:
+    """``(code, bare)``: ``text`` with comments blanked, and also string contents blanked."""
+    return _masks(text)
+
+
 def _args_end(bare: str, open_paren: int) -> int:
     """Offset of the ``)`` closing the call whose ``(`` is at ``open_paren``."""
     depth = 0

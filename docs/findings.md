@@ -622,10 +622,36 @@ a NUL in a response, are removed, so they cannot corrupt the file.
 docker compose --profile operator run --rm operator buggy-cli retest <engagement> --all-verified
 ```
 
-Per finding: `still_vulnerable`, `fixed` or `inconclusive`. `fixed` needs two
-consistent attempts and, for a finding with more than one assertion, a control
-that still passes, so an outage or an expired login cannot look like a fix.
-Exit 0 all fixed, 10 any still vulnerable, 3 any inconclusive.
+Per finding: `still_vulnerable`, `fixed`, `variant_still_works` or
+`inconclusive`. `fixed` needs two consistent attempts and, for a finding with
+more than one assertion, a control that still passes, so an outage or an
+expired login cannot look like a fix. Exit 0 all fixed, 10 any still
+vulnerable or with a working variant, 3 any inconclusive.
+
+**Variants after a fix.** When the original proof is fixed, retest tries a
+small fixed set of variants of the same probe on the same parameter
+(`buggy/findings/variants.py`), at most 12 requests, read-only only:
+
+- SQL injection: other quote and comment contexts and encodings, each as a
+  TRUE/FALSE pair against the baseline value;
+- XSS: other breakouts and encodings of a markup-only marker;
+- path traversal: other encodings and depths to the probe's marker files;
+- open redirect: other bypass forms to a fresh `.example` host;
+- IDOR: other forms of the object's path and `HEAD` as the attacker, and the
+  neighbouring ids read by both accounts.
+
+A variant that works becomes a new candidate linked to the original (its
+description names it; both histories get an event), and the outcome is
+`variant_still_works`: fixed for the original payload, but not fixed. The new
+candidate counts only after the verifier re-proves it. A proof that can change
+state is not varied: run the probe with approval. `--no-variants` skips this.
+
+**Sibling leads.** A proven finding seeds leads on the endpoints recon knows
+that look like it (`buggy/findings/siblings.py`): the same route pattern
+(`/api/Users/{id}` proven -> `/api/Cards/{id}`, `/api/Addresss/{id}`) or the
+same parameter name on another endpoint. They are queued as ordinary leads
+with the original finding as the reason. `hunt` does this after the probe
+sweep.
 
 ## Lessons and the shared board
 

@@ -857,6 +857,35 @@ def queue_leads(engagement: str, records: dict[str, list[dict[str, Any]]]) -> di
     return _capture("candidates_add", engagement, items_json=json.dumps(items), actor="recon")
 
 
+def queue_siblings(
+    engagement: str, records: dict[str, list[dict[str, Any]]], proven: list[dict[str, Any]]
+) -> dict[str, Any]:
+    """Queue sibling leads of the findings a sweep proved (:mod:`buggy.findings.siblings`).
+
+    A proven IDOR on ``/api/Users/{id}`` seeds ``/api/Cards/{id}``; a proven
+    injection in ``q`` seeds the other endpoints that take ``q``. Each lead
+    names the original as its reason and still has to be proven. Deterministic;
+    returns the queue's answer (``{"rows": 0}`` when there was nothing to add).
+    """
+    from buggy.findings import siblings  # noqa: PLC0415
+
+    rows: list[dict[str, str]] = []
+    for entry in proven:
+        got = _capture("finding_get", engagement, finding_id=str(entry.get("id") or ""))
+        finding = got.get("finding") if isinstance(got.get("finding"), dict) else None
+        if finding and finding.get("status") == "exploit_verified":
+            rows += siblings.rows(finding, records)
+    if not rows:
+        return {"rows": 0}
+    queued = _capture(
+        "candidates_add",
+        engagement,
+        items_json=json.dumps(siblings.queue_rows(rows)),
+        actor="siblings",
+    )
+    return {**queued, "rows": len(rows)}
+
+
 #: Scanner records are sent to the grader slimmed to what it reads, and capped.
 _KNOWN_ISSUE_ATTRS = ("class", "cwe", "tags", "template_id", "matched_at")
 MAX_KNOWN_ISSUES = 300
@@ -2291,6 +2320,20 @@ def _class_stage(
         print(line, file=sys.stderr)
 
     run_by_class(slug, groups, _known_issues(records), report=show)
+    proven = [
+        entry
+        for _label, _planned, counts in groups
+        for entry in counts.get("findings") or []
+        if entry.get("status") == "exploit_verified"
+    ]
+    if proven:
+        queued = queue_siblings(slug, records, proven)
+        if queued.get("rows"):
+            print(
+                f"  sibling leads    {queued.get('created', 0)} new of {queued['rows']} "
+                f"from {len(proven)} proven finding(s)",
+                file=sys.stderr,
+            )
     for counts in (probes, state):
         if counts is not None:
             counts["planned"] = int(counts.get("planned") or 0)

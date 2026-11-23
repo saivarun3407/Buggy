@@ -263,6 +263,19 @@ build-skill-graph:
 check-skill-graph:
 	uv run python -m buggy.skillogy.builder --frozen-built-at --check
 
+## Skill versions: packages/buggy/buggy/skills/skills.lock.json holds every
+## SKILL.md's sha256 and the digest that last passed verify-skills. CI gate:
+## fails when a skill changed without the lock being updated and verified.
+.PHONY: check-skills-lock
+check-skills-lock:
+	uv run python -m buggy.skill_audit lock
+
+## Check every skill (frontmatter, sections, the Buggy checks it names) and
+## record the passing digests in the lock. Run after editing a SKILL.md.
+.PHONY: verify-skills
+verify-skills:
+	uv run python -m buggy.skill_audit verify-skills
+
 ## main-push lane: slow included, coverage 60% gate (ratcheted from 35% in #380).
 ci-test-coverage:
 	uv run pytest -n auto --cov --cov-report=xml --cov-report=term --cov-fail-under=60

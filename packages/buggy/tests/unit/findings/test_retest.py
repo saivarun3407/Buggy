@@ -154,7 +154,7 @@ class TestOutcomes:
         before = row(env, finding)
         behave(env, ORDER, "fixed")
 
-        out = retest(env.service, "acme", finding)
+        out = retest(env.service, "acme", finding, variants=False)
 
         assert out["outcome"] == "fixed"
         assert [a["verdict"] for a in out["attempts"]] == ["safe", "safe"]
@@ -546,7 +546,9 @@ class TestCli:
             }
             assert result["status"] == "exploit_verified"
         assert by_id[first]["outcome"] == "fixed" and by_id[first]["fixed_at"]
-        assert len(by_id[first]["capture_ids"]) == 4
+        notes = [_must(env.gateway.store.get("acme", c)).note for c in by_id[first]["capture_ids"]]
+        assert notes.count("verifier") == 4  # the rest are the variants tried after the fix
+        assert set(notes) == {"verifier", "retest-variant"}
         assert by_id[second]["outcome"] == "still_vulnerable" and by_id[second]["fixed_at"] is None
 
     def test_only_verified_findings_are_retested_with_all_verified(self, env: Env, cli) -> None:
