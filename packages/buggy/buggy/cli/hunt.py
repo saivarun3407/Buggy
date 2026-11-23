@@ -87,6 +87,9 @@ Every run that gets past the scope step writes
 #: Most severe first; the order ``--fail-on`` thresholds are read in.
 SEVERITIES = ("critical", "high", "medium", "low", "info")
 RESULT_FILE = "hunt-result.json"
+#: What the launcher's disprover pass did (``--finalize --disprover``): it judged the
+#: agent-made findings, there were none, it could not run (no ``claude``), or it failed.
+DISPROVER_STATES = ("ran", "nothing", "skipped", "failed")
 #: The blocks of ``roe.json`` that decide what may be sent where. A re-run
 #: whose blocks equal the stored ones is a resume; any difference needs a yes.
 COMPARED_BLOCKS = ("machine_enforcement", "pipeline", "approvals", "network")
@@ -248,6 +251,12 @@ def _build_parser() -> argparse.ArgumentParser:
         "--agent-runner",
         default="",
         help="With --finalize: the name of the agent that ran (recorded in the result).",
+    )
+    p.add_argument(
+        "--disprover",
+        choices=DISPROVER_STATES,
+        default="",
+        help="With --finalize: what the disprover pass did (recorded in the result).",
     )
     p.add_argument(
         "--no-probes",
@@ -819,7 +828,7 @@ def write_technologies(directory: Path, records: dict[str, list[dict[str, Any]]]
 
     names: list[str] = []
     for record in records.get("technology", []):
-        attrs = record.get("attrs") if isinstance(record.get("attrs"), dict) else {}
+        attrs = _mapping(record.get("attrs"))
         name = str((attrs or {}).get("name") or "").strip()
         if name:
             version = str((attrs or {}).get("version") or "").strip()
@@ -953,6 +962,10 @@ def run_state_sweep(
     return _run_steps(engagement, planned, _known_issues(records))
 
 
+def _mapping(value: Any) -> dict[str, Any]:
+    return value if isinstance(value, dict) else {}
+
+
 def _run_steps(engagement: str, planned: dict[str, Any], known: str) -> dict[str, Any]:
     """Send the planned probe runs one bug class after another; re-prove and grade positives.
 
@@ -981,7 +994,7 @@ def _run_steps(engagement: str, planned: dict[str, Any], known: str) -> dict[str
         out["ran"] += 1
         cls["checks"] += 1
         # The capture server recorded why a run found nothing (buggy.findings.ruled_out).
-        ledger = result.get("ledger") if isinstance(result.get("ledger"), dict) else {}
+        ledger = _mapping(result.get("ledger"))
         if ledger.get("kind") == "ruled_out":
             out["ruled_out"] += 1
         elif ledger.get("kind") == "attempt":
@@ -1441,14 +1454,29 @@ FINDINGS_REPORTS = (("markdown", "report.md"), ("html", "report.html"), ("json",
 SARIF_FILE = "findings.sarif"
 
 
+def with_agent_cost(markdown: str, line: str) -> str:
+    """The Markdown report with an "Agent cost" line before its summary."""
+    if not line:
+        return markdown
+    marker = "\n## Summary\n"
+    added = f"\nAgent cost: {line}.\n"
+    return markdown.replace(marker, added + marker, 1) if marker in markdown else markdown + added
+
+
 def write_findings_reports(
-    control: Path, engagement: str, summary: dict[str, Any] | None, *, complete: bool
+    control: Path,
+    engagement: str,
+    summary: dict[str, Any] | None,
+    *,
+    complete: bool,
+    agent_cost: str = "",
 ) -> dict[str, Any]:
     """Write the findings report (Markdown, HTML, JSON) and SARIF into the control dir.
 
     The capture server builds them from the findings store: only findings the
-    verifier proved are listed as findings. Returns ``{"written": [...]}`` and,
-    when something could not be produced, ``"errors"``.
+    verifier proved are listed as findings. ``agent_cost`` is the one-line cost of
+    the Claude Code sessions, added to the Markdown report. Returns
+    ``{"written": [...]}`` and, when something could not be produced, ``"errors"``.
     """
     directory = control / engagement
     written: list[str] = []
@@ -1467,6 +1495,8 @@ def write_findings_reports(
         if not isinstance(text, str):
             errors.append(f"{filename}: {(built or {}).get('error') or built}")
             continue
+        if fmt == "markdown":
+            text = with_agent_cost(text, agent_cost)
         try:
             directory.mkdir(parents=True, exist_ok=True)
             (directory / filename).write_text(text, encoding="utf-8")
@@ -1543,6 +1573,9 @@ def write_proof_and_word(
         return out
     report["coverage"] = list(result.get("coverage") or [])
     report["not_tested"] = list(result.get("not_tested") or [])
+    cost = result.get("agent_cost")
+    if isinstance(cost, dict) and cost.get("line"):
+        report["agent_cost"] = str(cost["line"])
     images: dict[str, bytes] = {}
     videos: dict[str, str] = {}
     # Evidence is for valid bugs only: re-proven AND graded as reportable. A
@@ -1879,7 +1912,9 @@ def build_result(
             "ran": bool(agent["ran"]),
             "error": agent["error"],
             **({"runner": str(agent["runner"])} if agent.get("runner") else {}),
+            **({"disprover": str(agent["disprover"])} if agent.get("disprover") else {}),
         },
+        **({"agent_cost": outcome["agent_cost"]} if outcome.get("agent_cost") else {}),
         "probes": _probes_result(outcome.get("probes")),
         "access": _access_result(outcome.get("access")),
         "signed_in": _signed_in_result(outcome.get("signed_in")),
@@ -2709,6 +2744,16 @@ _POINTER_NAME = re.compile(r"^\.hunt-[A-Za-z0-9]{6,40}\.json$")
 POINTER_ENV = "BUGGY_HUNT_POINTER"
 
 
+def agent_cost(audit: Path, slug: str) -> dict[str, Any] | None:
+    """Totals of the Claude Code sessions the launcher recorded, with a one-line summary."""
+    from buggy import agent_records  # noqa: PLC0415
+
+    summary = agent_records.cost_summary(
+        agent_records.read_jsonl(agent_records.runs_file(audit, slug))
+    )
+    return {**summary, "line": agent_records.cost_line(summary)} if summary else None
+
+
 def finalize_outcome(control: Path, slug: str, args: argparse.Namespace) -> dict[str, Any]:
     """The outcome of a run whose agent stage happened outside this command.
 
@@ -2731,14 +2776,45 @@ def finalize_outcome(control: Path, slug: str, args: argparse.Namespace) -> dict
     issues: dict[str, Any] = section("issues") or {}
     runner = args.agent_runner if _RUNNER_NAME.match(args.agent_runner or "") else "external"
     kept_probes = probes if probes.get("ran_sweep") else None
+    agent: dict[str, Any] = {"ran": True, "error": None, "runner": runner}
+    disprover = getattr(args, "disprover", "")
+    if disprover in DISPROVER_STATES:
+        agent["disprover"] = disprover
     return {
         "recon": recon or recon_outcome("skipped", None),
         "issues": {severity: int(issues.get(severity) or 0) for severity in SEVERITIES},
-        "agent": {"ran": True, "error": None, "runner": runner},
+        "agent": agent,
+        "agent_cost": agent_cost(_paths.audit_root(getattr(args, "audit_root", None)), slug),
         "probes": kept_probes,
         "access": access,
         "not_tested": not_tested(slug, args, kept_probes, access, agents_ran=True),
     }
+
+
+_DISPROVER_SAID = {
+    "ran": "judged the agent-made findings (buggy-cli disprover list {slug})",
+    "nothing": "no agent-made finding to judge",
+    "skipped": "skipped: the claude command is not available, agent findings are not challenged",
+    "failed": "did not finish; findings it did not judge are graded as usual",
+}
+
+
+def _print_agent_review(args: argparse.Namespace, slug: str, result: dict[str, Any]) -> None:
+    """After an outside agent: what the disprover did, and the trace review in one line."""
+    from buggy import agent_records  # noqa: PLC0415
+    from buggy.cli import trace_review  # noqa: PLC0415
+
+    state = str(result["agent"].get("disprover") or "")
+    if state in _DISPROVER_SAID:
+        print(f"  disprover        {_DISPROVER_SAID[state].format(slug=slug)}", file=sys.stderr)
+    audit = _paths.audit_root(getattr(args, "audit_root", None))
+    reviewed = trace_review.review(agent_records.calls(audit, slug))
+    if reviewed["runs"]:
+        print(
+            f"  trace review     {trace_review.summary_line(reviewed)} "
+            f"(buggy-cli trace-review {slug})",
+            file=sys.stderr,
+        )
 
 
 def write_pointer(control: Path, slug: str) -> None:
@@ -2881,12 +2957,18 @@ def main(argv: list[str] | None = None) -> int:  # noqa: PLR0911, PLR0912, PLR09
         return EXIT_INCOMPLETE
     write_pointer(control, slug)
     print(f"\n  result           {_host_path(path)}", file=sys.stderr)
+    cost = result.get("agent_cost") or {}
+    if cost.get("line"):
+        print(f"  agent cost       {cost['line']}", file=sys.stderr)
+    if args.finalize:
+        _print_agent_review(args, slug, result)
     if capture_available():
         reports = write_findings_reports(
             control,
             slug,
             {"records": outcome["recon"]["records"]},
             complete=bool(result["complete"]),
+            agent_cost=str(cost.get("line") or ""),
         )
         if reports["written"]:
             print(

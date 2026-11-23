@@ -114,7 +114,7 @@ func TestClaudeArgs_NoWebHasNoBuiltinTools(t *testing.T) {
 
 func bridgeArgs(t *testing.T, web bool) []string {
 	t.Helper()
-	body, err := claudeMCPConfig(dockerShaped(huntCompose(false)), "acme", web)
+	body, err := claudeMCPConfig(dockerShaped(huntCompose(false)), "acme", claudeRun{Role: roleAgent, Web: web}, "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -147,7 +147,7 @@ func TestClaudeMCPConfig_NoWebHidesResearchFetch(t *testing.T) {
 
 func TestClaudeMCPConfig_StartsTheBridgeInTheOperatorContainer(t *testing.T) {
 	stackHome(t)
-	body, err := claudeMCPConfig(dockerShaped(huntCompose(false)), "acme", true)
+	body, err := claudeMCPConfig(dockerShaped(huntCompose(false)), "acme", claudeRun{Role: roleAgent, Web: true}, "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -245,27 +245,27 @@ func TestHuntPointer_RoundTripAndRejects(t *testing.T) {
 
 func TestClaudeAgentStage_FinalizesEvenWhenClaudeFails(t *testing.T) {
 	stackHome(t)
-	prevRun, prevFinal := runClaudeFn, finalizeHuntFn
-	t.Cleanup(func() { runClaudeFn, finalizeHuntFn = prevRun, prevFinal })
+	fakeStage(t, []stageStatus{{BudgetTotal: 300, CallsLeft: 300, OpenLeads: 4}})
 
 	var ran, finalized []string
 	var webs []bool
-	runClaudeFn = func(_ *compose.Compose, slug string, web bool) error {
+	runClaudeFn = func(_ *compose.Compose, slug string, run claudeRun, _ string) (claudeResult, error) {
 		ran = append(ran, slug)
-		webs = append(webs, web)
-		return errors.New("exit status 1")
+		webs = append(webs, run.Web)
+		return claudeResult{}, errors.New("exit status 1")
 	}
-	finalizeHuntFn = func(_ *compose.Compose, slug, failOn string, issues bool) error {
-		finalized = append(finalized, slug+"|"+failOn)
+	finalizeHuntFn = func(_ *compose.Compose, slug, failOn string, issues bool, disprover string) error {
+		finalized = append(finalized, slug+"|"+failOn+"|"+disprover)
 		return nil
 	}
-	if err := claudeAgentStage(huntCompose(false), "acme", "high", false, true); err != nil {
+	if err := claudeAgentStage(huntCompose(false), "acme", agentStageOptions{FailOn: "high", Web: true, Attempts: 3}); err != nil {
 		t.Fatalf("a Claude Code failure must not fail the run by itself: %v", err)
 	}
-	if !slices.Equal(ran, []string{"acme"}) || !slices.Equal(finalized, []string{"acme|high"}) {
+	// A failed session is not retried: a sign-in problem would fail every attempt.
+	if !slices.Equal(ran, []string{"acme"}) || !slices.Equal(finalized, []string{"acme|high|nothing"}) {
 		t.Errorf("ran %v, finalized %v", ran, finalized)
 	}
-	if err := claudeAgentStage(huntCompose(false), "acme", "", false, false); err != nil {
+	if err := claudeAgentStage(huntCompose(false), "acme", agentStageOptions{Attempts: 3}); err != nil {
 		t.Fatal(err)
 	}
 	if !slices.Equal(webs, []bool{true, false}) {
@@ -273,7 +273,7 @@ func TestClaudeAgentStage_FinalizesEvenWhenClaudeFails(t *testing.T) {
 	}
 
 	ran, finalized = nil, nil
-	if err := claudeAgentStage(huntCompose(false), "../x", "", false, true); err == nil {
+	if err := claudeAgentStage(huntCompose(false), "../x", agentStageOptions{Web: true}); err == nil {
 		t.Error("a path was accepted as an engagement name")
 	}
 	if len(ran)+len(finalized) != 0 {

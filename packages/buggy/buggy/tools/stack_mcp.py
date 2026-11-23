@@ -563,6 +563,17 @@ async def finding_get(finding_id: str) -> str:
 
 
 @tool
+async def finding_challenge(finding_id: str, verdict: str, reason: str) -> str:
+    """Your verdict, as the disprover, on an agent-made finding: verdict is stands,
+    false_positive or undetermined; reason says what in the captures shows it (one or two
+    sentences the operator can check). false_positive and undetermined keep the finding out
+    of the report until the operator reviews it; stands changes nothing."""
+    return await _actor_call(
+        "finding_challenge", finding_id=finding_id, verdict=verdict, reason=reason
+    )
+
+
+@tool
 async def findings_list(status: str = "", grade: str = "") -> str:
     """Findings of this engagement by status (candidate, exploit_verified, inconclusive,
     discarded) or grade (submit, hold, discard)."""

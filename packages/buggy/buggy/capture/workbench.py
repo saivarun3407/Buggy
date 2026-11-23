@@ -43,7 +43,7 @@ from buggy.coordination.board import BoardError
 from buggy.findings import candidates, chains, report, skill_map, verifier
 from buggy.findings.model import Finding, Status
 from buggy.findings.ruled_out import review_days_from_env
-from buggy.findings.service import FindingService
+from buggy.findings.service import FindingService, read_overrides
 from buggy.findings.store import FindingStore
 from buggy.memory import DB_FILENAME as LESSONS_DB
 from buggy.memory import LessonStore, scope_hosts_from_document
@@ -283,6 +283,8 @@ class Workbench:
             sessions=gateway.sessions,
             review_days=review_days_from_env(),
         )
+        # The operator's overrides of the disprover live under the control root.
+        self.findings.overrides = lambda name: read_overrides(roots.control, name)
         self.probe_runs = ProbeRuns(roots.data / PROBE_RUNS_DB)
         self.recipes = RecipeStore(roots.data / RECIPES_DB)
         self.lessons = LessonStore(roots.data / LESSONS_DB)
@@ -596,6 +598,16 @@ class Workbench:
             )
 
         return self._guard(run)
+
+    def finding_challenge(
+        self, engagement: str, finding_id: str, verdict: str, reason: str, actor: str
+    ) -> dict[str, Any]:
+        """The disprover's verdict on an agent-made finding (the service decides the effect)."""
+        return self._guard(
+            lambda: self.findings.challenge(
+                self._engagement(engagement), finding_id, verdict, reason, _actor(actor)
+            )
+        )
 
     # ── the queue ────────────────────────────────────────────────────
 
@@ -1148,6 +1160,15 @@ def register_workbench(mcp: Any, bench: Workbench) -> None:
     ) -> dict[str, Any]:
         """Grade a finding against the program's rules: submit, hold or discard, with reasons."""
         return bench.finding_grade(engagement, finding_id, known_issues_json)
+
+    @mcp.tool()
+    def finding_challenge(
+        engagement: str, finding_id: str, verdict: str, reason: str, actor: str
+    ) -> dict[str, Any]:
+        """The disprover's verdict on an agent-made finding: stands, false_positive or
+        undetermined, with the reason. false_positive and undetermined hold the finding (not
+        submitted) until the operator overrides; stands changes nothing."""
+        return bench.finding_challenge(engagement, finding_id, verdict, reason, actor)
 
     @mcp.tool()
     def candidates_next(engagement: str, actor: str, limit: int = 5) -> dict[str, Any]:

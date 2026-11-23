@@ -16,10 +16,18 @@ import logging
 import sqlite3
 from collections.abc import Callable
 from dataclasses import replace
+from pathlib import Path
 from typing import Any
 
 from buggy.capture.gateway import CaptureGateway, GatewayRefusal
 from buggy.findings import verifier
+from buggy.findings.grade import (
+    CHALLENGE_HOLDS,
+    CHALLENGE_VERDICTS,
+    HOLD,
+    SUBMIT,
+    challenge_reason,
+)
 from buggy.findings.grade import grade as grade_finding
 from buggy.findings.model import (
     CONTEXT_REQUIRED_CLASSES,
@@ -42,6 +50,43 @@ log = logging.getLogger("buggy.findings.service")
 _SERVICE_OWNED = ("id", "status", "verification", "grade", "grade_reasons", "created_at")
 _FINAL = frozenset({Status.EXPLOIT_VERIFIED.value, Status.DISCARDED.value})
 SOURCE_SEPARATOR = " | "
+
+#: Sources whose proof is code (a probe re-run, a scanner record): the disprover skips them.
+CODE_SOURCES = ("probe:", "pipeline:")
+CHALLENGED = "challenged"
+MAX_CHALLENGE_REASON = 1000
+#: Under the operator-controlled root: the operator's overrides of the disprover.
+OVERRIDES_FILE = "disprover-overrides.jsonl"
+
+
+def agent_made(source: str) -> bool:
+    """Whether a finding's proof came from an agent's claim rather than from code."""
+    parts = [part.strip() for part in str(source or "").split("|") if part.strip()]
+    return not any(part.startswith(CODE_SOURCES) for part in parts)
+
+
+def read_overrides(control: Path, engagement: str) -> dict[str, float]:
+    """Finding id -> when the operator last overrode the disprover on it.
+
+    Written only by ``buggy-cli disprover override``. A file that cannot be read
+    gives no overrides, which keeps the findings held (the safe direction).
+    """
+    out: dict[str, float] = {}
+    try:
+        lines = (control / engagement / OVERRIDES_FILE).read_text(encoding="utf-8").splitlines()
+    except (OSError, UnicodeDecodeError):
+        return out
+    for raw in lines:
+        try:
+            row = json.loads(raw)
+        except ValueError:
+            continue
+        if not isinstance(row, dict) or not isinstance(row.get("finding_id"), str):
+            continue
+        at = row.get("at")
+        if isinstance(at, int | float) and not isinstance(at, bool):
+            out[row["finding_id"]] = max(out.get(row["finding_id"], 0.0), float(at))
+    return out
 
 
 def _error(code: str, detail: str, **extra: Any) -> dict[str, Any]:
@@ -75,6 +120,9 @@ class FindingService:
         self.sessions = sessions
         # What was tried and dropped, and why (buggy.findings.ruled_out).
         self.ledger = Ledger(store, review_days=review_days)
+        #: engagement -> {finding id: when the operator overrode the disprover}. The
+        #: capture server reads the operator's file (:func:`read_overrides`).
+        self.overrides: Callable[[str], dict[str, float]] = lambda _engagement: {}
 
     def _ledger(self, fn: Callable[[], Any]) -> None:
         """Record into the ledger; a ledger problem never fails the decision it follows."""
@@ -86,6 +134,95 @@ class FindingService:
     def _captures(self, engagement: str) -> Callable[[str], Any]:
         store = getattr(self.gateway, "store", None)
         return lambda capture_id: store.get(engagement, capture_id) if store is not None else None
+
+    # ── the disprover ───────────────────────────────────────────────
+
+    def _challenges(self, engagement: str, finding_id: str) -> list[dict[str, Any]]:
+        return [
+            {
+                "verdict": str(event["detail"].get("verdict") or ""),
+                "reason": str(event["detail"].get("reason") or ""),
+                "at": float(event["at"] or 0.0),
+                "by": str(event["actor"] or ""),
+            }
+            for event in self.store.events(engagement, finding_id)
+            if event["event"] == CHALLENGED and isinstance(event.get("detail"), dict)
+        ]
+
+    def standing_challenge(self, engagement: str, finding: Finding) -> dict[str, Any] | None:
+        """The disprover's objection that holds this finding now, if any.
+
+        Any ``false_positive`` or ``undetermined`` verdict recorded after the
+        operator's latest override holds it: two disprovers that disagree leave it
+        undetermined. ``stands`` never lifts an objection. Findings proven by code
+        (a probe, the scanner) are never held by the disprover.
+        """
+        if not agent_made(finding.source):
+            return None
+        overridden = self.overrides(engagement).get(finding.id)
+        for challenge in reversed(self._challenges(engagement, finding.id)):
+            if overridden is not None and challenge["at"] <= overridden:
+                break
+            if challenge["verdict"] in CHALLENGE_HOLDS:
+                return challenge
+        return None
+
+    def challenge(
+        self, engagement: str, finding_id: str, verdict: str, reason: str, actor: str
+    ) -> dict[str, Any]:
+        """Record the disprover's verdict on an agent-made finding; code decides the effect.
+
+        ``false_positive`` or ``undetermined`` hold the finding (grade rule 9) until
+        the operator overrides it; a finding already graded ``submit`` is held at
+        once. ``stands`` is recorded and changes nothing.
+        """
+        if not isinstance(actor, str) or not actor.strip():
+            return _error("BAD_ACTOR", "actor is required: a verdict names who gave it")
+        verdict = str(verdict or "").strip().lower()
+        if verdict not in CHALLENGE_VERDICTS:
+            return _error("INVALID", f"verdict must be one of {', '.join(CHALLENGE_VERDICTS)}")
+        reason = " ".join(str(reason or "").split())
+        if not reason:
+            return _error("INVALID", "reason is required: say what in the evidence shows it")
+        finding = self.store.get(engagement, finding_id)
+        if finding is None:
+            return _error("UNKNOWN_FINDING", f"no finding {finding_id!r} in this engagement")
+        if not agent_made(finding.source):
+            return _error(
+                "NOT_AGENT_MADE",
+                f"{finding_id} was proven by code ({finding.source}); the disprover judges "
+                "agent-made findings only",
+            )
+        detail = {"verdict": verdict, "reason": reason[:MAX_CHALLENGE_REASON]}
+        self.store.add_event(engagement, finding_id, actor, CHALLENGED, detail)
+        effect = "none"
+        standing = self.standing_challenge(engagement, finding)
+        if standing is not None and finding.grade == SUBMIT:
+            kept = tuple(r for r in finding.grade_reasons if not r.startswith("Rule 8 "))
+            reasons = (*kept, challenge_reason(standing))
+            try:
+                finding = self.store.upsert(
+                    replace(finding, grade=HOLD, grade_reasons=reasons),
+                    actor,
+                    event="graded",
+                    detail={
+                        "grade": HOLD,
+                        "previous_grade": SUBMIT,
+                        "reasons": list(reasons),
+                        "challenge": standing["verdict"],
+                    },
+                )
+            except IllegalTransition as exc:
+                return _error("CONFLICT", f"the finding changed while it was being held: {exc}")
+            effect = "held"
+        elif standing is not None:
+            effect = "held at grading"
+        return {
+            "ok": True,
+            "verdict": verdict,
+            "effect": effect,
+            "finding": self._shown(engagement, finding),
+        }
 
     # ── submit ──────────────────────────────────────────────────────
 
@@ -324,6 +461,7 @@ class FindingService:
                 scope=scope,
                 known_issues=list(known_issues or []),
                 prior=list(prior or []),
+                challenge=self.standing_challenge(engagement, finding),
             )
         except ValueError as exc:
             return _error("BAD_SCOPE", str(exc))
@@ -373,6 +511,14 @@ class FindingService:
         """
         shown = finding.to_dict()
         try:
+            challenges = self._challenges(engagement, finding.id)
+        except (sqlite3.Error, ValueError, KeyError, TypeError):
+            challenges = []
+        if challenges:
+            # The disprover's latest verdict, and whether one still holds the finding.
+            standing = self.standing_challenge(engagement, finding)
+            shown["challenge"] = {**challenges[-1], "holds": standing is not None}
+        try:
             state = self.store.retest_state(engagement, finding.id)
         except (FindingNotFound, sqlite3.Error, ValueError):
             # A retest record that cannot be read never hides the finding itself.
@@ -397,4 +543,11 @@ class FindingService:
         }
 
 
-__all__ = ["SOURCE_SEPARATOR", "FindingService"]
+__all__ = [
+    "CODE_SOURCES",
+    "OVERRIDES_FILE",
+    "SOURCE_SEPARATOR",
+    "FindingService",
+    "agent_made",
+    "read_overrides",
+]

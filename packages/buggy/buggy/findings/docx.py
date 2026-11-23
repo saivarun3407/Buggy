@@ -479,6 +479,8 @@ def _body(
     out.append(_label("Engagement", engagement))
     out.append(_label("Generated", _str(report, "generated_at")))
     out.append(_label("Testing complete", "yes" if _get(summary, "complete", False) else "no"))
+    if _str(report, "agent_cost"):
+        out.append(_label("Agent cost", _str(report, "agent_cost")))
     out.append(_heading("Scope", 1))
     scope = [clean(entry) for entry in _list(report, "scope")]
     out.extend(_text(f"• {entry}") for entry in scope)

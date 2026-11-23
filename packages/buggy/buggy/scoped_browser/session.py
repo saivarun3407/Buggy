@@ -17,6 +17,7 @@ from pathlib import Path
 from typing import Any
 from urllib.parse import urlsplit
 
+from buggy.capture import halt as halt_switch
 from buggy.capture.gateway import SAFE_METHODS, CaptureGateway, internal_address_block
 from buggy.egress_guard.ledger import Ledger
 from buggy.pipeline.scope import ScopeError, ScopeFilter
@@ -152,6 +153,12 @@ class ScopedBrowser:
             return False, reason
         if internal_address_block(url, scope, document) is not None:
             return False, "INTERNAL_ADDRESS"
+        # The operator's halt switch stops the browser too; unreadable state refuses.
+        try:
+            if halt_switch.read_state(self._control, engagement).halted:
+                return False, "HALTED"
+        except halt_switch.ControlStateError:
+            return False, "HALT_STATE_UNREADABLE"
         if method.upper() not in SAFE_METHODS and CaptureGateway.approval_required(document):
             return False, "APPROVAL_REQUIRED_USE_HTTP_SEND"
         return True, reason

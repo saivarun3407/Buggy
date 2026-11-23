@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+from collections.abc import Iterator
 from pathlib import Path
 
 import pytest
@@ -131,7 +132,7 @@ class TestVerify:
 
 class TestAgentSeesVersions:
     @pytest.fixture
-    def library(self, root: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
+    def library(self, root: Path, monkeypatch: pytest.MonkeyPatch) -> Iterator[Path]:
         monkeypatch.setattr(skill_library, "SKILLS_ROOT", root)
         skill_library._index.cache_clear()  # noqa: SLF001
         yield root

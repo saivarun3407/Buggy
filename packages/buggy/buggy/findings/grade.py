@@ -15,6 +15,9 @@ stops at the first hit, so the operator sees all of it at once.
  6. severity cap      above the program's cap for the host -> the decision is
                       kept and ``capped_severity`` is returned
  7. low signal        ``info``, or ``misconfiguration`` at ``low`` -> hold
+ 9. disprover         an agent-made finding the disprover called ``false_positive``
+                      or ``undetermined``, not overridden by the operator -> hold
+                      (checked before 8; numbered last so the older numbers stay)
  8. submit            none of the above held or discarded it
 
 The decision is the strictest one any rule asked for: discard over hold over
@@ -57,7 +60,34 @@ RULES: dict[int, str] = {
     6: "severity cap",
     7: "low signal",
     8: "submit",
+    9: "disprover",
 }
+
+#: The disprover's verdicts (``finding_challenge``) and the ones that hold a finding.
+CHALLENGE_STANDS = "stands"
+CHALLENGE_VERDICTS = (CHALLENGE_STANDS, "false_positive", "undetermined")
+CHALLENGE_HOLDS = frozenset({"false_positive", "undetermined"})
+CHALLENGE_BLOCKING = (
+    "Answer the disprover's objection with evidence, or have the operator override it "
+    "(buggy-cli disprover override ENGAGEMENT FINDING_ID --reason TEXT)."
+)
+
+
+def challenge_text(challenge: dict[str, Any] | None) -> str:
+    """Rule 9's sentence for a standing objection, or ``""`` when it holds nothing."""
+    challenge = challenge if isinstance(challenge, dict) else {}
+    verdict = str(challenge.get("verdict") or "")
+    if verdict not in CHALLENGE_HOLDS:
+        return ""
+    said = " ".join(str(challenge.get("reason") or "no reason given").split())[:300]
+    return f"the disprover's verdict is {verdict}: {said.rstrip('.') or 'no reason given'}."
+
+
+def challenge_reason(challenge: dict[str, Any] | None) -> str:
+    """The full reason line rule 9 adds (``Rule 9 (disprover): ...``), or ``""``."""
+    text = challenge_text(challenge)
+    return f"Rule 9 ({RULES[9]}): {text}" if text else ""
+
 
 # The remediation rule and the banned techniques mirror ``buggy.program.gate``.
 # That module is outside what this package may import (see AGENT_RULES.md,
@@ -396,13 +426,16 @@ def grade(
     scope: Any,
     known_issues: list[dict[str, Any]],
     prior: list[Finding],
+    challenge: dict[str, Any] | None = None,
 ) -> Grade:
     """Decide ``submit``, ``hold`` or ``discard`` for ``finding`` and say why.
 
     ``program`` is the engagement's ``program.json`` (``None`` when it is not a
     program engagement); ``scope`` is the enforced scope (anything with
     ``allows(host) -> bool``); ``known_issues`` are pipeline ``vulnerability``
-    records; ``prior`` are earlier findings. Nothing is written.
+    records; ``prior`` are earlier findings. ``challenge`` is the disprover's
+    standing objection (``{"verdict", "reason"}``), if there is one the
+    operator has not overridden. Nothing is written.
     """
     if scope is None or not callable(getattr(scope, "allows", None)):
         raise ValueError("scope is required: a finding is not graded without the enforced scope")
@@ -533,6 +566,11 @@ def grade(
             ),
         )
 
+    # 9. The disprover argued it is false, or could not tell; the operator decides.
+    objection = challenge_text(challenge)
+    if objection:
+        ruling.add(9, objection, decision=HOLD, blocking=CHALLENGE_BLOCKING)
+
     # 8. Nothing held or discarded it.
     if ruling.decision == SUBMIT:
         ruling.add(
@@ -545,6 +583,10 @@ def grade(
 
 __all__ = [
     "BANNED_TECHNIQUES",
+    "CHALLENGE_BLOCKING",
+    "CHALLENGE_HOLDS",
+    "CHALLENGE_STANDS",
+    "CHALLENGE_VERDICTS",
     "CWE_TO_CLASS",
     "DISCARD",
     "HOLD",
@@ -554,6 +596,8 @@ __all__ = [
     "SUBMIT",
     "Grade",
     "banned_matches",
+    "challenge_reason",
+    "challenge_text",
     "duplicate_of",
     "endpoint_host",
     "excluded_matches",

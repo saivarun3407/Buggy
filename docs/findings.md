@@ -213,7 +213,17 @@ Worked example: can a second account read the first account's order?
    endpoint as a scanner-known issue -> `hold`
 6. severity above the program's cap for the host -> capped, with the reason
 7. severity `info`, or a low misconfiguration -> `hold`
+9. an agent-made finding the disprover called `false_positive` or
+   `undetermined`, and the operator has not overridden -> `hold` (checked
+   before 8)
 8. otherwise -> `submit`
+
+Rule 9 comes from the disprover pass (see
+[claude-code-agent.md](claude-code-agent.md#the-disprover)). Findings proven
+by code (source `probe:` or `pipeline:`) are never judged by it. Once any
+disprover says `false_positive` or `undetermined`, a later `stands` does not
+lift it; only `buggy-cli disprover override <engagement> <finding-id> --reason
+...` does, and a new objection after the override holds it again.
 
 Every reason names its rule. A grade can go stale: re-grade after a new
 verification. Reports and gates require `exploit_verified` **and** `submit`.

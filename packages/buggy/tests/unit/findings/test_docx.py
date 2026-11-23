@@ -268,6 +268,12 @@ def test_sections_evidence_and_unproven_items() -> None:
 def test_without_coverage_or_not_tested_those_sections_are_left_out() -> None:
     text = document_text(to_docx(make()))
     assert "Bug-class coverage" not in text and "Not tested, and why" not in text
+    assert "Agent cost" not in text
+
+
+def test_the_agent_cost_line_is_shown_when_there_is_one() -> None:
+    text = document_text(to_docx(make(agent_cost="2 Claude Code session(s), 89 tool calls")))
+    assert "Agent cost: 2 Claude Code session(s), 89 tool calls" in text
 
 
 def test_an_embedded_png_is_referenced_from_rels_and_content_types() -> None:

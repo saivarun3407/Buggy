@@ -50,7 +50,7 @@ def _must[T](value: T | None) -> T:
 
 ORDER = "https://app.acme.test/api/orders/1001"
 REMEDIATION = "Check that the order belongs to the caller before returning it."
-REASON = re.compile(r"^Rule ([1-8]) \(([a-z ]+)\): [A-Za-z][^\n]*\.$")
+REASON = re.compile(r"^Rule ([1-9]) \(([a-z ]+)\): [A-Za-z][^\n]*\.$")
 
 
 def _scope(*hosts: str) -> ScopeFilter:
@@ -122,6 +122,7 @@ def _grade(finding: Finding | None = None, **inputs) -> Grade:
         scope=inputs.get("scope", SCOPE),
         known_issues=inputs.get("known_issues", []),
         prior=inputs.get("prior", []),
+        challenge=inputs.get("challenge"),
     )
 
 
@@ -389,6 +390,31 @@ CASES = [
         None,
     ),
     ("low access control", {"severity": "low"}, {}, SUBMIT, [8], None),
+    # 9. disprover
+    (
+        "disprover: false positive",
+        {},
+        {"challenge": {"verdict": "false_positive", "reason": "cap-1 is the caller's own order"}},
+        HOLD,
+        [9],
+        "the disprover's verdict is false_positive: cap-1 is the caller's own order",
+    ),
+    (
+        "disprover: undetermined",
+        {},
+        {"challenge": {"verdict": "undetermined", "reason": ""}},
+        HOLD,
+        [9],
+        "the disprover's verdict is undetermined: no reason given",
+    ),
+    (
+        "disprover: stands",
+        {},
+        {"challenge": {"verdict": "stands", "reason": "ok"}},
+        SUBMIT,
+        [8],
+        None,
+    ),
 ]
 
 

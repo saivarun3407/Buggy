@@ -90,3 +90,48 @@ class TestPointer:
         monkeypatch.setenv(hunt.POINTER_ENV, name)
         hunt.write_pointer(tmp_path, "acme")
         assert list(tmp_path.iterdir()) == []
+
+
+class TestAgentCostAndDisprover:
+    def runs(self, audit: Path) -> None:
+        (audit / "acme" / "agent").mkdir(parents=True)
+        rows = [
+            {
+                "role": "agent",
+                "wall_seconds": 300,
+                "tool_calls": 80,
+                "signin_calls": 6,
+                "claude": {"total_cost_usd": 2.5, "usage": {"input_tokens": 50000}},
+            },
+            {"role": "skeptic", "wall_seconds": 60, "tool_calls": 9},
+        ]
+        (audit / "acme" / "agent" / "agent-runs.jsonl").write_text(
+            "".join(json.dumps(row) + "\n" for row in rows)
+        )
+
+    def test_the_result_records_the_cost_and_the_disprover(self, tmp_path: Path) -> None:
+        control, audit = control_with(tmp_path, PRIOR), tmp_path / "audit"
+        self.runs(audit)
+        outcome = hunt.finalize_outcome(control, "acme", args(audit_root=audit, disprover="ran"))
+        result = hunt.build_result("acme", outcome, {}, now=1.0)
+        assert result["agent"]["disprover"] == "ran"
+        cost = result["agent_cost"]
+        assert cost["sessions"] == 2 and cost["tool_calls"] == 89 and cost["cost_usd"] == 2.5
+        assert cost["line"].startswith("2 Claude Code session(s), 89 tool calls (6 on sign-in)")
+
+    def test_no_runs_no_cost_section(self, tmp_path: Path) -> None:
+        control = control_with(tmp_path, PRIOR)
+        outcome = hunt.finalize_outcome(control, "acme", args(audit_root=tmp_path / "none"))
+        assert "agent_cost" not in hunt.build_result("acme", outcome, {}, now=1.0)
+
+    def test_the_markdown_report_gets_an_agent_cost_line(self) -> None:
+        text = "# Security report: acme\n\nGenerated now.\n\n## Summary\n\nNothing.\n"
+        out = hunt.with_agent_cost(text, "1 Claude Code session(s), 3 tool calls")
+        assert "Agent cost: 1 Claude Code session(s), 3 tool calls.\n\n## Summary" in out
+        assert hunt.with_agent_cost(text, "") == text
+
+    def test_the_disprover_state_is_a_fixed_word(self) -> None:
+        parser = hunt._build_parser()  # noqa: SLF001
+        assert parser.parse_args(["--disprover", "skipped", "x"]).disprover == "skipped"
+        with pytest.raises(SystemExit):
+            parser.parse_args(["--disprover", "whatever", "x"])

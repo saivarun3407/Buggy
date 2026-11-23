@@ -63,7 +63,107 @@ bridge before a call is forwarded:
 
 1. your tool-call rules from the scope (`machine_enforcement.tool_guard`);
 2. the same call three times in a row is withheld;
-3. a cap on tool calls per run (`BUGGY_MAX_TOOL_CALLS`, default 300).
+3. a cap on tool calls (`BUGGY_MAX_TOOL_CALLS`, default 300) for the whole
+   agent stage, shared by its attempts (see "Several short attempts").
+
+## Halting an engagement
+
+```bash
+buggy-cli halt <engagement> --reason "the client asked us to stop"
+buggy-cli halt <engagement> --show
+buggy-cli halt <engagement> --clear
+```
+
+A halt is a file, `<control>/<engagement>/HALT`, under the operator-only root;
+no agent can write or remove it. While it is there:
+
+- the bridge refuses every tool call (`HALTED`), tells the agent to write its
+  summary, and closes, so Claude Code has no tools left;
+- the evidence gateway sends nothing for the engagement (`HALTED`, with a
+  ledger line), so Buggy's own agents, probes and retests stop too;
+- the scoped browser loads nothing from the target.
+
+Each halt also raises a counter, `<control>/<engagement>/halt-epoch`. A bridge
+run notes the counter when it starts (its lease, kept in
+`<audit>/<engagement>/agent/leases/<run>.json`), and a higher counter ends it
+(`LEASE_REVOKED`). So `--clear` lets new runs start but never revives a run
+that was going on when you halted. A halt state that cannot be read refuses
+the call (fail closed).
+
+## Several short attempts
+
+The agent stage is up to three short Claude Code sessions instead of one long
+one (`buggy agent --attempts N`, `buggy hunt --agent-attempts N`). Before each,
+the launcher asks the bridge for the state (`python -m buggy.agent_bridge
+--engagement X --status`: halt, calls used, open leads, as JSON). Another
+attempt starts, in a fresh session, only when the last one finished cleanly,
+leads are still open in `candidates_next`, attempts remain and the budget left
+gives the attempt at least 15 calls. Each attempt gets an even share of what is
+left; the bridge also caps a run at what the session's earlier attempts left.
+A later attempt's brief lists the open leads and says that earlier "cannot be
+done" conclusions were not proven by anything. A Claude Code failure (not
+signed in, usage limit) is not retried.
+
+## The disprover
+
+After the attempts, when agent-made findings were verified (source not
+`probe:` or `pipeline:`), a second Claude Code session runs the bridge with
+`--role skeptic`. It has no web and no tool that sends a request: only
+`finding_get`, `findings_list`, `http_capture` (only for captures a finding it
+read cites), recon queries, the skill files, and `finding_challenge(finding_id,
+verdict, reason)`. Its job is to argue each finding is false. Code decides the
+effect: `false_positive` or `undetermined` holds the finding (grade rule 9,
+not "submit") until you override it; `stands` changes nothing.
+
+```bash
+buggy-cli disprover list <engagement>
+buggy-cli disprover override <engagement> <finding-id> --reason "cap-2 shows Alice's order"
+```
+
+The override is written under the operator-only root and the finding is
+graded again. `hunt-result.json` records what the pass did (`"disprover":
+"ran" | "nothing" | "skipped" | "failed"`). Buggy's own agents do not get this
+pass; `buggy hunt` says so.
+
+## What each run costs
+
+The launcher runs Claude Code with `--output-format json` and records one line
+per session in `<audit>/<engagement>/agent/agent-runs.jsonl`: tokens (input,
+output, cache read and write), `total_cost_usd` when Claude Code reports it,
+wall time, tool calls, refused calls, and calls spent signing in (identity
+tools and requests to login, register, password, session or token URLs; a
+heuristic). The agent's own text is not kept there. The line is written by the
+status call that follows the session, inside the operator container, because
+on Linux the audit root belongs to the containers' user. The launcher prints a
+short line after each session. `hunt --finalize` adds an "Agent cost" line to
+`hunt-result.json` (`agent_cost`), `report.md` and the Word report. When
+Claude Code reports no cost, the line says so.
+
+The bridge's call log, its leases and these lines live in
+`<audit>/<engagement>/agent/`. The operator container mounts the audit root
+read-only, so the launcher mounts that one folder writable for the bridge and
+its status call (`BUGGY_AGENT_RECORDS`).
+
+## Reading the traces
+
+The bridge writes one line per tool call to
+`<audit>/<engagement>/agent/calls.jsonl`: tool, a digest of the arguments
+(not the arguments), refusal code, time, run and session, capture ids seen in
+the result, and the captures a `finding_submit` cites. `buggy-cli trace-review
+<engagement>` (add `--json` for JSON) flags, by fixed rules:
+
+- loops: the same call three times or more in a run;
+- dead ends: six calls in a row that were refused, failed or repeated an
+  earlier answer;
+- no progress: 40 calls in a row without a submitted or verified finding, a
+  fact or a saved recipe;
+- invented observations: a `finding_submit` citing a capture no tool had
+  returned earlier in the session;
+- refusals per run, with a warning when policy refusals (scope, internal
+  address, operator rule, target data in a URL) cluster: four within ten
+  calls is an early sign of a prompt injection steering the agent.
+
+`hunt --finalize` prints its one-line summary.
 
 For the lab benchmark's plain-agent baseline, `BUGGY_AGENT_PROFILE=plain`
 gives the bridge a smaller set: `http_send`, `http_capture` and the finding
@@ -202,6 +302,10 @@ claude -p "Call the engagement_brief tool of the buggy server, then carry out th
 
 For a run with no web access use `--tools "" --allowedTools mcp__buggy` and
 add `"-e", "BUGGY_AGENT_WEB=off"` after `"-T"` in the configuration's `args`.
+The operator container mounts the audit root read-only, so a hand-started
+bridge cannot keep its call log and lease there (it warns once and keeps none);
+`buggy agent` mounts `<audit>/<engagement>/agent` writable for that. A run
+started this way is one attempt with no disprover.
 
 Run it from the repository root (where `docker-compose.yml` and `.env` are),
 then close the run:
@@ -212,7 +316,8 @@ docker compose --profile operator run --rm operator buggy-cli hunt --resume <eng
 
 ## Limits
 
-- Usage counts against your own Claude plan; Buggy does not measure it.
+- Usage counts against your own Claude plan. Buggy records what Claude Code
+  reports per session (tokens, cost) but does not cap spend in dollars.
 - The agent's quality on real programs has not been measured here. Two
   bounded runs against the local practice apps are recorded in
   [findings.md](findings.md).

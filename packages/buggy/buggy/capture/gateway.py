@@ -3,7 +3,9 @@
 Order of checks for every request, each of which can stop it before a byte
 leaves:
 
-1. the engagement has an enforced scope, and the URL's host is in it;
+1. the engagement has an enforced scope, and the URL's host is in it; the
+   operator has not halted the engagement (``buggy-cli halt``, see
+   :mod:`buggy.capture.halt`), and its halt state can be read;
 2. if the method can change state and the engagement requires approval, a
    human has allowed this exact request (method + URL + body);
 3. the engagement's rate limit.
@@ -39,6 +41,7 @@ from pathlib import Path
 from typing import Any
 from urllib.parse import urlsplit
 
+from buggy.capture import halt as halt_switch
 from buggy.capture.identities import (
     Identity,
     IdentityError,
@@ -313,6 +316,26 @@ class CaptureGateway:
             raise GatewayRefusal("NO_ENFORCED_SCOPE", str(exc)) from exc
         return scope, document
 
+    def check_halt(self, engagement: str, method: str = "", url: str = "") -> None:
+        """Refuse (``HALTED``, with a ledger line) while the operator has halted the engagement.
+
+        A halt state that exists but cannot be read is a refusal too
+        (``HALT_STATE_UNREADABLE``): the gateway fails closed.
+        """
+        try:
+            state = halt_switch.read_state(self.roots.control, engagement)
+        except halt_switch.ControlStateError as exc:
+            self._refused(engagement, method or "CHECK", url, "HALT_STATE_UNREADABLE")
+            raise GatewayRefusal(
+                "HALT_STATE_UNREADABLE",
+                f"the operator's halt state for {engagement} cannot be read ({exc}); not sent",
+            ) from exc
+        if state.halted:
+            self._refused(engagement, method or "CHECK", url, "HALTED")
+            raise GatewayRefusal(
+                "HALTED", f"{halt_switch.refusal_text(engagement, state)}; not sent"
+            )
+
     @staticmethod
     def approval_required(document: dict[str, Any]) -> bool:
         """State-changing requests need a human unless the scope explicitly waives it."""
@@ -570,6 +593,7 @@ class CaptureGateway:
                 "OUT_OF_SCOPE",
                 f"{host_of(url)!r} is not in the enforced scope ({reason}); not sent",
             )
+        self.check_halt(engagement, method, url)
 
     def _run_grant(
         self,
@@ -938,6 +962,8 @@ class CaptureGateway:
                 "OUT_OF_SCOPE",
                 f"{host_of(url)!r} is not in the enforced scope ({reason}); not sent",
             )
+
+        self.check_halt(engagement, method, url)
 
         blocked = internal_address_block(url, scope, document)
         if blocked is not None:

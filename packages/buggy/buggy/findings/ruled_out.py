@@ -43,6 +43,7 @@ from buggy.findings.store import (
     STATE_OPEN,
     FindingStore,
 )
+from buggy.pipeline.schema import as_dict
 
 DAY = 86400.0
 DEFAULT_REVIEW_DAYS = 30.0
@@ -333,7 +334,7 @@ class Ledger:
         url = str(params.get("url") or "")
         if not url:
             return None
-        details = result.get("details") if isinstance(result.get("details"), dict) else {}
+        details = as_dict(result.get("details"))
         parameter = str(params.get("parameter") or details.get("parameter") or "")
         technique = f"probe:{probe}"
         actor = technique

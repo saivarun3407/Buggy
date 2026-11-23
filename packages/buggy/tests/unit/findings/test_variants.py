@@ -188,7 +188,8 @@ class TestIdorVariants:
         assert "variant_of" in [e["event"] for e in env.store.events("acme", new_id)]
         # Not fixed: fixed_at stays unset, and the original's status is untouched.
         assert out["fixed_at"] is None
-        assert env.store.get("acme", original).status == "exploit_verified"
+        kept = env.store.get("acme", original)
+        assert kept is not None and kept.status == "exploit_verified"
         # The new claim is re-provable like any other.
         assert env.service.verify("acme", new_id)["finding"]["status"] == "exploit_verified"
 
@@ -221,6 +222,7 @@ class TestIdorVariants:
         out = retest(env.service, "acme", original)
         assert out["outcome"] == "variant_still_works"
         new = env.store.get("acme", out["variants"]["new_finding_ids"][0])
+        assert new is not None
         assert new.method == "HEAD" and new.severity == "low"
 
     def test_a_neighbouring_object_both_accounts_read_is_a_variant(self, env: Env) -> None:
@@ -298,6 +300,7 @@ def test_sqli_another_quote_context_still_works(env: Env) -> None:
     tried = out["variants"]["tried"]
     assert [t["name"] for t in tried] == ["double_quote"] and tried[0]["outcome"] == "works"
     new = env.store.get("acme", out["variants"]["new_finding_ids"][0])
+    assert new is not None
     assert new.parameter == "q [variant: double_quote]" and len(new.assertions) == 3
     assert env.service.verify("acme", new.id)["finding"]["status"] == "exploit_verified"
 
@@ -532,6 +535,7 @@ class TestSiblings:
         assert out["ok"] and out["created"] == 1
         assert out["rows"][0]["where"] == "https://app.acme.test/api/invoices/{id}"
         lead = env.store.get("acme", out["ids"][0])
+        assert lead is not None
         assert lead.status == "candidate" and lead.severity == "info"
         assert original in lead.description and lead.assertions == ()
 
