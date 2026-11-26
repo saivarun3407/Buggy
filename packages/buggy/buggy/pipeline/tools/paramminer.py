@@ -112,6 +112,8 @@ def choose_endpoints(
     out: list[str] = []
     for url in [*profiled, *pages, origin + "/"]:
         url = url.split("#", 1)[0].split("?", 1)[0]
+        if url.endswith("/") and url != origin + "/":
+            url = url.rstrip("/")  # /api/Users/ is /api/Users
         if not url.startswith(origin + "/") and url != origin:
             continue
         path = urlsplit(url).path
@@ -299,31 +301,35 @@ class Miner:
         return out
 
     def run(self, names: list[str]) -> Outcome:
+        """Guess ``names``. Each batch that changed the answer is narrowed down and
+        its names confirmed before the next batch, so a budget stop keeps them."""
+        # x8's --strict idea: when very many names "change" the page, none is trusted.
+        most = max(8, len(names) // 10)
+        changed = 0
         try:
             if not names or not self._baseline():
                 return self.outcome
-            candidates: list[tuple[str, str]] = []
-            reflected: set[str] = set()
             for chunk in _chunks(names, self.location):
                 pairs = {name: random_value() for name in chunk}
                 snap = self._request(pairs)
                 if snap is None:
                     continue
                 echoed = self._reflected(snap, pairs)
-                reflected.update(echoed)
+                candidates: list[tuple[str, str]] = []
                 if self._changed(snap, pairs.values()):
                     self._split([n for n in chunk if n not in echoed], candidates)
-            names_to_check = list(dict.fromkeys([n for n, _ in candidates] + sorted(reflected)))
-            # x8's --strict idea: when very many names "change" the page, none of them is trusted.
-            if len(names_to_check) > max(8, len(names) // 10):
-                self.outcome.skipped = (
-                    f"{len(names_to_check)} names changed the answer: the page reacts to any name"
-                )
-                return self.outcome
-            for name in names_to_check:
-                found = self._confirm(name, name in reflected)
-                if found is not None:
-                    self.outcome.found.append(found)
+                to_check = list(dict.fromkeys([n for n, _ in candidates] + echoed))
+                changed += len(to_check)
+                if changed > most:
+                    self.outcome.found = []
+                    self.outcome.skipped = (
+                        f"over {most} names changed the answer: the page reacts to any name"
+                    )
+                    return self.outcome
+                for name in to_check:
+                    found = self._confirm(name, name in echoed)
+                    if found is not None:
+                        self.outcome.found.append(found)
             self.outcome.found += self._switches(names, {f.name for f in self.outcome.found})
         except _Budget:
             self.outcome.skipped = self.outcome.skipped or "request budget used up"

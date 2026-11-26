@@ -24,7 +24,7 @@ from __future__ import annotations
 import re
 import time
 from bisect import bisect_right
-from collections.abc import Iterator
+from collections.abc import Iterable, Iterator
 from dataclasses import dataclass, field
 from typing import Any
 from urllib.parse import urljoin, urlsplit
@@ -279,6 +279,20 @@ _MAP_PAIR = re.compile(
 _PUBLIC_PATH = re.compile(r"""(?<![\w$])[\w$]{1,40}\.p\s*=\s*(["'])([^"'\\\n]{0,300})\1""")
 _SCRIPT_LITERAL = re.compile(r"""(["'`])((?:\.{1,2}/|/)?[\w\-.~/@]{1,250}\.m?js)\1""")
 _IDENT_END = re.compile(r"[\w$.]")
+# The runtime's chunk-name function: ``r.u = e => ...`` or ``r.u = function(e){return ...``.
+_NAME_FUNCTION = re.compile(
+    r"(?<![\w$])[\w$]{1,40}\.u\s*=\s*(?:\(?\s*([\w$]+)\s*\)?\s*=>\s*\{?\s*(?:return\s+)?"
+    r"|function\s*\(\s*([\w$]+)\s*\)\s*\{\s*return\s+)"
+)
+# ``592 === e ? "common" : e`` (Angular names one shared chunk this way).
+_TERNARY = re.compile(
+    r"""^\(\s*(?:(?P<id1>\d+|"[^"]*")\s*===?\s*(?P<v1>[\w$]+)|(?P<v2>[\w$]+)\s*===?\s*(?P<id2>\d+|"[^"]*"))"""
+    r"""\s*\?\s*(?P<q>["'])(?P<name>[^"']*)(?P=q)\s*:\s*(?P<v3>[\w$]+)\s*\)$"""
+)
+# Where a chunk is asked for: ``n.e(592)``, ``__webpack_require__.e(/*! import() */ "admin")``.
+_CHUNK_ID = re.compile(
+    r"""(?<![\w$])[\w$]{1,40}\.e\(\s*(?:/\*[^*]{0,80}\*/\s*)?(\d{1,8}|"[\w\-.]{1,80}")\s*\)"""
+)
 
 
 def _term_before(text: str, end: int) -> tuple[int, tuple[str, Any]] | None:
@@ -317,11 +331,17 @@ def _term_before(text: str, end: int) -> tuple[int, tuple[str, Any]] | None:
         }
         return j, ("map", (pairs, var))
     if char == ")":
-        inner_end = i
-        match = re.search(r"\|\|\s*([\w$]+)\s*$", text[max(0, i - 80) : inner_end])
+        open_paren = text.rfind("(", max(0, i - 200), i)
+        ternary = _TERNARY.match(text[open_paren : i + 1]) if open_paren >= 0 else None
+        if ternary is not None:
+            chunk_id = (ternary.group("id1") or ternary.group("id2")).strip('"')
+            var = ternary.group("v1") or ternary.group("v2")
+            if var == ternary.group("v3"):
+                return open_paren, ("fallback", ({chunk_id: ternary.group("name")}, var))
+        match = re.search(r"\|\|\s*([\w$]+)\s*$", text[max(0, i - 80) : i])
         if match is None:
             return None
-        term = _term_before(text, inner_end - len(match.group(0)))
+        term = _term_before(text, i - len(match.group(0)))
         if term is None or term[1][0] != "map":
             return None
         start = term[0] - 1
@@ -341,59 +361,53 @@ def _term_before(text: str, end: int) -> tuple[int, tuple[str, Any]] | None:
     return None
 
 
-def _chunk_names(script: str) -> list[tuple[str, bool]]:
-    """``(file name, uses the public path)`` of every chunk a webpack-style runtime
-    can load: ``"static/js/" + ({57: "admin"}[e] || e) + "." + {57: "a1b2"}[e] +
-    ".chunk.js"`` gives one name per chunk id. Nothing is run."""
-    out: list[tuple[str, bool]] = []
-    for suffix in _JS_SUFFIX.finditer(script):
-        terms: list[tuple[str, Any]] = [("str", suffix.group(0).split(suffix.group(1), 1)[1][:-1])]
-        pos = suffix.start()
-        for _ in range(10):
-            term = _term_before(script, pos)
-            if term is None:
-                break
-            terms.insert(0, term[1])
-            pos = term[0]
-            k = pos - 1
-            while k >= 0 and script[k].isspace():
-                k -= 1
-            if k < 0 or script[k] != "+":
-                break
-            pos = k
-        maps = [t[1] for t in terms if t[0] in ("map", "fallback")]
-        if not maps:
-            continue
-        var = maps[-1][1]
-        ids = list(dict.fromkeys(key for pairs, _v in maps for key in pairs))
+@dataclass(frozen=True)
+class ChunkTemplate:
+    """How a runtime names its chunks: concatenation terms, the chunk-id variable,
+    and the URL names resolve against. Nothing is run; :meth:`url` fills the terms in."""
+
+    terms: tuple[tuple[str, Any], ...]
+    var: str
+    base: str
+    js_url: str
+
+    def known_ids(self) -> list[str]:
+        """Chunk ids the template's own maps list."""
+        return list(
+            dict.fromkeys(k for kind, v in self.terms if kind in ("map", "fallback") for k in v[0])
+        )
+
+    def needs_ids(self) -> bool:
+        """True when only the terms' maps cannot list the chunks (ids come from ``x.e(id)``)."""
+        return not any(kind == "map" for kind, _v in self.terms)
+
+    def url(self, chunk_id: str) -> str | None:
+        parts: list[str] = []
         public = False
-        for chunk_id in ids[:MAX_SCRIPT_REFERENCES]:
-            parts: list[str] = []
-            for kind, value in terms:
-                if kind == "str":
-                    parts.append(value)
-                elif kind == "map":
-                    if chunk_id not in value[0]:
-                        break
-                    parts.append(value[0][chunk_id])
-                elif kind == "fallback":
-                    parts.append(value[0].get(chunk_id) or chunk_id)
-                elif value == var:
-                    parts.append(chunk_id)
-                elif value.endswith(".p"):
-                    public = True  # the runtime's public path
-                else:
-                    break
+        for kind, value in self.terms:
+            if kind == "str":
+                parts.append(value)
+            elif kind == "map":
+                if chunk_id not in value[0]:
+                    return None
+                parts.append(value[0][chunk_id])
+            elif kind == "fallback":
+                parts.append(value[0].get(chunk_id) or chunk_id)
+            elif value == self.var:
+                parts.append(chunk_id)
+            elif value.endswith(".p"):
+                public = True  # the runtime's public path
             else:
-                out.append(("".join(parts), public))
-    return out
+                return None
+        name = "".join(parts)
+        if not name.endswith((".js", ".mjs")):
+            return None
+        if name.startswith(("http://", "https://", "/")) or "/" in name or public:
+            return normalize_url(urljoin(self.base, name))
+        return normalize_url(urljoin(self.js_url, name))  # no folder, no public path
 
 
-def script_references(script: str, *, js_url: str) -> list[str]:
-    """Absolute URLs of the scripts ``script`` loads: lazy chunks whose names the
-    runtime computes (webpack and similar), ``import("./x.js")``, Vite's
-    preload lists (``"assets/x-1a2b.js"``). At most :data:`MAX_SCRIPT_REFERENCES`.
-    """
+def _base(script: str, js_url: str) -> str:
     parts = urlsplit(js_url)
     origin = f"{parts.scheme}://{parts.netloc}"
     public = _PUBLIC_PATH.search(script)
@@ -401,21 +415,94 @@ def script_references(script: str, *, js_url: str) -> list[str]:
     if not public_path.startswith(("/", "http://", "https://")):
         public_path = "/" + public_path
     base = urljoin(origin + "/", public_path)
-    if not base.endswith("/"):
-        base += "/"
+    return base if base.endswith("/") else base + "/"
+
+
+def _chain_before(script: str, end: int) -> tuple[int, list[tuple[str, Any]]]:
+    """Terms joined by ``+`` that end at ``end``, and where the chain starts."""
+    terms: list[tuple[str, Any]] = []
+    pos = end
+    for _ in range(10):
+        term = _term_before(script, pos)
+        if term is None:
+            break
+        terms.insert(0, term[1])
+        pos = term[0]
+        k = pos - 1
+        while k >= 0 and script[k].isspace():
+            k -= 1
+        if k < 0 or script[k] != "+":
+            break
+        pos = k
+    return pos, terms
+
+
+def chunk_templates(script: str, *, js_url: str) -> list[ChunkTemplate]:
+    """Every chunk-name expression in ``script``: a chain with a ``{id: hash}``
+    map (webpack 4 and 5), or the runtime's ``.u`` function with no map, whose
+    ids then come from ``x.e(id)`` calls (Angular, webpack 5 with ids only)."""
+    base = _base(script, js_url)
+    out: list[ChunkTemplate] = []
+    starts = {m.end(): m.group(1) or m.group(2) for m in _NAME_FUNCTION.finditer(script)}
+    for suffix in _JS_SUFFIX.finditer(script):
+        quote = suffix.group(1)
+        tail = suffix.group(0).split(quote, 1)[1][:-1]
+        start, terms = _chain_before(script, suffix.start())
+        terms = [*terms, ("str", tail)]
+        maps = [t[1] for t in terms if t[0] in ("map", "fallback")]
+        named = next(
+            (
+                var
+                for at, var in starts.items()
+                if 0 <= start - at <= 2 or script[at:start].strip() in ("", "(")
+            ),
+            None,
+        )
+        if any(t[0] == "map" for t in terms):
+            var = next(t[1][1] for t in reversed(terms) if t[0] == "map")
+        elif named is not None and any(t == ("var", named) or t[0] == "fallback" for t in terms):
+            var = named
+        elif maps:
+            var = maps[-1][1]
+        else:
+            continue
+        out.append(ChunkTemplate(tuple(terms), var, base, js_url))
+    return out
+
+
+def chunk_ids(script: str) -> list[str]:
+    """Chunk ids a script asks the runtime for (``n.e(592)``)."""
+    return list(dict.fromkeys(m.group(1).strip('"') for m in _CHUNK_ID.finditer(script)))
+
+
+def chunk_urls(templates: Iterable[ChunkTemplate], ids: Iterable[str] = ()) -> list[str]:
+    """Chunk URLs the templates give for their own map ids and for ``ids``."""
+    extra = list(ids)
     found: dict[str, None] = {}
+    for template in templates:
+        for chunk_id in dict.fromkeys([*template.known_ids(), *extra]):
+            url = template.url(chunk_id)
+            if url is not None and len(found) < MAX_SCRIPT_REFERENCES:
+                found.setdefault(url, None)
+    return list(found)
+
+
+def script_references(script: str, *, js_url: str) -> list[str]:
+    """Absolute URLs of the scripts ``script`` loads on its own: lazy chunks its
+    runtime names (with the ids it lists itself), ``import("./x.js")``, Vite's
+    preload lists (``"assets/x-1a2b.js"``). At most :data:`MAX_SCRIPT_REFERENCES`.
+    Chunks whose ids sit in another script are joined by the caller
+    (:func:`chunk_templates`, :func:`chunk_ids`, :func:`chunk_urls`).
+    """
+    parts = urlsplit(js_url)
+    origin = f"{parts.scheme}://{parts.netloc}"
+    base = _base(script, js_url)
+    found = dict.fromkeys(chunk_urls(chunk_templates(script, js_url=js_url), chunk_ids(script)))
 
     def add(url: str) -> None:
         if urlsplit(url).scheme in ("http", "https") and len(found) < MAX_SCRIPT_REFERENCES:
             found.setdefault(normalize_url(url), None)
 
-    for name, _public in _chunk_names(script):
-        if name.startswith(("http://", "https://", "/")):
-            add(urljoin(base, name))
-        elif "/" in name or public:
-            add(urljoin(base, name))
-        else:
-            add(urljoin(js_url, name))  # no folder and no public path: next to the script
     for match in _SCRIPT_LITERAL.finditer(script):
         value = match.group(2)
         if value.startswith(("./", "../")):

@@ -127,7 +127,7 @@ LINK_TYPES = (RecordType.URL, RecordType.ENDPOINT, RecordType.JS_FILE)
 #: Hidden-parameter guessing: pages per origin, requests per run, requests per page and place.
 PARAM_ENDPOINTS_PER_ORIGIN = 4
 PARAM_MAX_REQUESTS = 300
-PARAM_BUDGET = {"query": 40, "header": 25, "cookie": 15}
+PARAM_BUDGET = {"query": 60, "header": 25, "cookie": 15}
 PUBLIC_REPO_HOSTS = frozenset({"github.com", "gitlab.com", "bitbucket.org"})
 
 # (name, invocation, raw_path) -> RunResult. Injected in tests.
@@ -1434,6 +1434,8 @@ class Pipeline:
         seen = {value for value, _asset in queue}
         loaded = 0
         index = 0
+        templates: dict[str, list[jsparse.ChunkTemplate]] = {}
+        chunk_ids: dict[str, list[str]] = {}
         while index < len(queue) and index < MAX_JS_FILES:
             js_url, js_asset = queue[index]
             index += 1
@@ -1490,7 +1492,15 @@ class Pipeline:
                 pairs.append((_with_line(finding, len(lines)), finding.asset))
             for map_url in analysis.source_maps:
                 source_maps.setdefault(map_url, js_url)
-            for ref in jsparse.script_references(script, js_url=js_url):
+            # A runtime names its chunks; the ids it is asked for may sit in
+            # another script of the same host (Angular: ``r.e(592)`` in main.js).
+            templates.setdefault(js_asset, []).extend(
+                jsparse.chunk_templates(script, js_url=js_url)
+            )
+            chunk_ids.setdefault(js_asset, []).extend(jsparse.chunk_ids(script))
+            refs = jsparse.script_references(script, js_url=js_url)
+            refs += jsparse.chunk_urls(templates[js_asset], chunk_ids[js_asset])
+            for ref in refs:
                 ref_host = host_of(ref)
                 if ref in seen or ref_host not in hosts or not self.scope.allows(ref):
                     continue

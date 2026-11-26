@@ -242,3 +242,10 @@ def test_hidden_finds_become_leads() -> None:
     )
     assert by_where["GET https://a.test/ query:q"] == ("xss", "xss_reflected")
     assert by_where["GET https://a.test/ query:debug"] == ("misconfiguration", "http_send")
+
+
+def test_finds_survive_a_budget_stop() -> None:
+    # debug is in the first batch; the budget runs out in a later one.
+    outcome = _run("query", ["debug", *FILLER[:95], *FILLER[100:300]], budget=20)
+    assert outcome.skipped == "request budget used up"
+    assert _found(outcome) == {"debug": "body_changed"}

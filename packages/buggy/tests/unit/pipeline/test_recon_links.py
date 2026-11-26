@@ -258,3 +258,16 @@ def test_guessing_is_skipped_when_passive(env) -> None:
     summary = _pipeline(env, roe).run()
     assert summary["stages"]["enumerate"]["tools"]["subdomain_guess"]["skipped"] == "passive_only"
     assert _values(env, "subdomain", "subdomain_guess") == {}
+
+
+def test_angular_chunks_take_their_ids_from_another_script() -> None:
+    runtime = 'r.u=e=>(592===e?"common":e)+".js",r.miniCssF=e=>{};'
+    main = "c.e(98).then(c.bind(c,98));Promise.all([c.e(592),c.e(103)]);"
+    templates = jsparse.chunk_templates(runtime, js_url="https://a.test/runtime.js")
+    assert len(templates) == 1 and templates[0].needs_ids()
+    assert jsparse.chunk_ids(main) == ["98", "592", "103"]
+    assert jsparse.chunk_urls(templates, jsparse.chunk_ids(main)) == [
+        "https://a.test/common.js",
+        "https://a.test/98.js",
+        "https://a.test/103.js",
+    ]

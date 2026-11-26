@@ -186,7 +186,7 @@ Param Miner, Arjun and x8; the code and the word lists
 
 Limits: read-only GETs only (no body guessing: a POST can change state), 4
 pages per origin (answering API endpoints, pages with inputs, the root),
-headers and cookies on the first page only, 40 / 25 / 15 requests per page for
+headers and cookies on the first page only, 60 / 25 / 15 requests per page for
 query / header / cookie, 300 requests per run. Every request goes through the
 scoped, rate-limited client; logout or delete URLs are never used. Skipped
 with `passive_only`; a program can turn it off with
