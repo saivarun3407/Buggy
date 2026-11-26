@@ -72,7 +72,11 @@ _KEY_ASSIGN = re.compile(
 _DIGIT = re.compile(r"[0-9]")
 _LETTER = re.compile(r"[A-Za-z]")
 
-_ROUTE = re.compile(r"""(?<![\w$])path\s*:\s*(["'`])([A-Za-z0-9_\-./:*]{1,200})\1""")
+# Router paths: ``{path: "/admin"}`` and, in JSX, ``<Route path="/admin">`` and
+# ``<Link to="/admin">`` / ``<NavLink to={"/admin"}>``.
+_ROUTE = re.compile(
+    r"""(?<![\w$.\-])(?P<key>path|to)\s*[:=]\s*\{?\s*(?P<q>["'`])(?P<route>[A-Za-z0-9_\-./:*]{1,200})(?P=q)"""
+)
 _ROLE_WORDS = r"(?:admin|administrator|superuser|super_admin|root|staff|moderator|owner)"
 # Matched where strings are blanked: a name in code, not a word in a message.
 _CLIENT_AUTH_NAME = re.compile(
@@ -288,11 +292,13 @@ def scan(text: str, *, deadline: float | None = None) -> list[dict[str, Any]]:
         kept += 1
         add("endpoint", literal[:300], offset, offset + len(probe), literal=literal[:300])
     for match in _ROUTE.finditer(code):
-        route = match.group(2)
+        route = match.group("route")
         if route in ("", "*", "**") or kept >= MAX_ENDPOINTS_PER_FILE:
             continue
+        if match.group("key") == "to" and not route.startswith("/"):
+            continue  # ``{from: "en", to: "de"}`` is not a link
         kept += 1
-        add("endpoint", f"route:{route}", match.start(2), match.end(2), route=route)
+        add("endpoint", f"route:{route}", match.start("route"), match.end("route"), route=route)
     return hits
 
 

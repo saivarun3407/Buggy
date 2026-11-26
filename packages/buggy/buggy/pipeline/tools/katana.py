@@ -20,9 +20,22 @@ STATIC_EXTENSIONS = (
 )
 
 
+#: Script file endings. ``.jsx`` / ``.tsx`` / ``.ts`` are served as-is by dev
+#: servers (Vite, webpack-dev-server) and some static sites.
+SCRIPT_SUFFIXES = (".js", ".mjs", ".cjs", ".jsx", ".tsx", ".ts")
+_SCRIPT_TYPES = ("javascript", "ecmascript", "typescript", "jsx")
+
+
 def is_javascript(url: str, content_type: str = "") -> bool:
+    """A script by its file ending or its content type. A ``.ts`` file served as
+    video (an HLS segment) is not a script."""
     path = urlsplit(url).path.lower()
-    return path.endswith((".js", ".mjs")) or "javascript" in content_type.lower()
+    kind = content_type.lower()
+    if any(word in kind for word in _SCRIPT_TYPES):
+        return True
+    if path.endswith(".ts") and (kind.startswith("video/") or "/hls/" in path or "segment" in path):
+        return False
+    return path.endswith(SCRIPT_SUFFIXES)
 
 
 class Katana:

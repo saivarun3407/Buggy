@@ -191,21 +191,69 @@ def extract_literals(script: str, *, limit: int = 5000) -> list[str]:
     return list(found)
 
 
+# Client-side routes: ``{path: "/admin"}`` (React Router, Vue Router, Angular),
+# ``<Route path="/admin">`` and ``<Link to="/admin">`` (JSX, before or after
+# compiling), ``redirectTo: "home"``, ``navigate("/x")``, ``router.push("/x")``.
+_ROUTE_VALUE = r"""(?P<q>["'`])(?P<v>[A-Za-z0-9_\-./:*~%]{1,200})(?P=q)"""
+_ROUTE_PROPERTY = re.compile(
+    r"(?<![\w$.\-])(?P<key>path|to|redirectTo)\s*[:=]\s*\{?\s*" + _ROUTE_VALUE
+)
+_ROUTE_CALL = re.compile(
+    r"(?<![\w$])(?:(?:history|router|\$router|Router)\s*\.\s*(?:push|replace)"
+    r"|navigate|navigateByUrl|redirect)\s*\(\s*\[?\s*" + _ROUTE_VALUE
+)
+_ROUTE_PARAM = re.compile(r"(?<=/):[A-Za-z_][\w]*\??")
+MAX_ROUTES = 500
+
+
+def client_routes(script: str) -> list[str]:
+    """Rooted paths the script's client-side router serves, ``:id`` as ``{id}``.
+
+    A relative route (``path: "admin"``, Angular) is rooted (``/admin``); a
+    child route's parent is not known, so it may be one level short. Wildcards
+    and empty routes are left out.
+    """
+    found: dict[str, None] = {}
+    for pattern in (_ROUTE_PROPERTY, _ROUTE_CALL):
+        for match in pattern.finditer(script):
+            value = match.group("v")
+            if pattern is _ROUTE_PROPERTY and match.group("key") == "to" and value[:1] != "/":
+                continue  # ``{from: "en", to: "de"}`` is not a link
+            if "//" in value or value.startswith(("./", "../", ".")) or "*" in value.strip("/*"):
+                continue
+            value = value.rstrip("*").rstrip("/") if value not in ("/",) else value
+            if not value or value == "/" or value.endswith((".js", ".css", ".html", ".json")):
+                continue
+            route = "/" + value.lstrip("/")
+            route = _ROUTE_PARAM.sub(PLACEHOLDER, route)
+            if len(route) >= 3 and not _NOISE.search(route.replace(PLACEHOLDER, "id")):
+                found.setdefault(route, None)
+            if len(found) >= MAX_ROUTES:
+                return list(found)
+    return list(found)
+
+
 def parse(script: str, *, js_url: str) -> Iterator[Record]:
     """Endpoint records for every literal, resolved against the script's URL.
 
     ``attrs.method`` is set when the literal is passed straight to a call that
-    names its method (``http.post(...)``).
+    names its method (``http.post(...)``). A path the script's router serves
+    carries ``attrs.client_route``; a route that is not a plain literal
+    (``path: "admin"``, ``/users/:id``) gets a record of its own.
     """
     methods = call_methods(script)
-    for literal in extract_literals(script):
+    routes = client_routes(script)
+    route_set = set(routes)
+    seen: set[str] = set()
+    for literal in [*extract_literals(script), *routes]:
         resolved = urljoin(js_url, literal)
         if urlsplit(resolved).scheme not in ("http", "https"):
             continue
         url = normalize_url(resolved)
         asset = host_of(url)
-        if not asset:
+        if not asset or url in seen:
             continue
+        seen.add(url)
         yield Record(
             type=RecordType.ENDPOINT,
             asset=asset,
@@ -215,8 +263,168 @@ def parse(script: str, *, js_url: str) -> Iterator[Record]:
                 "found_in": js_url,
                 "literal": literal[:300],
                 **({"method": methods[literal]} if literal in methods else {}),
+                **({"client_route": True} if literal in route_set else {}),
             },
         )
+
+
+# ── scripts a script loads: lazy chunks and imports ───────────────────
+
+#: Scripts named per script (chunks and imports together).
+MAX_SCRIPT_REFERENCES = 300
+_JS_SUFFIX = re.compile(r"""\+\s*(["'])[^"'\\\n]{0,80}\.m?js\1""")
+_MAP_PAIR = re.compile(
+    r"""(?:(["'])([^"'\\]{1,80})\1|([\w$]{1,80}))\s*:\s*(["'])([^"'\\]{0,200})\4"""
+)
+_PUBLIC_PATH = re.compile(r"""(?<![\w$])[\w$]{1,40}\.p\s*=\s*(["'])([^"'\\\n]{0,300})\1""")
+_SCRIPT_LITERAL = re.compile(r"""(["'`])((?:\.{1,2}/|/)?[\w\-.~/@]{1,250}\.m?js)\1""")
+_IDENT_END = re.compile(r"[\w$.]")
+
+
+def _term_before(text: str, end: int) -> tuple[int, tuple[str, Any]] | None:
+    """The concatenation term that ends at ``end`` (exclusive), read right to left:
+    ``("str", value)``, ``("map", ({id: value}, var))``, ``("fallback", (map, var))``
+    or ``("var", name)``; ``None`` when it is none of those."""
+    i = end - 1
+    while i >= 0 and text[i].isspace():
+        i -= 1
+    if i < 0:
+        return None
+    char = text[i]
+    if char in "\"'":
+        start = text.rfind(char, max(0, i - 400), i)
+        return (start, ("str", text[start + 1 : i])) if start >= 0 else None
+    if char == "]":
+        open_index = text.rfind("[", max(0, i - 80), i)
+        var = text[open_index + 1 : i].strip() if open_index >= 0 else ""
+        if not var or not re.fullmatch(r"[\w$]+", var) or text[open_index - 1] != "}":
+            return None
+        depth, j = 0, open_index - 1
+        floor = max(0, j - 400_000)
+        while j >= floor:
+            if text[j] == "}":
+                depth += 1
+            elif text[j] == "{":
+                depth -= 1
+                if depth == 0:
+                    break
+            j -= 1
+        if depth != 0:
+            return None
+        pairs = {
+            (m.group(2) or m.group(3)): m.group(5)
+            for m in _MAP_PAIR.finditer(text[j + 1 : open_index - 1])
+        }
+        return j, ("map", (pairs, var))
+    if char == ")":
+        inner_end = i
+        match = re.search(r"\|\|\s*([\w$]+)\s*$", text[max(0, i - 80) : inner_end])
+        if match is None:
+            return None
+        term = _term_before(text, inner_end - len(match.group(0)))
+        if term is None or term[1][0] != "map":
+            return None
+        start = term[0] - 1
+        while start >= 0 and text[start].isspace():
+            start -= 1
+        if start < 0 or text[start] != "(":
+            return None
+        return start, ("fallback", term[1][1])
+    if _IDENT_END.match(char):
+        j = i
+        while j >= 0 and _IDENT_END.match(text[j]):
+            j -= 1
+        name = text[j + 1 : i + 1]
+        if name in ("return", "typeof", "void") or name[0].isdigit():
+            return None
+        return j + 1, ("var", name)
+    return None
+
+
+def _chunk_names(script: str) -> list[tuple[str, bool]]:
+    """``(file name, uses the public path)`` of every chunk a webpack-style runtime
+    can load: ``"static/js/" + ({57: "admin"}[e] || e) + "." + {57: "a1b2"}[e] +
+    ".chunk.js"`` gives one name per chunk id. Nothing is run."""
+    out: list[tuple[str, bool]] = []
+    for suffix in _JS_SUFFIX.finditer(script):
+        terms: list[tuple[str, Any]] = [("str", suffix.group(0).split(suffix.group(1), 1)[1][:-1])]
+        pos = suffix.start()
+        for _ in range(10):
+            term = _term_before(script, pos)
+            if term is None:
+                break
+            terms.insert(0, term[1])
+            pos = term[0]
+            k = pos - 1
+            while k >= 0 and script[k].isspace():
+                k -= 1
+            if k < 0 or script[k] != "+":
+                break
+            pos = k
+        maps = [t[1] for t in terms if t[0] in ("map", "fallback")]
+        if not maps:
+            continue
+        var = maps[-1][1]
+        ids = list(dict.fromkeys(key for pairs, _v in maps for key in pairs))
+        public = False
+        for chunk_id in ids[:MAX_SCRIPT_REFERENCES]:
+            parts: list[str] = []
+            for kind, value in terms:
+                if kind == "str":
+                    parts.append(value)
+                elif kind == "map":
+                    if chunk_id not in value[0]:
+                        break
+                    parts.append(value[0][chunk_id])
+                elif kind == "fallback":
+                    parts.append(value[0].get(chunk_id) or chunk_id)
+                elif value == var:
+                    parts.append(chunk_id)
+                elif value.endswith(".p"):
+                    public = True  # the runtime's public path
+                else:
+                    break
+            else:
+                out.append(("".join(parts), public))
+    return out
+
+
+def script_references(script: str, *, js_url: str) -> list[str]:
+    """Absolute URLs of the scripts ``script`` loads: lazy chunks whose names the
+    runtime computes (webpack and similar), ``import("./x.js")``, Vite's
+    preload lists (``"assets/x-1a2b.js"``). At most :data:`MAX_SCRIPT_REFERENCES`.
+    """
+    parts = urlsplit(js_url)
+    origin = f"{parts.scheme}://{parts.netloc}"
+    public = _PUBLIC_PATH.search(script)
+    public_path = public.group(2) if public and public.group(2) not in ("", "auto") else "/"
+    if not public_path.startswith(("/", "http://", "https://")):
+        public_path = "/" + public_path
+    base = urljoin(origin + "/", public_path)
+    if not base.endswith("/"):
+        base += "/"
+    found: dict[str, None] = {}
+
+    def add(url: str) -> None:
+        if urlsplit(url).scheme in ("http", "https") and len(found) < MAX_SCRIPT_REFERENCES:
+            found.setdefault(normalize_url(url), None)
+
+    for name, _public in _chunk_names(script):
+        if name.startswith(("http://", "https://", "/")):
+            add(urljoin(base, name))
+        elif "/" in name or public:
+            add(urljoin(base, name))
+        else:
+            add(urljoin(js_url, name))  # no folder and no public path: next to the script
+    for match in _SCRIPT_LITERAL.finditer(script):
+        value = match.group(2)
+        if value.startswith(("./", "../")):
+            add(urljoin(js_url, value))
+        elif value.startswith("/"):
+            add(origin + value)
+        elif "/" in value:
+            add(urljoin(base, value))
+    return [url for url in found if url != normalize_url(js_url)]
 
 
 # ── deeper analysis: source maps, DOM sinks, dependency names ─────────

@@ -10,11 +10,11 @@ pipeline; `test_guards.py::TestNoLLMInTheLoop` enforces it.
 
 | # | Stage | Tools | Touches the target |
 |---|---|---|---|
-| 1 | `enumerate` | subfinder, amass (`-passive`), crt.sh | no |
+| 1 | `enumerate` | subfinder, amass (`-passive`), crt.sh; opt-in subdomain guessing (dnsx) | no (guessing: public resolvers) |
 | 2 | `dns` | dnsx: A, AAAA, CNAME, MX, TXT, NS | no (public resolvers) |
 | 3 | `live` | naabu (connect scan), httpx | yes |
 | 4 | `fingerprint` | technology, TLS, response headers from the stage-3 probe | no new requests |
-| 5 | `urls` | katana, gau, waybackurls, JS endpoint extraction | katana and JS fetch only |
+| 5 | `urls` | katana, gau, waybackurls, JS endpoint extraction (and the lazy chunks and imports each script loads) | katana and JS fetch only |
 | 6 | `web` | web recon: robots.txt, sitemaps, security.txt; security headers and session cookie flags; sign-in pages by kind | known files only |
 | 7 | `apispec` | OpenAPI / Swagger probing, GraphQL introspection | yes |
 | 8 | `api` | API recon: API roots and versions, OAuth / OpenID discovery, one unauthenticated GET per API endpoint | discovery documents and the endpoint GETs |
@@ -135,6 +135,33 @@ the run's work directory and reads them with fixed rules. Nothing is run.
   never stored. An endpoint on an out-of-scope host keeps no URL.
 - Each hit is a lead, not a finding: it still needs a live proof.
 
+### Scripts, routes and hosts found later
+
+- Scripts: `.js`, `.mjs`, `.cjs`, `.jsx`, `.tsx` and `.ts` files (dev servers
+  serve source as-is), or anything served with a JavaScript or TypeScript
+  content type. A `.ts` served as video (an HLS segment) is not a script.
+- Lazy chunks: a webpack-style runtime computes chunk names
+  (`"static/js/" + id + "." + {7: "ab12"}[id] + ".chunk.js"`). The JS step
+  reads the expression without running it and lists every chunk; `import()`
+  targets and Vite preload lists (`"assets/x-1a2b.js"`) are read too. Each
+  in-scope script found this way is stored (`js_file`, `kind: loaded`),
+  fetched and read like the others, up to 200 scripts per run.
+- Client routes: `{path: "/admin"}`, `<Route path="/admin">`,
+  `<Link to="/admin">`, `navigate("/x")`, `router.push("/x")` in bundles and in
+  recovered source. An endpoint record from one carries `client_route: true`;
+  a relative route (`path: "admin"`) is rooted, `:id` becomes `{id}`.
+- Hosts found later: after the last stage, in-scope hosts that stored URLs,
+  scripts and API operations point to, and that no enumeration source listed,
+  become `subdomain` records (source `links`). One more round (DNS to
+  `issues`) runs for those hosts only, at most 50 per run. Its stage stats are
+  in the run summary under `linked_round`.
+- Subdomain guessing (opt-in, `pipeline.subdomain_guess`): permutations of the
+  hosts found (`api` gives `api-dev`, `dev-api`, `api2`) and about 220 common
+  labels, at most 1,500 names per root, each passed through the scope filter
+  first. They are resolved with dnsx next to two made-up names; a name that
+  only answers with a made-up name's addresses is a wildcard echo and is
+  dropped. Skipped with `passive_only`.
+
 ### Hidden parameters
 
 The `paramguess` stage (`pipeline/tools/paramminer.py`) finds inputs the site
@@ -210,6 +237,7 @@ Rate and technique limits come from the enforced `roe.json`:
     "crawl_depth": 2,
     "nuclei_severities": ["low", "medium", "high", "critical"],
     "disabled_stages": [],
+    "subdomain_guess": false,
     "public_repos": ["https://github.com/acme/app"]
   }
 }
@@ -220,6 +248,9 @@ Rate and technique limits come from the enforced `roe.json`:
 on every active tool. `passive_only: true` (for programs that ban automated
 scanning) runs stages 1–2 and the archive lookups and sends nothing to the
 target.
+
+`subdomain_guess: true` turns on subdomain guessing (see "Hosts found
+later"). It is DNS brute force, so it is off unless the program allows it.
 
 ## Schema and store
 

@@ -74,6 +74,9 @@ class PipelineLimits:
     # directory. A contract is input data: every host it names is filtered
     # like any other input, and nothing is requested because of it.
     api_contracts: tuple[dict[str, str], ...] = ()
+    # Guess subdomains (common labels and permutations of found hosts) and
+    # resolve them. Off unless the program allows DNS brute force.
+    subdomain_guess: bool = False
 
     @classmethod
     def from_roe(cls, rules: MachineEnforcement, document: dict[str, Any]) -> PipelineLimits:
@@ -118,6 +121,7 @@ class PipelineLimits:
                 if isinstance(u, str) and u.strip().lower().startswith(("http://", "https://"))
             ),
             api_contracts=_api_contracts(block.get("api_contracts")),
+            subdomain_guess=block.get("subdomain_guess") is True,
         )
 
 

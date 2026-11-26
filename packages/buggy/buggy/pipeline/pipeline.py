@@ -55,6 +55,7 @@ from buggy.pipeline.tools import (
     paramminer,
     params,
     recovered,
+    subguess,
     webrecon,
 )
 from buggy.pipeline.tools.amass import Amass
@@ -119,6 +120,10 @@ MAX_JS_FILES = 200
 MAX_JS_BYTES = 3 * 1024 * 1024
 #: Source maps per run whose original files are rebuilt and scanned.
 MAX_RECOVERED_MAPS = 20
+#: Hosts found in links that one run feeds back into DNS, live probing and the crawl.
+MAX_LINKED_HOSTS = 50
+LINKS_TOOL = "links"
+LINK_TYPES = (RecordType.URL, RecordType.ENDPOINT, RecordType.JS_FILE)
 #: Hidden-parameter guessing: pages per origin, requests per run, requests per page and place.
 PARAM_ENDPOINTS_PER_ORIGIN = 4
 PARAM_MAX_REQUESTS = 300
@@ -273,6 +278,9 @@ class Pipeline:
         self.force = force
         self.max_age = max_age
         self.only_asset = normalize_host(only_asset) if only_asset else None
+        self._round_hosts: set[str] | None = None  # set during the linked-hosts round
+        self.linked_hosts: list[str] = []
+        self.linked_stats: dict[str, StageStats] = {}
         self.public_repos = tuple(public_repos)
         self._executor = executor or default_executor
         self._resolver = resolver or versions.verify
@@ -327,16 +335,24 @@ class Pipeline:
         try:
             done: list[str] = []
             for stage in STAGES:
-                stats = self.stats.setdefault(stage, StageStats())
-                current, self._outcomes, self._handled = stage, [], []
-                if stage in self.scope.limits.disabled_stages:
-                    stats.skipped = STAGE_DISABLED
-                    self._stamp_skipped(stage, STAGE_DISABLED)
-                    continue
-                self.store.set_run_progress(self.run_id, stage=stage, done=list(done))
-                handlers[stage](stats)
-                self._stamp_stage(stage)
-                done.append(stage)
+                current = stage
+                self._run_stage(stage, handlers[stage], done)
+            # Hosts the pages, scripts and API descriptions link to that no
+            # enumeration source listed: resolved, probed and crawled in one
+            # more round that only looks at them.
+            linked = self._linked_hosts() if "dns" not in self.scope.limits.disabled_stages else []
+            if linked:
+                # The round keeps its own stage stats, next to the first round's.
+                self.linked_hosts = linked
+                self._round_hosts = set(linked)
+                first, self.stats = self.stats, {}
+                try:
+                    for stage in STAGES[1:]:
+                        current = stage
+                        self._run_stage(stage, handlers[stage], done)
+                finally:
+                    self._round_hosts = None
+                    self.linked_stats, self.stats = self.stats, first
         except Exception as exc:  # noqa: BLE001 - the run is closed as failed, then re-raised
             status, error = "failed", f"{type(exc).__name__}: {exc}"
             log.exception("pipeline run %s failed", self.run_id)
@@ -359,6 +375,12 @@ class Pipeline:
                     "passive_only": self.scope.limits.passive_only,
                 },
                 "only_asset": self.only_asset or "",
+                "linked_hosts": list(self.linked_hosts),
+                "linked_round": {
+                    name: self.linked_stats[name].to_dict()
+                    for name in STAGES
+                    if name in self.linked_stats
+                },
                 "force": self.force,
                 "scope_drops": len(self.store.scope_drops(self.engagement, run_id=self.run_id)),
             }
@@ -392,8 +414,71 @@ class Pipeline:
         ref = f"raw/{self.engagement}/{self.run_id}/{stage}-{tool}.{suffix}"
         return self.data_root / ref, ref
 
+    def _run_stage(
+        self, stage: str, handler: Callable[[StageStats], None], done: list[str]
+    ) -> None:
+        stats = self.stats.setdefault(stage, StageStats())
+        self._outcomes, self._handled = [], []
+        if stage in self.scope.limits.disabled_stages:
+            stats.skipped = STAGE_DISABLED
+            self._stamp_skipped(stage, STAGE_DISABLED)
+            return
+        self.store.set_run_progress(self.run_id, stage=stage, done=list(done))
+        handler(stats)
+        self._stamp_stage(stage)
+        if stage not in done:
+            done.append(stage)
+
+    def _linked_hosts(self) -> list[str]:
+        """In-scope hosts that stored URLs, scripts and API operations point to but
+        that are not yet subdomain records, stored as ``subdomain`` records
+        (source ``links``). At most :data:`MAX_LINKED_HOSTS` per run."""
+        known = {r.asset for r in self._records(RecordType.SUBDOMAIN)}
+        found: dict[str, str] = {}
+        urls = [r.value for kind in LINK_TYPES for r in self._records(kind)]
+        urls += [str(r.attrs.get("url") or "") for r in self._records(RecordType.API_OPERATION)]
+        for url in urls:
+            host = host_of(url)
+            if not host or host in known or host in found or _is_address(host):
+                continue
+            if self._wanted(host) and self.scope.allows(host):
+                found[host] = url
+                if len(found) >= MAX_LINKED_HOSTS:
+                    break
+        if not found:
+            return []
+        stats = self.stats.setdefault("enumerate", StageStats())
+        lines = [json.dumps({"host": h, "found_in": u}) for h, u in found.items()]
+        ref = self._save_raw("enumerate", LINKS_TOOL, "\n".join(lines) + "\n")
+        roots = self._enumeration_roots()
+        kept = self._store(
+            "enumerate",
+            stats,
+            LINKS_TOOL,
+            (
+                (
+                    Record(
+                        RecordType.SUBDOMAIN,
+                        host,
+                        host,
+                        LINKS_TOOL,
+                        attrs={"found_in": url},
+                        raw_line=index,
+                    ),
+                    self._root_of(host, roots),
+                )
+                for index, (host, url) in enumerate(found.items(), start=1)
+            ),
+            version=versions.BUILTIN_VERSION,
+            raw_ref=ref,
+        )
+        return sorted(found) if kept else []
+
     def _wanted(self, host: str) -> bool:
-        """Whether a host is selected by ``only_asset`` (always true without it)."""
+        """Whether a host is selected by ``only_asset`` (always true without it) and,
+        in the linked-hosts round, is one of the hosts that round looks at."""
+        if self._round_hosts is not None and host not in self._round_hosts:
+            return False
         if not self.only_asset:
             return True
         return host == self.only_asset or host.endswith("." + self.only_asset)
@@ -831,7 +916,51 @@ class Pipeline:
                 version=versions.BUILTIN_VERSION,
                 raw_ref=ref,
             )
+        self._guess_subdomains(stats, targets)
         self._complete("enumerate", stats, pending)
+
+    def _guess_subdomains(self, stats: StageStats, roots: list[str]) -> None:
+        """Opt-in (``pipeline.subdomain_guess``): common labels and permutations of
+        the hosts found, resolved through dnsx; only names that answer with more
+        than a wildcard's echo are kept. Skipped in a passive run."""
+        limits = self.scope.limits
+        if not limits.subdomain_guess:
+            return
+        entry = stats.tools.setdefault(subguess.NAME, {"version": versions.BUILTIN_VERSION})
+        if limits.passive_only:
+            entry["skipped"] = "passive_only"
+            self._note(subguess.NAME, "skipped", "passive_only", roots)
+            return
+        known = [r.asset for r in self._records(RecordType.SUBDOMAIN)]
+        guessed = 0
+        for root in roots:
+            names = subguess.candidates(root, known, allowed=self.scope.allows)
+            if not names:
+                continue
+            probes = [p for p in subguess.canaries(root) if self.scope.allows(p)]
+            answers, ref, _version, problem = self._dnsx_resolve(
+                "enumerate", f"guess-{root}", names + probes
+            )
+            guessed += len(names)
+            if problem:
+                entry.setdefault("errors", {})[root] = problem
+                self._note(subguess.NAME, "failed", problem, [root])
+                continue
+            self._note(subguess.NAME, "complete", assets=[root])
+            found = subguess.keep(answers, probes)
+            if found:
+                self._store(
+                    "enumerate",
+                    stats,
+                    subguess.NAME,
+                    (
+                        (Record(RecordType.SUBDOMAIN, name, name, subguess.NAME), root)
+                        for name in found
+                    ),
+                    version=versions.BUILTIN_VERSION,
+                    raw_ref=ref,
+                )
+        entry["guessed"] = guessed
 
     def _enumeration_roots(self) -> list[str]:
         """Enumeration roots selected by ``only_asset`` (all of them without it)."""
@@ -1058,54 +1187,63 @@ class Pipeline:
         and rate limit, and they pass the scope filter like any other input.
         Their raw output is kept under its own reference.
         """
-        tool = self._dnsx.name
         run = {"ref": "", "version": "", "problem": ""}
 
         def resolve(names: list[str]) -> dict[str, set[str]]:
-            answers: dict[str, set[str]] = {name: set() for name in names}
-            if self.scope.admit(names, stage="dns", tool=tool, direction="input") != names:
-                run["problem"] = "probe names are not in scope"
-                return answers
-            try:
-                binary, run["version"] = self._resolver(tool)
-            except versions.ToolVersionError as exc:
-                run["problem"] = str(exc)[:200]
-                return answers
-            invocation = self._dnsx.invocation(binary, names, self.scope.limits, self._workdir())
-            raw_path, run["ref"] = self._raw_path("dns", f"{tool}-wildcard-{root}")
-            result = self._executor(tool, invocation, raw_path)
-            self.store.register_raw_output(
-                run["ref"],
-                run_id=self.run_id,
-                engagement=self.engagement,
-                stage="dns",
-                tool=tool,
-                tool_version=run["version"],
-                argv=list(result.argv),
-                sha256=result.sha256,
-                bytes=result.size,
-                exit_code=result.exit_code,
-                started_at=result.started_at,
-                finished_at=result.finished_at,
-            )
-            if result.timed_out:
-                run["problem"] = "timed out"
-            elif result.exit_code not in (0, None):
-                run["problem"] = f"exit {result.exit_code}"
-            if run["problem"]:
-                return answers
-            try:
-                raw = raw_path.read_text(encoding="utf-8", errors="replace")
-            except OSError:
-                run["problem"] = "no output"
-                return answers
-            for record in self._dnsx.parse(raw):
-                if record.asset in answers and record.attrs.get("rtype") in ADDRESS_RTYPES:
-                    answers[record.asset].add(str(record.attrs["data"]))
+            answers, ref, version, problem = self._dnsx_resolve("dns", f"wildcard-{root}", names)
+            run["ref"], run["version"] = ref or run["ref"], version or run["version"]
+            run["problem"] = run["problem"] or problem  # one failed probe settles nothing
             return answers
 
         info = wildcard.detect(root, resolve, rng=self._wildcard_rng)
         return (None if run["problem"] else info), run["ref"], run["version"], run["problem"]
+
+    def _dnsx_resolve(
+        self, stage: str, label: str, names: list[str]
+    ) -> tuple[dict[str, set[str]], str, str, str]:
+        """Resolve ``names`` with dnsx (same resolvers and rate as the DNS stage).
+
+        Returns ``({name: addresses}, raw_ref, version, problem)``; ``problem``
+        says why nothing could be resolved. Every name must pass the scope
+        filter, or nothing is sent.
+        """
+        tool = self._dnsx.name
+        answers: dict[str, set[str]] = {name: set() for name in names}
+        if self.scope.admit(names, stage=stage, tool=tool, direction="input") != names:
+            return answers, "", "", "probe names are not in scope"
+        try:
+            binary, version = self._resolver(tool)
+        except versions.ToolVersionError as exc:
+            return answers, "", "", str(exc)[:200]
+        invocation = self._dnsx.invocation(binary, names, self.scope.limits, self._workdir())
+        raw_path, ref = self._raw_path(stage, f"{tool}-{label}")
+        result = self._executor(tool, invocation, raw_path)
+        self.store.register_raw_output(
+            ref,
+            run_id=self.run_id,
+            engagement=self.engagement,
+            stage=stage,
+            tool=tool,
+            tool_version=version,
+            argv=list(result.argv),
+            sha256=result.sha256,
+            bytes=result.size,
+            exit_code=result.exit_code,
+            started_at=result.started_at,
+            finished_at=result.finished_at,
+        )
+        if result.timed_out:
+            return answers, ref, version, "timed out"
+        if result.exit_code not in (0, None):
+            return answers, ref, version, f"exit {result.exit_code}"
+        try:
+            raw = raw_path.read_text(encoding="utf-8", errors="replace")
+        except OSError:
+            return answers, ref, version, "no output"
+        for record in self._dnsx.parse(raw):
+            if record.asset in answers and record.attrs.get("rtype") in ADDRESS_RTYPES:
+                answers[record.asset].add(str(record.attrs["data"]))
+        return answers, ref, version, ""
 
     def _retire_wildcard_roots(self, stats: StageStats) -> None:
         """Forget the verdict (and wildcard record) of a root the scope no longer names."""
@@ -1290,28 +1428,38 @@ class Pipeline:
         pairs: list[tuple[Record, str]] = []
         source_maps: dict[str, str] = {}  # map URL -> the script that names it
         limited: dict[str, dict[str, int]] = {}  # asset -> {limit hit: files}
-        for record in js_files:
+        # Scripts a fetched script loads (lazy chunks, imports) join the queue,
+        # up to MAX_JS_FILES in all.
+        queue = [(r.value, r.asset) for r in js_files]
+        seen = {value for value, _asset in queue}
+        loaded = 0
+        index = 0
+        while index < len(queue) and index < MAX_JS_FILES:
+            js_url, js_asset = queue[index]
+            index += 1
             try:
-                response = client.get(record.value)
+                response = client.get(js_url)
             except OutOfScopeRequest:
                 continue
-            tally[record.asset][0] += 1
+            tally[js_asset][0] += 1
             if response is None:  # transport error: the script was not read
-                tally[record.asset][1] += 1
+                tally[js_asset][1] += 1
                 continue
             if response.status != 200 or not response.body:
                 continue
+            if response.headers.get("content-type", "").startswith(("video/", "image/")):
+                continue  # a .ts video segment, not TypeScript
             fetched += 1
             body = response.body[:MAX_JS_BYTES]
-            name = hashlib.sha256(record.value.encode()).hexdigest()[:24] + ".js"
+            name = hashlib.sha256(js_url.encode()).hexdigest()[:24] + ".js"
             (js_dir / name).write_bytes(body)
-            self._js_sources[name] = record.value
+            self._js_sources[name] = js_url
             script = body.decode("utf-8", "replace")
-            for endpoint in jsparse.parse(script, js_url=record.value):
+            for endpoint in jsparse.parse(script, js_url=js_url):
                 lines.append(
                     json.dumps(
                         {
-                            "js": record.value,
+                            "js": js_url,
                             "url": endpoint.value,
                             "literal": endpoint.attrs["literal"],
                         }
@@ -1333,16 +1481,38 @@ class Pipeline:
             # Source maps, DOM sinks, dependency names. A file too large to
             # analyse leaves its host's stamp partial, not "nothing found".
             size = MAX_JS_BYTES + 1 if response.truncated else len(response.body)
-            analysis = jsparse.analyze(script, js_url=record.value, size=size)
+            analysis = jsparse.analyze(script, js_url=js_url, size=size)
             if analysis.partial:
-                limited.setdefault(record.asset, {}).setdefault(analysis.partial, 0)
-                limited[record.asset][analysis.partial] += 1
+                limited.setdefault(js_asset, {}).setdefault(analysis.partial, 0)
+                limited[js_asset][analysis.partial] += 1
             for finding in analysis.findings:
-                lines.append(json.dumps({"js": record.value, **finding.attrs}, sort_keys=True))
+                lines.append(json.dumps({"js": js_url, **finding.attrs}, sort_keys=True))
                 pairs.append((_with_line(finding, len(lines)), finding.asset))
             for map_url in analysis.source_maps:
-                source_maps.setdefault(map_url, record.value)
+                source_maps.setdefault(map_url, js_url)
+            for ref in jsparse.script_references(script, js_url=js_url):
+                ref_host = host_of(ref)
+                if ref in seen or ref_host not in hosts or not self.scope.allows(ref):
+                    continue
+                seen.add(ref)
+                queue.append((ref, ref_host))
+                loaded += 1
+                lines.append(json.dumps({"js": js_url, "loads": ref}))
+                pairs.append(
+                    (
+                        Record(
+                            RecordType.JS_FILE,
+                            ref_host,
+                            ref,
+                            jsparse.NAME,
+                            attrs={"found_in": js_url, "kind": "loaded"},
+                            raw_line=len(lines),
+                        ),
+                        ref_host,
+                    )
+                )
         entry["fetched"] = fetched
+        entry["loaded_scripts"] = loaded
         entry["source_maps"] = self._fetch_source_maps(
             client, source_maps, tally, lines, pairs, entry
         )
