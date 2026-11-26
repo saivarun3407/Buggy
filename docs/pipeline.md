@@ -18,7 +18,8 @@ pipeline; `test_guards.py::TestNoLLMInTheLoop` enforces it.
 | 6 | `web` | web recon: robots.txt, sitemaps, security.txt; security headers and session cookie flags; sign-in pages by kind | known files only |
 | 7 | `apispec` | OpenAPI / Swagger probing, GraphQL introspection | yes |
 | 8 | `api` | API recon: API roots and versions, OAuth / OpenID discovery, one unauthenticated GET per API endpoint | discovery documents and the endpoint GETs |
-| 9 | `issues` | nuclei (vetted set), gitleaks on fetched JS and listed public repos | nuclei only |
+| 9 | `paramguess` | hidden parameters: guesses query names, headers and cookies no page links to (built in) | read-only GETs, capped |
+| 10 | `issues` | nuclei (vetted set), gitleaks on fetched JS and listed public repos | nuclei only |
 
 ## What runs at the same time
 
@@ -31,6 +32,7 @@ urls        ├─ katana ─┬─ gau ─┬─ waybackurls → JS parsing    
 web         │  known files, headers, sign-in pages                  │
 apispec     │  OpenAPI / GraphQL probes, inputs                     │
 api         │  API roots, OAuth discovery, endpoint profiles        │
+paramguess  │  hidden query names, headers, cookies                 │
 issues      └─ collects nuclei ←───────────────────────────────────┘ → gitleaks
 ```
 
@@ -132,6 +134,43 @@ the run's work directory and reads them with fixed rules. Nothing is run.
   original `file` and `line`, and a redacted snippet. A secret's value is
   never stored. An endpoint on an out-of-scope host keeps no URL.
 - Each hit is a lead, not a finding: it still needs a live proof.
+
+### Hidden parameters
+
+The `paramguess` stage (`pipeline/tools/paramminer.py`) finds inputs the site
+reacts to but no page links to: a `debug` query name, an `X-Forwarded-Host`
+header written into a link, a `beta` cookie. The method follows PortSwigger's
+Param Miner, Arjun and x8; the code and the word lists
+(`pipeline/tools/data/{param,header,cookie}_names.txt`) are Buggy's own.
+
+1. Baseline: three GETs, each with one made-up name, learn what "no change"
+   looks like (status, page lines with numbers and long tokens blanked,
+   header names). A page whose status changes on its own is skipped.
+2. Guess in bulk: up to 96 query names, 20 headers or 24 cookies per request,
+   each with its own random value. Names come from this engagement first
+   (stored parameters, JSON field names, path words), then the curated list.
+3. A batch that changed the answer is split in half until single names are
+   left. Each is checked again with a new value next to a made-up control
+   name that must change nothing.
+4. Names that read like a switch (`debug`, `admin`, `preview`) are also sent
+   with `true`, `1` and `admin`.
+5. When very many names "change" the page, none is kept (the page reacts to
+   any name).
+
+Limits: read-only GETs only (no body guessing: a POST can change state), 4
+pages per origin (answering API endpoints, pages with inputs, the root),
+headers and cookies on the first page only, 40 / 25 / 15 requests per page for
+query / header / cookie, 300 requests per run. Every request goes through the
+scoped, rate-limited client; logout or delete URLs are never used. Skipped
+with `passive_only`; a program can turn it off with
+`pipeline.disabled_stages: ["paramguess"]`.
+
+Each find is a `parameter` record (`source_tool: param_miner`, `hidden: true`,
+`reason`: `status_changed`, `body_changed`, `headers_changed` or `reflected`),
+so the sweep plans tests for it like any other input. The report lists them
+under **Inputs → Hidden parameters**, and **Test next** gets a row per find:
+a header → cache poisoning or host override, an echoed name → XSS, any other
+→ debug or admin switch.
 
 ## Scope
 

@@ -43,6 +43,7 @@ CLEAN = {
     "web": set(HOSTS),
     "apispec": set(HOSTS),
     "api": set(HOSTS),
+    "paramguess": set(HOSTS),
     "issues": set(HOSTS),
 }
 
@@ -507,7 +508,7 @@ class TestQueries:
         assert summary["coverage"] == {
             status: sum(1 for r in rows if r["status"] == status) for status in COVERAGE_STATUSES
         }
-        assert summary["coverage"] == {"complete": 21, "partial": 2, "failed": 2, "skipped": 0}
+        assert summary["coverage"] == {"complete": 23, "partial": 2, "failed": 2, "skipped": 0}
         assert {(g["stage"], g["asset"], g["status"]) for g in summary["coverage_gaps"]} == {
             ("issues", "api.acme.test", "partial"),
             ("issues", "www.acme.test", "partial"),
@@ -560,8 +561,8 @@ class TestQueries:
         self._two_faults(env)
         queries = _queries(env)
         everything = queries.coverage("acme")
-        assert everything["total"] == 25 and not everything["truncated"]
-        assert everything["counts"] == {"complete": 21, "partial": 2, "failed": 2, "skipped": 0}
+        assert everything["total"] == 27 and not everything["truncated"]
+        assert everything["counts"] == {"complete": 23, "partial": 2, "failed": 2, "skipped": 0}
         statuses = [row["status"] for row in everything["coverage"]]
         assert "complete" not in statuses[:4] and set(statuses[4:]) == {"complete"}
 

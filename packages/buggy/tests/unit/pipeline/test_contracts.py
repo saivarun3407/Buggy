@@ -711,13 +711,16 @@ class TestInThePipeline:
         assert body.attrs["example"] == ""  # the schema's example is not carried
 
     def test_a_contract_adds_no_tool_call_and_no_request(self, env, tmp_path: Path) -> None:
-        _pipeline(env, _roe(SHOP, _entry(POSTMAN, base_url="https://www.acme.test"))).run()
+        # Hidden-parameter guessing sends random values: off here, so the runs compare.
+        off = {"disabled_stages": ["paramguess"]}
+        postman = _entry(POSTMAN, base_url="https://www.acme.test")
+        _pipeline(env, _roe(SHOP, postman, **off)).run()
         assert len(_values(env, "api_operation")) > 6
         plain_store = ReconStore(tmp_path / "plain" / "recon.sqlite3")
         plain = {**env, "store": plain_store, "root": tmp_path / "plain"}
         plain["tools"], plain["opener"] = FakeTools(), FakeOpener()
         try:
-            summary = _pipeline(plain, _roe()).run()
+            summary = _pipeline(plain, _roe(**off)).run()
         finally:
             plain_store.close()
         assert "contracts" not in summary["stages"]["apispec"]["tools"]

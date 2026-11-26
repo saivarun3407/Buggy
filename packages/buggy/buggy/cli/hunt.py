@@ -712,6 +712,7 @@ STAGE_LABELS = {
     "web": "web recon: robots, sitemap, headers, sign-in pages",
     "apispec": "reading API specifications",
     "api": "API recon: API roots, OAuth discovery, one GET per endpoint",
+    "paramguess": "Hidden parameters: guess query names, headers and cookies",
     "issues": "checking for known issues (the slow stage at a polite request rate)",
 }
 

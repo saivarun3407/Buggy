@@ -32,7 +32,7 @@ from concurrent.futures import Future, ThreadPoolExecutor
 from dataclasses import dataclass, field, replace
 from pathlib import Path
 from typing import Any
-from urllib.parse import urlsplit
+from urllib.parse import urlencode, urlsplit
 
 from buggy.pipeline import versions, wildcard
 from buggy.pipeline.http import OutOfScopeRequest, RateLimiter, Response, ScopedHTTP, fetch_passive
@@ -47,7 +47,16 @@ from buggy.pipeline.schema import (
 )
 from buggy.pipeline.scope import PipelineLimits, ScopeFilter
 from buggy.pipeline.store import ReconStore
-from buggy.pipeline.tools import apirecon, apispec, crtsh, jsparse, params, recovered, webrecon
+from buggy.pipeline.tools import (
+    apirecon,
+    apispec,
+    crtsh,
+    jsparse,
+    paramminer,
+    params,
+    recovered,
+    webrecon,
+)
 from buggy.pipeline.tools.amass import Amass
 from buggy.pipeline.tools.archives import Gau, Waybackurls
 from buggy.pipeline.tools.base import Invocation
@@ -61,7 +70,18 @@ from buggy.pipeline.tools.subfinder import Subfinder
 
 log = logging.getLogger("buggy.pipeline")
 
-STAGES = ("enumerate", "dns", "live", "fingerprint", "urls", "web", "apispec", "api", "issues")
+STAGES = (
+    "enumerate",
+    "dns",
+    "live",
+    "fingerprint",
+    "urls",
+    "web",
+    "apispec",
+    "api",
+    "paramguess",
+    "issues",
+)
 
 # The live stage does two separate things to a host: the port scan (naabu) and
 # the HTTP probe (httpx). Program rules can turn the first off while the second
@@ -77,6 +97,7 @@ COVERAGE_STAGES = (
     "web",
     "apispec",
     "api",
+    "paramguess",
     "issues",
 )
 PORT_SCAN_DISABLED = "port scan disabled by program rules"
@@ -84,7 +105,9 @@ STAGE_DISABLED = "disabled by program rules"
 
 # Stages whose records are retired when a re-processed input stops reporting
 # them. Discovery stages (subdomains, URLs) only accumulate.
-RETIRING_STAGES = frozenset({"dns", "live", "fingerprint", "web", "apispec", "api", "issues"})
+RETIRING_STAGES = frozenset(
+    {"dns", "live", "fingerprint", "web", "apispec", "api", "paramguess", "issues"}
+)
 
 # Stage-cache namespace of the DNS stage's wildcard check: one row per
 # enumeration root (the verdict), next to the stage's own per-host rows.
@@ -96,6 +119,10 @@ MAX_JS_FILES = 200
 MAX_JS_BYTES = 3 * 1024 * 1024
 #: Source maps per run whose original files are rebuilt and scanned.
 MAX_RECOVERED_MAPS = 20
+#: Hidden-parameter guessing: pages per origin, requests per run, requests per page and place.
+PARAM_ENDPOINTS_PER_ORIGIN = 4
+PARAM_MAX_REQUESTS = 300
+PARAM_BUDGET = {"query": 40, "header": 25, "cookie": 15}
 PUBLIC_REPO_HOSTS = frozenset({"github.com", "gitlab.com", "bitbucket.org"})
 
 # (name, invocation, raw_path) -> RunResult. Injected in tests.
@@ -293,6 +320,7 @@ class Pipeline:
             "web": self._stage_web,
             "apispec": self._stage_apispec,
             "api": self._stage_api,
+            "paramguess": self._stage_paramguess,
             "issues": self._stage_issues,
         }
         current = ""
@@ -1946,7 +1974,143 @@ class Pipeline:
             )
         self._complete("api", stats, pending)
 
-    # ── stage 9: known issues ───────────────────────────────────────
+    # ── stage 9: hidden parameters ──────────────────────────────────
+
+    def _stage_paramguess(self, stats: StageStats) -> None:
+        """Query names, headers and cookies the site reacts to but never links.
+
+        Built in (``tools/paramminer.py``): read-only GETs through the scoped,
+        rate-limited client, at most :data:`PARAM_ENDPOINTS_PER_ORIGIN` pages
+        per origin and :data:`PARAM_MAX_REQUESTS` requests per run. Headers and
+        cookies are guessed on one page per origin. Skipped in a passive run.
+        """
+        from buggy.capture.crawl import never_request_reason  # noqa: PLC0415
+
+        tool = paramminer.NAME
+        origins = self._service_origins("paramguess", tool)
+        profiled = [
+            str(r.attrs.get("url") or "")
+            for r in self._records(RecordType.API_PROFILE)
+            if isinstance(r.attrs.get("status"), int) and 200 <= r.attrs["status"] < 300
+        ]
+        parameters = self._records(RecordType.PARAMETER)
+        with_inputs = [str(r.attrs.get("url") or "") for r in parameters]
+        pages = [u for u, _tool in self._page_urls(operations=False)]
+        chosen = {
+            origin: paramminer.choose_endpoints(
+                origin,
+                profiled,
+                with_inputs + pages,
+                never=never_request_reason,
+                per_origin=PARAM_ENDPOINTS_PER_ORIGIN,
+            )
+            for origin in origins
+        }
+        candidates = {
+            origin: self._digest([s.content_hash for s in services], chosen[origin])
+            for origin, services in origins.items()
+        }
+        pending = self._pending("paramguess", stats, candidates)
+        if not pending:
+            return
+        if self.scope.limits.passive_only:
+            stats.tools.setdefault(tool, {})["skipped"] = "passive_only"
+            self._note(tool, "skipped", "passive_only")
+            self._complete("paramguess", stats, pending)
+            return
+        harvested = paramminer.harvest(
+            [str(r.attrs.get("name") or "") for r in parameters],
+            [
+                str(f)
+                for r in self._records(RecordType.API_PROFILE)
+                for f in r.attrs.get("fields") or []
+            ],
+            pages,
+        )
+        known: dict[str, set[str]] = {}
+        for record in parameters:
+            known.setdefault(str(record.attrs.get("url") or ""), set()).add(
+                str(record.attrs.get("name") or "")
+            )
+        client = self._http("paramguess", tool)
+        tally: dict[str, list[int]] = {}
+        found: list[tuple[Record, str]] = []
+        lines: list[str] = []
+        skipped: list[str] = []
+        left = PARAM_MAX_REQUESTS
+        for origin in pending:
+            sent = tally.setdefault(_asset(origin), [0, 0])
+            for index, url in enumerate(chosen.get(origin, [])):
+                locations = ["query"] + (["header", "cookie"] if index == 0 else [])
+                for location in locations:
+                    budget = min(PARAM_BUDGET[location], left)
+                    if budget < 5:
+                        break
+                    names = paramminer.wordlist(location, harvested, known.get(url, ()))
+                    miner = paramminer.Miner(
+                        self._param_sender(client, url, sent), location, max_requests=budget
+                    )
+                    outcome = miner.run(names)
+                    left -= outcome.requests
+                    if outcome.skipped:
+                        skipped.append(f"{url} {location}: {outcome.skipped}")
+                    for hit in outcome.found:
+                        record = Record(
+                            type=RecordType.PARAMETER,
+                            asset=host_of(url),
+                            value=f"GET {url} {hit.location}:{hit.name}",
+                            source_tool=tool,
+                            attrs={
+                                "name": hit.name,
+                                "location": hit.location,
+                                "method": "GET",
+                                "url": url,
+                                "example": "",
+                                "sources": [tool],
+                                "hints": params.hints_for(hit.name),
+                                "hidden": True,
+                                "reason": hit.reason,
+                                "detail": hit.detail,
+                            },
+                        )
+                        lines.append(json.dumps({"value": record.value, **record.attrs}))
+                        found.append((_with_line(record, len(lines)), origin))
+        entry = stats.tools.setdefault(tool, {})
+        entry["requests"] = client.requests_sent
+        if skipped:
+            entry["not_guessed"] = skipped[:20]
+        self._note_requests(tool, tally)
+        if found:
+            ref = self._save_raw("paramguess", tool, "\n".join(lines) + "\n")
+            self._store(
+                "paramguess", stats, tool, found, version=versions.BUILTIN_VERSION, raw_ref=ref
+            )
+        self._complete("paramguess", stats, pending)
+
+    def _param_sender(self, client: ScopedHTTP, url: str, sent: list[int]) -> paramminer.Send:
+        """The miner's request callback: names in the query, as headers or as cookies."""
+
+        def send(location: str, pairs: dict[str, str]) -> paramminer.Snapshot | None:
+            target, headers = url, None
+            if location == "query":
+                target = f"{url}?{urlencode(pairs)}"
+            elif location == "header":
+                headers = pairs
+            else:
+                headers = {"Cookie": "; ".join(f"{k}={v}" for k, v in pairs.items())}
+            try:
+                response = client.get(target, headers=headers)
+            except OutOfScopeRequest:
+                return None
+            sent[0] += 1
+            if response is None:
+                sent[1] += 1
+                return None
+            return paramminer.snapshot(response.status, response.headers, response.text())
+
+        return send
+
+    # ── stage 10: known issues ──────────────────────────────────────
 
     def _issue_inputs(self) -> dict[str, str]:
         return {

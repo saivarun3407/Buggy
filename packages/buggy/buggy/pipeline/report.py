@@ -54,6 +54,7 @@ COVERAGE_STAGE_LABELS: tuple[tuple[str, str], ...] = (
     ("web", "web recon: robots, sitemap, security.txt, headers, sign-in pages"),
     ("apispec", "API specification discovery"),
     ("api", "API recon: API roots, OAuth discovery, endpoint profiles"),
+    ("paramguess", "hidden parameters: query names, headers and cookies"),
     ("issues", "known-issue and secret scanning"),
 )
 MAX_GAPS_PER_STAGE = 50
@@ -341,6 +342,31 @@ def rank_candidates(
         stored.setdefault(where, []).append(attrs)
     for where, group in stored.items():
         add_inputs(where, group)
+    # Hidden inputs the parameter miner found (``paramguess`` stage).
+    for record in records.get("parameter", []):
+        attrs = _attrs(record)
+        if not attrs.get("hidden"):
+            continue
+        where = str(record.get("value") or "")
+        name, location, reason = attrs.get("name"), attrs.get("location"), attrs.get("reason")
+        if location == "header":
+            add(
+                "misconfiguration",
+                where,
+                f"unlinked header {name} changes the answer ({reason}): check web cache "
+                "poisoning (is it left out of the cache key?) and host or URL override",
+                MANUAL,
+            )
+        elif reason == "reflected":
+            add("xss", where, f"unlinked {location} name {name} is echoed back", "xss_reflected")
+        else:
+            add(
+                "misconfiguration",
+                where,
+                f"unlinked {location} name {name} changes the answer ({reason}): "
+                "debug, preview or admin switch?",
+                MANUAL,
+            )
 
     def inputs_of(kind: str, record: dict[str, Any]) -> list[dict[str, Any]]:
         """Parameters of one record that no stored parameter record already names."""
@@ -580,6 +606,24 @@ def _inputs_section(records: dict[str, list[dict[str, Any]]]) -> list[str]:
         rows.append([label, str(len(found)), "; ".join(examples)])
     lines += _table(["Where", "Count", "Examples"], rows)
     lines.append("")
+    hidden = [_attrs(r) for r in parameters if _attrs(r).get("hidden")]
+    if hidden:
+        lines += ["### Hidden parameters", ""]
+        lines.append("Names no page links to, found by guessing; each changed the answer.")
+        lines.append("")
+        lines += _table(
+            ["Name", "Where", "At", "Why"],
+            [
+                [
+                    f"`{a.get('name')}`",
+                    str(a.get("location") or ""),
+                    f"GET {a.get('url') or ''}",
+                    " ".join(str(x) for x in (a.get("reason"), a.get("detail")) if x),
+                ]
+                for a in hidden
+            ],
+        )
+        lines.append("")
     return lines
 
 

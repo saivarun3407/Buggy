@@ -27,7 +27,18 @@ from urllib.parse import urlencode
 from benchmark.lab import lab
 
 ARMS = ("with-pipeline", "without-pipeline")
-ALL_STAGES = ["enumerate", "dns", "live", "fingerprint", "urls", "web", "apispec", "api", "issues"]
+ALL_STAGES = [
+    "enumerate",
+    "dns",
+    "live",
+    "fingerprint",
+    "urls",
+    "web",
+    "apispec",
+    "api",
+    "paramguess",
+    "issues",
+]
 
 
 def _iso(ts: float) -> str:

@@ -402,11 +402,11 @@ def env(tmp_path: Path):
     store.close()
 
 
-def _pipeline(env, **kwargs) -> Pipeline:
+def _pipeline(env, roe: dict | None = None, **kwargs) -> Pipeline:
     crt = json.dumps([{"name_value": "www.acme.test\ncrt-only.acme.test\n*.acme.test"}]).encode()
     return Pipeline(
         env["store"],
-        ScopeFilter.from_document(ROE),
+        ScopeFilter.from_document(roe or ROE),
         "acme",
         data_root=env["root"],
         executor=env["tools"].execute,
@@ -456,7 +456,9 @@ class TestInThePipeline:
         assert [r["value"] for r in page["records"]] == [API_PDF]
 
     def test_extraction_adds_no_tool_call_no_request_and_no_coverage_stage(self, env) -> None:
-        _pipeline(env).run()
+        roe = json.loads(json.dumps(ROE))
+        roe["pipeline"]["disabled_stages"] = ["paramguess"]  # it requests on purpose
+        _pipeline(env, roe=roe).run()
         assert _parameters(env)
         # The external calls are exactly the ones the stages made before.
         assert sorted(name for name, _inputs, _argv in env["tools"].calls) == sorted([
